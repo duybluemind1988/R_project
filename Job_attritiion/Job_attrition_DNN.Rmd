@@ -1,0 +1,579 @@
+---
+title: "Job_attrition"
+output: html_document
+---
+# 1. Import Data
+```{r}
+#library(tidyverse)# include dplyr, tidr, ggplot2, tibble, readr, purr
+library(dplyr) # mutate, select, filter, summarize, arrange, group by 
+library(tidyr) # gather, spread, separate, extract, unite, %>%
+library(ggplot2)
+library(tibble) # provide tibble class (better than traditional data frame)
+library(readr) # read_csv, tsv, delim, table, log....
+library(purrr) # map, map_dbl, split,
+library(data.table)
+```
+
+```{r}
+path="WA_Fn-UseC_-HR-Employee-Attrition.csv"
+data <- fread(path)
+data
+```
+# 2. Summary of data:
+
+Questions we could Ask Ourselves:
+- Columns and Observations: How many columns and observations is there in our dataset?
+- Missing data: Are there any missing data in our dataset?
+- Data Type: The different datatypes we are dealing in this dataset.
+- Distribution of our Data: Is it right-skewed, left-skewed or symmetric? This might be useful especially if we are implementing any type of statistical analysis or even for modelling.
+- Structure of our Data: Some datasets are a bit complex to work with however, the tidyverse package is really useful to deal with complex datasets.
+- Meaning of our Data: What does our data mean? Most features in this dataset are ordinal variables which are similar to categorical variables however, ordering of those variables matter. A lot of the variables in this dataset have a range from 1-4 or 1-5, The lower the ordinal variable, the worse it is in this case. For instance, Job Satisfaction 1 = "Low" while 4 = "Very High".
+- Label: What is our label in the dataset or in otherwords the output?
+```{r}
+#class(data)
+#dim(data)
+#str(data)
+```
+
+```{r}
+# Using an insightful summary with skim and kable
+data %>% glimpse()
+```
+
+```{r}
+summary(data)
+```
+
+```{r}
+psych::describe(data)
+```
+# Check NA value
+
+```{r}
+sum(is.na(data))
+```
+
+
+```{r}
+#install.packages("Tmisc")
+library(Tmisc)
+Tmisc::gg_na(data)
+```
+
+
+```{r}
+Tmisc::propmiss(data)
+```
+# Distribution of our Labels:
+```{r}
+#install.packages("cowplot")
+library(cowplot)
+```
+
+```{r}
+options(repr.plot.width=8, repr.plot.height=4)
+
+# plot count
+attritions_number <- data %>% 
+                    group_by(Attrition) %>% 
+                    summarise(Count=n()) %>%
+ggplot(aes(x=Attrition, y=Count)) + geom_bar(stat="identity", fill="orange", color="grey40") + theme_bw() + coord_flip() + 
+geom_text(aes(x=Attrition, y=0.01, label= Count),
+            hjust=-0.8, vjust=-1, size=3, 
+            colour="black", fontface="bold",
+         angle=360) + labs(title="Employee Attrition (Amount)", x="Employee Attrition",y="Amount") + theme(plot.title=element_text(hjust=0.5))
+
+# plot percentage
+attrition_percentage <- data %>% group_by(Attrition) %>%
+                                  summarise(Count=n()) %>% 
+                                  mutate(pct=round(prop.table(Count),2) * 100) %>% 
+ggplot(aes(x=Attrition, y=pct)) + geom_bar(stat="identity", fill = "dodgerblue", color="grey40") + 
+geom_text(aes(x=Attrition, y=0.01, label= sprintf("%.2f%%", pct)),
+            hjust=0.5, vjust=-3, size=4, 
+            colour="black", fontface="bold") + theme_bw() + labs(x="Employee Attrition", y="Percentage") + 
+labs(title="Employee Attrition (%)") + theme(plot.title=element_text(hjust=0.5))
+
+cowplot::plot_grid(attritions_number, attrition_percentage, align="h", ncol=2)
+```
+
+```{r}
+count(data,Attrition)
+```
+# 3. Data analysis/visualization
+
+```{r}
+ggplot(data,aes(x = Age,fill = Attrition)) +
+  geom_density(alpha = 0.4) 
+```
+
+```{r}
+head(data)
+```
+
+```{r}
+ggplot(data,aes(x = Attrition,y = Age,fill=Attrition)) +
+  geom_boxplot(alpha = 0.4) 
+```
+
+
+```{r}
+ggplot(data, aes(x = BusinessTravel)) + 
+  geom_bar()
+```
+```{r}
+count(data,BusinessTravel)
+```
+```{r}
+#install.packages("memisc")
+library(memisc)
+memisc::percent(data$BusinessTravel)
+```
+
+
+
+```{r}
+ggplot(data, 
+       aes(x = BusinessTravel, 
+           y = ..count.. / sum(..count..))) + 
+  geom_bar()
+```
+
+
+```{r}
+plotdata <- data %>%
+  count(BusinessTravel) %>%
+  mutate(pct = n / sum(n),
+         pctlabel = paste0(round(pct*100), "%"))
+plotdata
+```
+
+
+```{r}
+library(scales)
+ggplot(plotdata, 
+       aes(x = reorder(BusinessTravel, -pct),
+           y = pct)) + 
+  geom_bar(stat = "identity", 
+           #fill = "indianred3", 
+           color = "black") +
+  geom_text(aes(label = pctlabel), 
+            vjust = -0.25) +
+  scale_y_continuous(labels = percent) +
+  labs(x = "Race", 
+       y = "Percent", 
+       title  = "Participants by race")
+```
+
+```{r}
+# create a summary dataset
+library(dplyr)
+plotdata <- data %>%
+  group_by(Attrition, BusinessTravel) %>%
+  summarize(n = n()) %>% 
+  mutate(pct = n/sum(n),
+         lbl = scales::percent(pct))
+plotdata
+```
+
+
+```{r}
+# create segmented bar chart
+# adding labels to each segment
+
+ggplot(plotdata, 
+       aes(x = Attrition,
+           y = pct,
+           fill = BusinessTravel)) + 
+  geom_bar(stat = "identity",
+           position = "fill") +
+  scale_y_continuous(breaks = seq(0, 1, .2),label = percent) +
+  geom_text(aes(label = lbl), 
+            size = 3, 
+            position = position_stack(vjust = 0.5)) +
+  scale_fill_brewer(palette = "Set2") +
+  #labs(y = "Percent",fill = "Drive Train",x = "Class",title = "Automobile Drive by Class") +
+  theme_minimal()
+```
+# 3.1 Plot categorical vs catagorical
+
+```{r}
+data %>%
+  dplyr::group_by(Attrition, BusinessTravel) %>%
+  dplyr::summarize(n = n()) %>% 
+  dplyr::mutate(pct = n/sum(n),lbl = scales::percent(pct)) %>% 
+  ggplot(aes(x = Attrition,y = pct,
+           fill = BusinessTravel)) + 
+  geom_bar(stat = "identity",
+           position = "fill") +
+  scale_y_continuous(breaks = seq(0, 1, .2),label = percent) +
+  geom_text(aes(label = lbl), 
+            size = 3, 
+            position = position_stack(vjust = 0.5)) +
+  scale_fill_brewer(palette = "Set2") +
+  #labs(y = "Percent",fill = "Drive Train",x = "Class",title = "Automobile Drive by Class") +
+  theme_minimal()
+```
+
+```{r}
+Categorical_vs_categorical_plot <- function(data,group_col,fill_col){
+data %>%
+  group_by_(group_col, fill_col) %>%
+  summarize(n = n()) %>% 
+  mutate(pct = n/sum(n),lbl = scales::percent(pct))%>% 
+  ggplot(aes_(x = group_col,y = ~pct,
+           fill = fill_col)) +
+  geom_bar(stat = "identity",
+           position = "fill") +
+  scale_y_continuous(breaks = seq(0, 1, .2),label = percent) +
+  geom_text(aes(label = lbl), 
+            size = 3, 
+            position = position_stack(vjust = 0.5)) +
+  #scale_fill_brewer(palette = "Set2") +
+  labs(y = "Percent",x = "Attrition",title = "Compare attrition accross category")+
+  theme_minimal()  
+  
+}
+```
+
+```{r}
+# Get all character columns
+data %>% 
+  select_if(is.character)
+```
+
+```{r}
+Categorical_vs_categorical_plot(data,~Attrition,~BusinessTravel)
+Categorical_vs_categorical_plot(data,~Attrition,~Department)
+Categorical_vs_categorical_plot(data,~Attrition,~EducationField)
+Categorical_vs_categorical_plot(data,~Attrition,~Gender)
+Categorical_vs_categorical_plot(data,~Attrition,~JobRole)
+Categorical_vs_categorical_plot(data,~Attrition,~MaritalStatus)
+Categorical_vs_categorical_plot(data,~Attrition,~OverTime)
+
+```
+
+# Combine multy plot
+```{r}
+#install.packages("patchwork")
+library(patchwork)
+p1 <- Categorical_vs_categorical_plot(data,~Attrition,~BusinessTravel)
+p2 <- Categorical_vs_categorical_plot(data,~Attrition,~Department)
+p3 <- Categorical_vs_categorical_plot(data,~Attrition,~EducationField)
+```
+
+
+```{r}
+#install.packages("gridExtra")
+library(gridExtra)
+gridExtra::grid.arrange(p1,p2,p3)
+```
+
+# 3.2 Plot Quantitative vs. Quantitative
+
+```{r}
+str(data)
+```
+
+
+```{r}
+# plot the distribution of salaries 
+# by rank using kernel density plots
+ggplot(data, 
+       aes(x = DistanceFromHome, 
+           fill = Attrition)) +
+  geom_density(alpha = 0.4) 
+  #labs(title = "Salary distribution by rank")
+```
+
+```{r}
+#install.packages("ggridges")
+library(ggridges)
+
+ggplot(data, 
+       aes(x = DistanceFromHome, 
+           y = Attrition, 
+           fill = Attrition)) +
+  geom_density_ridges() + 
+  theme_ridges() +
+  theme(legend.position = "none")
+```
+
+```{r}
+# plot the distribution of salaries by rank using boxplots
+ggplot(data, 
+       aes(x = Attrition, 
+           y = DistanceFromHome)) +
+  geom_boxplot() 
+  #labs(title = "Salary distribution by rank")
+
+# plot the distribution using violin and boxplots
+ggplot(data, aes(x = Attrition, 
+                     y = DistanceFromHome)) +
+  geom_violin(fill = "cornflowerblue") +
+  geom_boxplot(width = .2, 
+               fill = "orange",
+               outlier.color = "orange",
+               outlier.size = 2) 
+```
+```{r}
+ggplot(data, 
+       aes(x = EnvironmentSatisfaction, 
+           fill = Attrition)) +
+  geom_density(alpha = 0.4) 
+```
+
+
+```{r}
+ggplot(data, 
+       aes(x = Attrition, 
+           y = EnvironmentSatisfaction)) +
+  geom_boxplot() 
+
+# plot the distribution using violin and boxplots
+ggplot(data, aes(x = Attrition, 
+                     y = EnvironmentSatisfaction)) +
+  geom_violin(fill = "cornflowerblue") +
+  geom_boxplot(width = .2, 
+               fill = "orange",
+               outlier.color = "orange",
+               outlier.size = 2) 
+
+```
+```{r}
+ggplot(data, aes(x = Attrition, 
+                     y = MonthlyIncome)) +
+  geom_violin(fill = "cornflowerblue") +
+  geom_boxplot(width = .2, 
+               fill = "orange",
+               outlier.color = "orange",
+               outlier.size = 2) +
+  facet_wrap(~Department) 
+```
+```{r}
+ggplot(data, aes(x = Attrition, 
+                     y = MonthlyIncome)) +
+  geom_violin(fill = "cornflowerblue") +
+  geom_boxplot(width = .2, 
+               fill = "orange",
+               outlier.color = "orange",
+               outlier.size = 2) +
+  facet_wrap(~JobRole) 
+```
+```{r}
+ggplot(data, aes(x = Attrition, 
+                     y = MonthlyIncome)) +
+  geom_violin(fill = "cornflowerblue") +
+  geom_boxplot(width = .2, 
+               fill = "orange",
+               outlier.color = "orange",
+               outlier.size = 2) +
+  facet_wrap(~JobSatisfaction) 
+```
+```{r}
+ggplot(data, aes(x = Attrition, 
+                     y = MonthlyIncome)) +
+  geom_violin(fill = "cornflowerblue") +
+  geom_boxplot(width = .2, 
+               fill = "orange",
+               outlier.color = "orange",
+               outlier.size = 2) +
+  facet_wrap(~PerformanceRating) 
+```
+
+```{r}
+Categorical_vs_quantitative_plot <- function(data,categorical_col,quantitative_col){
+  # plot the distribution using violin and boxplots
+  ggplot(data, aes_(x = categorical_col, 
+                     y = quantitative_col)) +
+  geom_violin(fill = "cornflowerblue") +
+  geom_boxplot(width = .2, 
+               fill = "orange",
+               outlier.color = "orange",
+               outlier.size = 2) 
+}
+```
+
+```{r}
+data %>% 
+  select_if(is.numeric)
+```
+
+
+```{r}
+Categorical_vs_quantitative_plot(data,~Attrition,~Age)
+Categorical_vs_quantitative_plot(data,~Attrition,~DistanceFromHome)
+Categorical_vs_quantitative_plot(data,~Attrition,~Education)
+Categorical_vs_quantitative_plot(data,~Attrition,~EnvironmentSatisfaction)
+Categorical_vs_quantitative_plot(data,~Attrition,~HourlyRate)
+Categorical_vs_quantitative_plot(data,~Attrition,~JobInvolvement)
+Categorical_vs_quantitative_plot(data,~Attrition,~JobLevel)
+Categorical_vs_quantitative_plot(data,~Attrition,~JobSatisfaction)
+Categorical_vs_quantitative_plot(data,~Attrition,~MonthlyIncome)
+Categorical_vs_quantitative_plot(data,~Attrition,~MonthlyRate)
+Categorical_vs_quantitative_plot(data,~Attrition,~NumCompaniesWorked)
+Categorical_vs_quantitative_plot(data,~Attrition,~PerformanceRating)
+Categorical_vs_quantitative_plot(data,~Attrition,~RelationshipSatisfaction)
+Categorical_vs_quantitative_plot(data,~Attrition,~TotalWorkingYears)
+Categorical_vs_quantitative_plot(data,~Attrition,~WorkLifeBalance)
+Categorical_vs_quantitative_plot(data,~Attrition,~YearsAtCompany)
+Categorical_vs_quantitative_plot(data,~Attrition,~YearsInCurrentRole)
+Categorical_vs_quantitative_plot(data,~Attrition,~YearsSinceLastPromotion)
+Categorical_vs_quantitative_plot(data,~Attrition,~YearsWithCurrManager)
+```
+# 3.3 Quantitative vs. Quantitative
+```{r}
+# scatterplot with linear fit line
+ggplot(data,
+       aes(x = TotalWorkingYears, 
+           y = MonthlyIncome)) +
+  geom_point(color= "steelblue") +
+  geom_smooth(method = "lm")
+# Age vs monthly income
+ggplot(data,
+       aes(x = Age, 
+           y = MonthlyIncome)) +
+  geom_point(color= "steelblue") +
+  geom_smooth(method = "lm")
+```
+```{r}
+fit1 <- lm(MonthlyIncome ~ TotalWorkingYears, data = data)
+summary(fit1)
+```
+# Correlation Matrix:
+```{r}
+# # Let's have a better understanding about each feature through a correlation plot
+options(repr.plot.width=10, repr.plot.height=7) 
+nums <- select_if(data, is.numeric)
+```
+
+```{r}
+
+corr <- round(cor(nums), 1)
+
+ggcorrplot(corr, 
+           type = "lower", 
+           lab = TRUE, 
+           lab_size = 3, 
+           method="square", 
+           colors = c("tomato2", "white", "#01A9DB"), 
+           title="Correlogram Employee Attritions", 
+           ggtheme=theme_minimal())
+```
+
+```{r}
+library(superheat)
+superheat(nums, scale = TRUE)
+```
+```{r}
+# sorted heat map
+superheat(nums,
+          scale = TRUE,
+          left.label.text.size=3,
+          bottom.label.text.size=3,
+          bottom.label.size = .05,
+          row.dendrogram = TRUE )
+```
+create a scatterplot matrix (long and not good visual)
+```{r}
+# create a scatterplot matrix (long and not good visual)
+#library(GGally)
+#ggpairs(nums)
+```
+# Radar chart
+
+```{r}
+head(data)
+```
+```{r}
+ data %>% select_if(function(col) is.numeric(col) | 
+                                   all(col == .$Attrition))
+```
+
+```{r}
+plotdata <- data %>% 
+            select_if(function(col) is.numeric(col) | all(col == .$Attrition)) %>% 
+            rename(group = Attrition) %>%
+            mutate_at(vars(-group),funs(rescale)) %>% 
+            relocate(group,Age)
+plotdata
+```
+```{r}
+library(ggradar)
+library(scales)
+ggradar::ggradar(plotdata)
+```
+
+# px.parallel_coordinates chart
+```{r}
+
+```
+
+
+# 3.4 Select column type for data processing
+
+```{r}
+# Get all character columns
+data %>% 
+  select_if(is.character)
+# select_if(~!is.numeric(.))
+```
+```{r}
+# Get all character columns
+data %>% 
+  select_if(is.numeric)
+# select_if(~!is.numeric(.))
+```
+```{r}
+class(colnames(data))
+```
+```{r}
+list(colnames(data))
+```
+
+```{r}
+for (i in list(colnames(data))){
+  print(i)
+}
+```
+
+# 4. Machine learning
+```{r}
+library(rsample)   # for data splitting
+library(caret)     # for model packages
+```
+```{r}
+library(modeldata) # data for some ML model
+data("attrition")
+attrition
+```
+
+```{r}
+# mutate_if() is particularly useful for transforming variables from one type to another
+#is.order: Performs check to determine if a vector is strictly increasing, strictly decreasing, not decreasing, or not increasing.
+df <- data %>% mutate_if(is.ordered, factor, ordered = FALSE)
+```
+
+```{r}
+set.seed(123)  # for reproducibility
+churn_split <- initial_split(df, prop = .8, strata = "Attrition")
+churn_train <- training(churn_split)
+churn_test  <- testing(churn_split)
+dim(churn_train)
+dim(churn_test)
+```
+# Multiple logistic regression
+```{r}
+set.seed(123)
+cv_model <- train(
+  Attrition ~ ., 
+  data = churn_train, 
+  method = "glm",
+  family = "binomial",
+  trControl = trainControl(method = "cv", number = 5)
+)
+```
+
+
+```{r}
+```
+

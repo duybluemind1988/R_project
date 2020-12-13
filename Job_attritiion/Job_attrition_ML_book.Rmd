@@ -1,0 +1,602 @@
+---
+title: "R Notebook"
+output: html_document
+---
+# **Chapter 5 Logistic Regression**
+**5.1 Prerequisites**
+```{r}
+# Helper packages
+library(dplyr)     # for data wrangling
+library(ggplot2)   # for awesome plotting
+library(rsample)   # for data splitting
+
+# Modeling packages
+library(caret)     # for logistic regression modeling
+
+# Model interpretability packages
+library(vip)       # variable importance
+```
+
+An unordered factor is what is often called categorical data, it does not have a natural order. To represent this in R you can use an unordered factor: is.ordered(f)
+f <- factor(c(1,3,2,1,3))
+f
+[1] 1 3 2 1 3
+Levels: 1 2 3
+
+is.ordered(f)
+[1] FALSE
+
+If the factors have a natural ordering, often called ordinal or ordered categorical data, you can define this in R using an ordered factor. Note the < sign in the levels of an ordered factor.
+
+f <- factor(c(1,3,2,1,3), ordered=TRUE)
+f
+[1] 1 3 2 1 3
+Levels: 1 < 2 < 3
+
+is.ordered(f)
+[1] TRUE
+```{r}
+library(modeldata) # data for some ML model
+data("attrition")
+# mutate_if() is particularly useful for transforming variables from one type to another
+df <- attrition %>% mutate_if(is.ordered, factor, ordered = FALSE)
+
+# Create training (70%) and test (30%) sets for the 
+# rsample::attrition data.
+set.seed(123)  # for reproducibility
+churn_split <- initial_split(df, prop = .7, strata = "Attrition")
+churn_train <- training(churn_split)
+churn_test  <- testing(churn_split)
+```
+#**5.3 Simple logistic regression**
+
+We will fit two logistic regression models in order to predict the probability of an employee attriting. The first predicts the probability of attrition based on their monthly income (MonthlyIncome) and the second is based on whether or not the employee works overtime (OverTime). The glm() function fits generalized linear models, a class of models that includes both logistic regression and simple linear regression as special cases. The syntax of the glm() function is similar to that of lm(), except that we must pass the argument family = "binomial" in order to tell R to run a logistic regression rather than some other type of generalized linear model (the default is family = "gaussian", which is equivalent to ordinary linear regression assuming normally distributed errors).
+
+```{r}
+model1 <- glm(Attrition ~ MonthlyIncome, family = "binomial", data = churn_train)
+model2 <- glm(Attrition ~ OverTime, family = "binomial", data = churn_train)
+```
+
+For model1, the estimated coefficient for MonthlyIncome is  B1=-0.000130, which is negative, indicating that an increase in MonthlyIncome is associated with a decrease in the probability of attrition. Similarly, for model2, employees who work OverTime are associated with an increased probability of attrition compared to those that do not work OverTime.
+```{r}
+tidy(model1)
+tidy(model2)
+```
+
+As discussed earlier, it is easier to interpret the coefficients using an  
+exp() transformation:
+
+```{r}
+exp(coef(model1))
+exp(coef(model2))
+```
+
+Many aspects of the logistic regression output are similar to those discussed for linear regression. For example, we can use the estimated standard errors to get confidence intervals as we did for linear regression in Chapter 4:
+```{r}
+confint(model1)
+confint(model2)
+```
+#**5.4 Multiple logistic regression**
+
+```{r}
+model3 <- glm(
+  Attrition ~ MonthlyIncome + OverTime,
+  family = "binomial", 
+  data = churn_train
+  )
+
+tidy(model3)
+```
+
+#**5.5 Assessing model accuracy**
+#** BEST METHOD**
+With a basic understanding of logistic regression under our belt, similar to linear regression our concern now shifts to how well do our models predict. As in the last chapter, we’ll use caret::train() and fit three 10-fold cross validated logistic regression models. Extracting the accuracy measures (in this case, classification accuracy), we see that both cv_model1 and cv_model2 had an average accuracy of 83.88%. However, cv_model3 which used all predictor variables in our data achieved an average accuracy rate of 87.58%.
+```{r}
+set.seed(123)
+cv_model1 <- train(
+  Attrition ~ MonthlyIncome, 
+  data = churn_train, 
+  method = "glm",
+  family = "binomial",
+  trControl = trainControl(method = "cv", number = 10)
+)
+
+set.seed(123)
+cv_model2 <- train(
+  Attrition ~ MonthlyIncome + OverTime, 
+  data = churn_train, 
+  method = "glm",
+  family = "binomial",
+  trControl = trainControl(method = "cv", number = 10)
+)
+
+set.seed(123)
+cv_model3 <- train(
+  Attrition ~ ., 
+  data = churn_train, 
+  method = "glm",
+  family = "binomial",
+  trControl = trainControl(method = "cv", number = 10)
+)
+
+# extract out of sample performance measures
+summary(
+  resamples(
+    list(
+      model1 = cv_model1, 
+      model2 = cv_model2, 
+      model3 = cv_model3
+    )
+  )
+)$statistics$Accuracy
+```
+
+
+```{r}
+# predict class
+pred_class <- predict(cv_model3, churn_train)
+
+# create confusion matrix
+confusionMatrix(
+  data = relevel(pred_class, ref = "Yes"), 
+  reference = relevel(churn_train$Attrition, ref = "Yes")
+)
+```
+One thing to point out, in the confusion matrix above you will note the metric No Information Rate: 0.839. This represents the ratio of non-attrition vs. attrition in our training data (table(churn_train$Attrition) %>% prop.table()). Consequently, if we simply predicted "No" for every employee we would still get an accuracy rate of 83.9%. Therefore, our goal is to maximize our accuracy rate over and above this no information baseline while also trying to balance sensitivity and specificity. To that end, we plot the ROC curve (section 2.6) which is displayed in Figure 5.4. If we compare our simple model (cv_model1) to our full model (cv_model3), we see the lift achieved with the more accurate model.
+
+```{r}
+#install.packages("ROCR")
+library(ROCR)
+
+# Compute predicted probabilities
+m1_prob <- predict(cv_model1, churn_train, type = "prob")$Yes
+m3_prob <- predict(cv_model3, churn_train, type = "prob")$Yes
+
+# Compute AUC metrics for cv_model1 and cv_model3
+perf1 <- prediction(m1_prob, churn_train$Attrition) %>%
+  performance(measure = "tpr", x.measure = "fpr")
+perf2 <- prediction(m3_prob, churn_train$Attrition) %>%
+  performance(measure = "tpr", x.measure = "fpr")
+
+# Plot ROC curves for cv_model1 and cv_model3
+plot(perf1, col = "black", lty = 2)
+plot(perf2, add = TRUE, col = "blue")
+legend(0.8, 0.2, legend = c("cv_model1", "cv_model3"),
+       col = c("black", "blue"), lty = 2:1, cex = 0.6)
+```
+Similar to linear regression, we can perform a PLS logistic regression to assess if reducing the dimension of our numeric predictors helps to improve accuracy. There are 16 numeric features in our data set so the following code performs a 10-fold cross-validated PLS model while tuning the number of principal components to use from 1–16. The optimal model uses 14 principal components, which is not reducing the dimension by much. However, the mean accuracy of 0.876 is no better than the average CV accuracy of cv_model3 (0.876).
+
+PLS was originally designed to be used for continuous features. Although you are not restricted from using PLS on categorical features, it is commonly advised to start with numeric features and explore alternative options for categorical features (i.e. ordinal encode, label encode, factor analysis.
+
+#**LOGISTIC REGRESSION COMBINE WITH PLS**
+```{r}
+# Perform 10-fold CV on a PLS model tuning the number of PCs to 
+# use as predictors
+set.seed(123)
+cv_model_pls <- train(
+  Attrition ~ ., 
+  data = churn_train, 
+  method = "pls",
+  family = "binomial",
+  trControl = trainControl(method = "cv", number = 5),
+  preProcess = c("zv", "center", "scale"),
+  tuneLength = 16
+)
+
+# Model with lowest RMSE
+cv_model_pls$bestTune
+##    ncomp
+## 14    14
+
+# results for model with lowest loss
+cv_model_pls$results %>%
+  dplyr::filter(ncomp == pull(cv_model_pls$bestTune))
+##   ncomp  Accuracy     Kappa AccuracySD   KappaSD
+## 1    14 0.8757518 0.3766944 0.01919777 0.1142592
+
+# Plot cross-validated RMSE
+ggplot(cv_model_pls)
+```
+#**5.7 Feature interpretation**
+
+Similar to linear regression, once our preferred logistic regression model is identified, we need to interpret how the features are influencing the results. As with normal linear regression models, variable importance for logistic regression models can be computed using the absolute value of the  
+z
+ -statistic for each coefficient (albeit with the same issues previously discussed). Using vip::vip() we can extract our top 20 influential variables. Figure 5.6 illustrates that OverTime is the most influential followed by JobSatisfaction, and EnvironmentSatisfaction.
+
+```{r}
+vip(cv_model3, num_features = 20)
+```
+#**5.8 Final thoughts**
+
+Logistic regression provides an alternative to linear regression for binary classification problems. However, similar to linear regression, logistic regression suffers from the many assumptions involved in the algorithm (i.e. linear relationship of the coefficient, multicollinearity). Moreover, often we have more than two classes to predict which is commonly referred to as multinomial classification. Although multinomial extensions of logistic regression exist, the assumptions made only increase and, often, the stability of the coefficient estimates (and therefore the accuracy) decrease. Future chapters will discuss more advanced algorithms that provide a more natural and trustworthy approach to binary and multinomial classification prediction.
+
+#**Chapter 6 Regularized Regression**
+#**BEST METHOD 6.5 chapter**
+We saw that regularization significantly improved our predictive accuracy for the Ames data set, but how about for the employee attrition example? In Chapter 5 we saw a maximum CV accuracy of 86.3% for our logistic regression model. We see a little improvement in the following with some preprocessing; however, performing a regularized logistic regression model provides us with an additional 0.8% improvement in accuracy (likely within the margin of error).
+
+```{r}
+#Do parallel
+library(doParallel)
+cl <-makePSOCKcluster(5)
+registerDoParallel(cl)
+# Helper packages
+library(recipes)  # for feature engineering
+library(rsample) # for resamples  (initial_split)
+# Modeling packages
+library(glmnet)   # for implementing regularized regression
+library(caret)    # for automating the tuning process
+# Model interpretability packages
+library(vip)      # for variable importance
+library(modeldata) # data for some ML model
+data("attrition")
+# mutate_if() is particularly useful for transforming variables from
+# one type to another
+df <- attrition %>% mutate_if(is.ordered, factor, ordered = FALSE)
+
+# Create training (70%) and test (30%) sets for the
+# rsample::attrition data. Use set.seed for reproducibility
+set.seed(123)
+churn_split <- initial_split(df, prop = .7, strata = "Attrition")
+train <- training(churn_split)
+test  <- testing(churn_split)
+
+# train logistic regression model
+set.seed(123)
+glm_mod <- train(
+  Attrition ~ ., 
+  data = train, 
+  method = "glm",
+  family = "binomial",
+  preProc = c("zv", "center", "scale"),
+  trControl = trainControl(method = "cv", number = 10)
+  )
+
+# train regularized logistic regression model
+set.seed(123)
+penalized_mod <- train(
+  Attrition ~ ., 
+  data = train, 
+  method = "glmnet",
+  family = "binomial",
+  preProc = c("zv", "center", "scale"),
+  trControl = trainControl(method = "cv", number = 10),
+  tuneLength = 10
+  )
+
+# extract out of sample performance measures
+summary(resamples(list(
+  logistic_model = glm_mod, 
+  penalized_model = penalized_mod
+  )))$statistics$Accuracy
+##                      Min.   1st Qu.    Median      Mean   3rd Qu.
+## logistic_model  0.8365385 0.8495146 0.8792476 0.8757893 0.8907767
+## penalized_model 0.8446602 0.8759280 0.8834951 0.8835759 0.8915469
+##                      Max. NA's
+## logistic_model  0.9313725    0
+## penalized_model 0.9411765    0
+```
+
+#**Chapter 7 Multivariate Adaptive Regression Splines**
+#BESTMODEL
+
+The MARS method and algorithm can be extended to handle classification problems and GLMs in general.24 We saw significant improvement to our predictive accuracy on the Ames data with a MARS model, but how about the employee attrition example? In Chapter 5 we saw a slight improvement in our cross-validated accuracy rate using regularized regression. Here, we tune a MARS model using the same search grid as we did above. We see our best models include no interaction effects and the optimal model retained 12 terms.
+```{r}
+#Do parallel
+library(doParallel)
+cl <-makePSOCKcluster(5)
+registerDoParallel(cl)
+# Helper packages
+library(recipes)  # for feature engineering
+library(rsample) # for resamples  (initial_split)
+# Modeling packages
+library(glmnet)   # for implementing regularized regression
+library(caret)    # for automating the tuning process
+library(earth)     # for fitting MARS models
+# Model interpretability packages
+library(vip)       # for variable importance
+library(pdp)       # for variable relationships
+#data for some ML model
+library(modeldata) # data for some ML model
+data("attrition")
+# mutate_if() is particularly useful for transforming variables from
+# one type to another
+df <- attrition %>% mutate_if(is.ordered, factor, ordered = FALSE)
+
+# Create training (70%) and test (30%) sets for the rsample::attrition data.
+# Use set.seed for reproducibility
+set.seed(123)
+churn_split <- rsample::initial_split(df, prop = .7, strata = "Attrition")
+churn_train <- rsample::training(churn_split)
+churn_test  <- rsample::testing(churn_split)
+
+# for reproducibiity
+set.seed(123)
+
+# cross validated model
+tuned_mars <- train(
+  x = subset(churn_train, select = -Attrition),
+  y = churn_train$Attrition,
+  method = "earth",
+  trControl = trainControl(method = "cv", number = 5),
+  tuneGrid = hyper_grid
+)
+
+# best model
+tuned_mars$bestTune
+##   nprune degree
+## 2     12      1
+
+# plot results
+ggplot(tuned_mars)
+```
+However, comparing our MARS model to the previous linear models (logistic regression and regularized regression), we do not see any improvement in our overall accuracy rate.
+
+#**Chapter 8 K-Nearest Neighbors**
+
+K-nearest neighbor (KNN) is a very simple algorithm in which each observation is predicted based on its “similarity” to other observations. Unlike most methods in this book, KNN is a memory-based algorithm and cannot be summarized by a closed-form model. This means the training samples are required at run-time and predictions are made directly from the sample relationships. Consequently, KNNs are also known as lazy learners (Cunningham and Delany 2007) and can be computationally inefficient. However, KNNs have been successful in a large number of business problems (see, for example, Jiang et al. (2012) and Mccord and Chuah (2011)) and are useful for preprocessing purposes as well (as was discussed in Section 3.3.2).
+
+```{r}
+#Do parallel
+library(doParallel)
+cl <-makePSOCKcluster(5)
+registerDoParallel(cl)
+# Helper packages
+library(recipes)  # for feature engineering
+library(rsample) # for resamples  (initial_split)
+# Modeling packages
+library(glmnet)   # for implementing regularized regression
+library(caret)    # for automating the tuning process, KNN model
+library(earth)     # for fitting MARS models
+# Model interpretability packages
+library(vip)       # for variable importance
+library(pdp)       # for variable relationships
+#data for some ML model
+library(modeldata) # data for some ML model
+data("attrition")
+# mutate_if() is particularly useful for transforming variables from
+# one type to another
+df <- attrition %>% mutate_if(is.ordered, factor, ordered = FALSE)
+
+# Create training (70%) and test (30%) sets for the rsample::attrition data.
+# Use set.seed for reproducibility
+set.seed(123)
+churn_split <- rsample::initial_split(df, prop = .7, strata = "Attrition")
+churn_train <- rsample::training(churn_split)
+churn_test  <- rsample::testing(churn_split)
+```
+#**8.3 Choosing k**
+When using KNN for classification, it is best to assess odd numbers for  
+k to avoid ties in the event there is equal proportion of response levels (i.e. when k = 2 one of the neighbors could have class “0” while the other neighbor has class “1”).
+```{r}
+# Create blueprint
+blueprint <- recipe(Attrition ~ ., data = churn_train) %>%
+  step_nzv(all_nominal()) %>%
+  step_integer(contains("Satisfaction")) %>%
+  step_integer(WorkLifeBalance) %>%
+  step_integer(JobInvolvement) %>%
+  step_dummy(all_nominal(), -all_outcomes(), one_hot = TRUE) %>%
+  step_center(all_numeric(), -all_outcomes()) %>%
+  step_scale(all_numeric(), -all_outcomes())
+
+# Create a resampling method
+cv <- trainControl(
+  method = "repeatedcv", 
+  number = 5, #10
+  repeats = 3, #5
+  classProbs = TRUE,                 
+  summaryFunction = twoClassSummary
+)
+
+# Create a hyperparameter grid search
+hyper_grid <- expand.grid(
+  k = floor(seq(1, nrow(churn_train)/3, length.out = 20))
+)
+
+# Fit knn model and perform grid search
+knn_grid <- train(
+  blueprint, 
+  data = churn_train, 
+  method = "knn", 
+  trControl = cv, 
+  tuneGrid = hyper_grid,
+  metric = "ROC"
+)
+
+ggplot(knn_grid)
+```
+Figure 8.3: Cross validated search grid results for Attrition training data where 20 values between 1 and 343 are assessed for k. When k = 1, the predicted value is based on a single observation that is closest to the target sample and when k = 343, the predicted value is based on the response with the largest proportion for 1/3 of the training sample.
+
+In contrast, the churn_train data has 1030 observations and Figure 8.3 illustrates that our loss function is not optimized until k=271
+ . Moreover, the max ROC value is 0.8078 and the overall proportion of attriting employees to non-attriting is 0.839. This suggest there is likely not a very strong signal in the Attrition data.
+```{r}
+hyper_grid # K from 1,19,37,55...343 (20 rows)
+```
+
+#**Chapter 14 Support Vector Machines**
+
+```{r}
+# Helper packages
+#install.packages("kernlab")
+library(dplyr)    # for data wrangling
+library(ggplot2)  # for awesome graphics
+library(rsample)  # for data splitting
+
+# Modeling packages
+library(caret)    # for classification and regression training
+library(kernlab)  # for fitting SVMs
+
+# Model interpretability packages
+library(pdp)      # for partial dependence plots, etc.
+library(vip)      # for variable importance plots
+```
+
+
+```{r}
+# Load attrition data
+library(modeldata) # data for some ML model
+data("attrition")
+df <- attrition %>% 
+  mutate_if(is.ordered, factor, ordered = FALSE)
+
+# Create training (70%) and test (30%) sets
+set.seed(123)  # for reproducibility
+churn_split <- initial_split(df, prop = 0.7, strata = "Attrition")
+churn_train <- training(churn_split)
+churn_test  <- testing(churn_split)
+```
+
+
+```{r}
+# Linear (i.e., soft margin classifier)
+caret::getModelInfo("svmLinear")$svmLinear$parameters
+##   parameter   class label
+## 1         C numeric  Cost
+
+# Polynomial kernel
+caret::getModelInfo("svmPoly")$svmPoly$parameters
+##   parameter   class             label
+## 1    degree numeric Polynomial Degree
+## 2     scale numeric             Scale
+## 3         C numeric              Cost
+
+# Radial basis kernel
+caret::getModelInfo("svmRadial")$svmRadial$parameters
+##   parameter   class label
+## 1     sigma numeric Sigma
+## 2         C numeric  Cost
+```
+
+
+```{r}
+#install.packages("e1071")
+# Tune an SVM with radial basis kernel
+set.seed(1854)  # for reproducibility
+churn_svm <- train(
+  Attrition ~ ., 
+  data = churn_train,
+  method = "svmRadial",               
+  preProcess = c("center", "scale"),  
+  trControl = trainControl(method = "cv", number = 5),
+  tuneLength = 10
+)
+```
+
+
+```{r}
+# Plot results
+ggplot(churn_svm) + theme_light()
+```
+
+Plotting the results, we see that smaller values of the cost parameter ( 
+C≈2–8) provide better cross-validated accuracy scores for these training data:
+```{r}
+# Print results
+churn_svm$results
+##          sigma      C  Accuracy     Kappa  AccuracySD   KappaSD
+## 1  0.009590249   0.25 0.8388542 0.0000000 0.004089627 0.0000000
+## 2  0.009590249   0.50 0.8388542 0.0000000 0.004089627 0.0000000
+## 3  0.009590249   1.00 0.8515233 0.1300469 0.014427649 0.1013069
+## 4  0.009590249   2.00 0.8708857 0.3526368 0.023749215 0.1449342
+## 5  0.009590249   4.00 0.8709611 0.4172884 0.026640331 0.1302496
+## 6  0.009590249   8.00 0.8660873 0.4242800 0.026271496 0.1206188
+## 7  0.009590249  16.00 0.8563495 0.4012563 0.026866012 0.1298460
+## 8  0.009590249  32.00 0.8515138 0.3831775 0.028717623 0.1338717
+## 9  0.009590249  64.00 0.8515138 0.3831775 0.028717623 0.1338717
+## 10 0.009590249 128.00 0.8515138 0.3831775 0.028717623 0.1338717
+```
+
+#14.4.1 Class weights
+
+```{r}
+class.weights = c("No" = 1, "Yes" = 10)
+```
+
+in the call to caret::train() or kernlab::ksvm() to make false negatives (i.e., predicting “Yes” when the truth is “No”) ten times more costly than false positives (i.e., predicting “No” when the truth is “Yes”). Cost-sensitive training with SVMs is left as an exercise on the book website.
+
+#14.4.2 Class probabilities
+
+In practice, predicted class probabilities are often more useful than the predicted class labels. For instance, we would need the predicted class probabilities if we were using an optimization metric like AUC (Chapter 2), as opposed to classification accuracy. In that case, we can set prob.model = TRUE in the call to kernlab::ksvm() or classProbs = TRUE in the call to caret::trainControl() (for details, see ?kernlab::ksvm and the references therein):
+```{r}
+# Control params for SVM
+ctrl <- trainControl(
+  method = "cv", 
+  number = 5, 
+  classProbs = TRUE,                 
+  summaryFunction = twoClassSummary  # also needed for AUC/ROC
+)
+
+# Tune an SVM
+set.seed(5628)  # for reproducibility
+churn_svm_auc <- train(
+  Attrition ~ ., 
+  data = churn_train,
+  method = "svmRadial",               
+  preProcess = c("center", "scale"),  
+  metric = "ROC",  # area under ROC curve (AUC)       
+  trControl = ctrl,
+  tuneLength = 10
+)
+
+```
+
+
+```{r}
+churn_svm_auc$results
+##          sigma      C       ROC      Sens      Spec      ROCSD      SensSD     SpecSD
+## 1  0.009727585   0.25 0.8379109 0.9675488 0.3933824 0.06701067 0.012073306 0.11466031
+## 2  0.009727585   0.50 0.8376397 0.9652767 0.3761029 0.06694554 0.010902039 0.14775214
+## 3  0.009727585   1.00 0.8377081 0.9652633 0.4055147 0.06725101 0.007798768 0.09871169
+## 4  0.009727585   2.00 0.8343294 0.9756750 0.3459559 0.06803483 0.012712528 0.14320366
+## 5  0.009727585   4.00 0.8200427 0.9745255 0.3452206 0.07188838 0.013092221 0.12082675
+## 6  0.009727585   8.00 0.8123546 0.9699278 0.3327206 0.07582032 0.013513393 0.11819788
+## 7  0.009727585  16.00 0.7915612 0.9756883 0.2849265 0.07791598 0.010094292 0.10700782
+## 8  0.009727585  32.00 0.7846566 0.9745255 0.2845588 0.07752526 0.010615423 0.08923723
+## 9  0.009727585  64.00 0.7848594 0.9745255 0.2845588 0.07741087 0.010615423 0.09848550
+## 10 0.009727585 128.00 0.7848594 0.9733895 0.2783088 0.07741087 0.010922892 0.10913126
+```
+
+
+```{r}
+confusionMatrix(churn_svm_auc)
+```
+#14.5 Feature interpretation
+
+```{r}
+prob_yes <- function(object, newdata) {
+  predict(object, newdata = newdata, type = "prob")[, "Yes"]
+}
+```
+
+
+```{r}
+# Variable importance plot
+set.seed(2827)  # for reproducibility
+vip(churn_svm_auc, method = "permute", nsim = 5, train = churn_train, 
+    target = "Attrition", metric = "auc", reference_class = "Yes", 
+    pred_wrapper = prob_yes)
+```
+
+
+```{r}
+features <- c("OverTime", "WorkLifeBalance", 
+              "JobSatisfaction", "JobRole")
+pdps <- lapply(features, function(x) {
+  partial(churn_svm_auc, pred.var = x, which.class = 2,  
+          prob = TRUE, plot = TRUE, plot.engine = "ggplot2") +
+    coord_flip()
+})
+grid.arrange(grobs = pdps,  ncol = 2)
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+

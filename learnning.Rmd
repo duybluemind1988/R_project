@@ -155,20 +155,151 @@ ggplot(plotdata,
   #labs(y = "Percent",fill = "Drive Train",x = "Class",title = "Automobile Drive by Class") +
   theme_minimal()
 ```
-
-
 ```{r}
+data(Salaries, package="carData")
+Salaries
 ```
 
 
 ```{r}
+# calculate means and standard errors by rank and sex
+
+plotdata <- Salaries %>%
+  group_by(rank, sex) %>%
+  summarize(n = n(),
+            mean = mean(salary),
+            sd = sd(salary),
+            se = sd/sqrt(n))
+
+# plot the means and standard errors by sex
+ggplot(plotdata, aes(x = rank,
+                     y = mean, 
+                     group=sex, 
+                     color=sex)) +
+  geom_point(size = 3) +
+  geom_line(size = 1) +
+  geom_errorbar(aes(ymin  =mean - se, 
+                    ymax = mean+se), 
+                width = .1)
+```
+```{r}
+devtools::install_github("ricardo-bion/ggradar", 
+                          dependencies = TRUE)
 ```
 
 
 ```{r}
+
+data(msleep, package = "ggplot2")
+library(ggradar)
+library(scales)
+library(dplyr)
+library(ggplot2)
+
+plotdata <- msleep %>%
+  filter(name %in% c("Cow", "Dog", "Pig")) %>%
+  dplyr::select(name, sleep_total, sleep_rem, 
+         sleep_cycle, brainwt, bodywt) %>%
+  rename(group = name) %>%
+  mutate_at(vars(-group),
+            funs(rescale))
+plotdata
 ```
 
 
 ```{r}
+# generate radar chart
+ggradar::ggradar(plotdata, 
+                grid.label.size = 4,
+                axis.label.size = 4, 
+                group.point.size = 5,
+                group.line.width = 1.5,
+                legend.text.size= 10) +
+                labs(title = "Mammals, size, and sleep")
+```
+```{r}
+library(ggradar)
+library(dplyr)
+library(scales)
+library(tibble)
+mtcars
+
+```
+```{r}
+mtcars_radar <- mtcars %>% 
+  as_tibble(rownames = "group") %>% 
+  mutate_at(vars(-group), rescale) %>% 
+  tail(4) %>% 
+  select(1:10)
+mtcars_radar
+```
+
+
+```{r}
+ggradar(mtcars_radar)
+```
+
+
+```{r}
+# Library
+library(fmsb)
+ 
+# Create data: note in High school for several students
+set.seed(99)
+data <- as.data.frame(matrix( sample( 0:20 , 15 , replace=F) , ncol=5))
+colnames(data) <- c("math" , "english" , "biology" , "music" , "R-coding" )
+rownames(data) <- paste("mister" , letters[1:3] , sep="-")
+ 
+# To use the fmsb package, I have to add 2 lines to the dataframe: the max and min of each variable to show on the plot!
+data <- rbind(rep(20,5) , rep(0,5) , data)
+data
+```
+
+
+```{r}
+# Color vector
+colors_border=c( rgb(0.2,0.5,0.5,0.9), rgb(0.8,0.2,0.5,0.9) , rgb(0.7,0.5,0.1,0.9) )
+colors_in=c( rgb(0.2,0.5,0.5,0.4), rgb(0.8,0.2,0.5,0.4) , rgb(0.7,0.5,0.1,0.4) )
+
+# plot with default options:
+radarchart( data  , axistype=1 , 
+    #custom polygon
+    pcol=colors_border , pfcol=colors_in , plwd=4 , plty=1,
+    #custom the grid
+    cglcol="grey", cglty=1, axislabcol="grey", caxislabels=seq(0,20,5), cglwd=0.8,
+    #custom labels
+    vlcex=0.8 
+    )
+
+# Add a legend
+legend(x=0.7, y=1, legend = rownames(data[-c(1,2),]), bty = "n", pch=20 , col=colors_in , text.col = "grey", cex=1.2, pt.cex=3)
+```
+
+
+```{r}
+# Libraries
+library(GGally)
+library(dplyr)
+library(hrbrthemes)
+
+# Data set is provided by R natively
+data <- iris
+
+# Plot
+data %>%
+  arrange(desc(Species)) %>%
+  ggparcoord(
+    columns = 1:4, groupColumn = 5, order = "anyClass",
+    showPoints = TRUE, 
+    title = "Original",
+    alphaLines = 1
+    ) + 
+  scale_color_manual(values=c( "#69b3a2", "#E8E8E8", "#E8E8E8") ) +
+  theme_ipsum()+
+  theme(
+    legend.position="Default",
+    plot.title = element_text(size=10)
+  ) +
+  xlab("")
 ```
 

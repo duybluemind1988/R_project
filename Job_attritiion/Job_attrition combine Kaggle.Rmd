@@ -1,0 +1,609 @@
+---
+title: "Job_attrition"
+output: html_document
+---
+# 1. Import Data
+```{r}
+#library(tidyverse)# include dplyr, tidyr, ggplot2, tibble, readr, purrr
+library(dplyr) # mutate, select, filter, summarize, arrange, group by 
+library(tidyr) # gather, spread, separate, extract, unite, %>%
+library(ggplot2)
+library(tibble) # provide tibble class (better than traditional data frame)
+library(readr) # read_csv, tsv, delim, table, log....
+library(purrr) # map, map_dbl, split,
+library(data.table)
+```
+
+```{r}
+path="WA_Fn-UseC_-HR-Employee-Attrition.csv"
+data <- fread(path)
+data
+```
+# 2. Summary of data:
+
+Questions we could Ask Ourselves:
+- Columns and Observations: How many columns and observations is there in our dataset?
+- Missing data: Are there any missing data in our dataset?
+- Data Type: The different datatypes we are dealing in this dataset.
+- Distribution of our Data: Is it right-skewed, left-skewed or symmetric? This might be useful especially if we are implementing any type of statistical analysis or even for modelling.
+- Structure of our Data: Some datasets are a bit complex to work with however, the tidyverse package is really useful to deal with complex datasets.
+- Meaning of our Data: What does our data mean? Most features in this dataset are ordinal variables which are similar to categorical variables however, ordering of those variables matter. A lot of the variables in this dataset have a range from 1-4 or 1-5, The lower the ordinal variable, the worse it is in this case. For instance, Job Satisfaction 1 = "Low" while 4 = "Very High".
+- Label: What is our label in the dataset or in otherwords the output?
+```{r}
+#class(data)
+#dim(data)
+#str(data)
+```
+
+```{r}
+# Using an insightful summary with skim and kable
+data %>% glimpse()
+```
+
+```{r}
+summary(data)
+```
+
+```{r}
+psych::describe(data)
+```
+# Check NA value
+
+```{r}
+sum(is.na(data))
+```
+
+
+```{r}
+#install.packages("Tmisc")
+library(Tmisc)
+Tmisc::gg_na(data)
+```
+
+
+```{r}
+Tmisc::propmiss(data)
+```
+# Distribution of our Labels:
+```{r}
+#install.packages("cowplot")
+library(cowplot)
+```
+
+```{r}
+options(repr.plot.width=8, repr.plot.height=4)
+
+# plot count
+attritions_number <- data %>% 
+                    group_by(Attrition) %>% 
+                    summarise(Count=n()) %>%
+ggplot(aes(x=Attrition, y=Count)) + geom_bar(stat="identity", fill="orange", color="grey40") + theme_bw() + coord_flip() + 
+geom_text(aes(x=Attrition, y=0.01, label= Count),
+            hjust=-0.8, vjust=-1, size=3, 
+            colour="black", fontface="bold",
+         angle=360) + labs(title="Employee Attrition (Amount)", x="Employee Attrition",y="Amount") + theme(plot.title=element_text(hjust=0.5))
+
+# plot percentage
+attrition_percentage <- data %>% group_by(Attrition) %>%
+                                  summarise(Count=n()) %>% 
+                                  mutate(pct=round(prop.table(Count),2) * 100) %>% 
+ggplot(aes(x=Attrition, y=pct)) + geom_bar(stat="identity", fill = "dodgerblue", color="grey40") + 
+geom_text(aes(x=Attrition, y=0.01, label= sprintf("%.2f%%", pct)),
+            hjust=0.5, vjust=-3, size=4, 
+            colour="black", fontface="bold") + theme_bw() + labs(x="Employee Attrition", y="Percentage") + 
+labs(title="Employee Attrition (%)") + theme(plot.title=element_text(hjust=0.5))
+
+cowplot::plot_grid(attritions_number, attrition_percentage, align="h", ncol=2)
+```
+
+```{r}
+count(data,Attrition)
+```
+# 4. Data analysis/visualization
+
+# 4.1 Gender Analysis:
+```{r}
+data
+```
+
+```{r}
+avg.age <- data %>% 
+          dplyr::select(Gender, Age) %>% 
+          group_by(Gender) %>% 
+          summarize(avg=mean(Age))
+
+avg.age
+```
+Age Distribution by Gender
+```{r}
+# Let's look closely at the distribution of the Age of our employees
+# Why? Unlike the older generation, millenials tend to switch workplaces more and thus that could
+# be an explanation of why we have the current levels of attrition
+options(repr.plot.width=8, repr.plot.height=6) 
+
+dat_text <- data.frame(
+  label = c("Mean = 37.33 \n Years Old", "Mean = 36.65 \n Years Old"),
+  Gender   = c("Female", "Male")
+)
+
+gender.dist <- data %>% 
+                dplyr:: select(Gender, Age) %>% 
+                filter(Gender == 'Male' | Gender== "Female") %>% 
+                filter(!is.na(Age)) %>% group_by(Gender) %>% 
+                ggplot(aes(x=Age)) + geom_density(aes(fill=Gender), alpha=0.8, show.legend=FALSE) +
+                facet_wrap(~Gender) + 
+                theme_minimal() + 
+                geom_vline(aes(xintercept=mean(Age)),color="red", linetype="dashed", size=1) + 
+                labs(title="Age Distribution") + 
+                theme(plot.title=element_text(hjust=0.5)) + scale_fill_manual(values=c("#F781F3", "#819FF7")) + 
+                geom_text(
+                  data    = dat_text,
+                  mapping = aes(x = 45, y = 0.03, label = label),
+                  hjust   = -0.1,
+                  vjust   = -1
+                )
+
+
+overall.dist <- data %>% 
+                dplyr::select(Gender, Age) %>% 
+                filter(!is.na(Age)) %>% 
+                ggplot(data=data, mapping=aes(x=Age)) + geom_density(color="darkblue", fill="lightblue") + 
+                geom_vline(aes(xintercept=mean(Age)),
+                            color="red", linetype="dashed", size=1) +  theme_minimal() + labs(x="Overall Age") + 
+                annotate("text", label = "Mean = 36.92 Years Old", x = 50, y = 0.03, color = "black")
+
+
+plot_grid(gender.dist, overall.dist, nrow=2)
+```
+Age by Gender: The average age of females is 37.33 and for males is 36.65 and both distributions are similar.
+
+# Distribution of Job Satisfaction:
+```{r}
+#install.packages("ggthemes")
+library(ggthemes) # theme_tufte
+```
+```{r}
+data %>% dplyr::select(Attrition, JobSatisfaction, Gender) %>% 
+ggplot(aes(x=Attrition, y=JobSatisfaction, fill=Attrition)) + geom_boxplot(color="black") + theme_minimal()
+```
+
+```{r}
+options(repr.plot.width=8, repr.plot.height=6) 
+
+box.attrition <- data %>% dplyr::select(Attrition, JobSatisfaction, Gender) %>% 
+ggplot(aes(x=Attrition, y=JobSatisfaction, fill=Attrition)) + geom_boxplot(color="black") + theme_minimal() + facet_wrap(~Gender) + 
+scale_fill_manual(values=c("#FA5858", "#9FF781"))
+
+# Distribution of Job Satisfaction
+dist.satisfaction <- data %>% dplyr::select(JobSatisfaction) %>%
+ggplot(aes(x=JobSatisfaction)) + geom_density(color="#013ADF", fill="#81BEF7", trim=TRUE) + theme_tufte() + xlim(range(c(1,4)))
+
+plot_grid(box.attrition, dist.satisfaction, nrow=2)
+```
+Job Satisfaction by Gender: For individuals who didn't leave the organization, job satisfaction levels are practically the same. However, for people who left the organization , females had a lower satisfaction level as opposed to males.
+
+# Monthly Income by Gender 
+```{r}
+p <- ggplot(data, aes(x=Gender, y=MonthlyIncome, color=Gender, fill=Gender)) + geom_boxplot() + 
+scale_fill_manual(values=c("#F5A9F2", "#5882FA")) + scale_color_manual(values=c("#FE2EF7", "#5858FA")) +
+coord_flip() + labs(title="Are there any Gender Disparities in Income?")
+
+p
+```
+Salaries: The average salaries for both genders are practically the same with males having an average of 6380.51 and females 6686.57
+
+```{r}
+data %>% 
+  ggplot(aes(x=Attrition, y=MonthlyIncome, fill=Attrition)) + geom_boxplot() + theme_minimal() +
+  facet_wrap(~Gender) 
+```
+# Average Income and Presence by Department
+```{r}
+data %>% group_by(Department, Gender) %>% summarise(amount=n())
+```
+```{r}
+# # How many people work in each department by gender
+gender.department <- data %>% group_by(Department, Gender) %>% summarise(amount=n()) %>%
+ggplot(aes(x=reorder(Department, -amount), y=amount, fill=Gender)) + geom_bar(stat="identity", position="dodge") + theme_minimal() + 
+theme(axis.text.x = element_text(angle = 90), plot.title=element_text(hjust=0.5)) + scale_fill_manual(values=c("pink", "lightblue")) + 
+labs(title="Number of Employees \n
+by Department",x="Department", y="Number of employees")
+
+gender.department
+```
+
+Departments: There are a higher number of males in the three departments however, females are more predominant in the Research and Development department.
+```{r}
+options(repr.plot.width=10, repr.plot.height=8) 
+
+gender.income <- data  %>% group_by(Gender) %>% summarise(avg_income=round(mean(MonthlyIncome), 2)) %>%
+ggplot(aes(x=Gender, y=avg_income)) + geom_bar(stat="identity", fill="#2E9AFE", width=0.5) + 
+geom_text(aes(x=Gender, y=0.01, label= paste0("$ ", avg_income)),
+            hjust=-2, vjust=0, size=3, 
+            colour="black", fontface="bold",
+         angle=360) + labs(title="Average Salary by Gender", x="Gender",y="Salary") + coord_flip() + 
+theme_minimal() + theme(plot.title=element_text(size=14, hjust=0.5))
+
+# # How many people work in each department by gender
+gender.department <- data %>% group_by(Department, Gender) %>% summarise(amount=n()) %>%
+ggplot(aes(x=reorder(Department, -amount), y=amount, fill=Gender)) + geom_bar(stat="identity", position="dodge") + theme_minimal() + 
+theme(axis.text.x = element_text(angle = 90), plot.title=element_text(hjust=0.5)) + scale_fill_manual(values=c("pink", "lightblue")) + 
+labs(title="Number of Employees \n
+by Department",x="Department", y="Number of employees")
+
+
+departments <- data %>% group_by(Department, Gender) %>% summarise(amount=n()) %>%
+ggplot(aes(x="", y=amount, fill=Department), show.legend=FALSE, width=) + geom_bar(stat="identity", position="dodge") + theme_minimal() + 
+theme(axis.text.x = element_text(angle = 90), plot.title=element_text(hjust=0.5), aspect.ratio=1) + 
+labs(title="Number of Employees \n
+by Department") + coord_polar() + scale_fill_manual(values=c("#FE642E", "#0080FF","#00FF40"))
+
+plot_grid(gender.income, gender.department, departments, ncol=2, nrow=2)
+```
+#4.2 Analysis by Generation and Education:
+
+It is well known, that each type of generation have their particular peculiarities and that is something I decided we should explore in this dataset. Nevertheless, there is still more coming in this section and I wonder what differences does each generation have when it comes to this dataset.
+
+Questions to Ask Ourselves:
+
+What is the average number of companies previously worked for each generation? My aim is to see if it is true that past generations used to stay longer in one company.
+
+# Understanding Generational Behavior:
+```{r}
+# Distribution of Number of Companies Worked by Attrition and Age
+# We want to see if young people have worked in more companies than the older generation
+# This might prove that the millenials tend to be more picky with regards to jobs than the older generation.
+options(repr.plot.width=8, repr.plot.height=7) 
+
+# First we must create categoricals variables based on Age
+data$Generation <- ifelse(data$Age<37,"Millenials",
+ifelse(data$Age>=38 & data$Age<54,"Generation X",
+ifelse(data$Age>=54 & data$Age<73,"Boomers","Silent"
+)))
+
+# Let's see the distribution by generation now
+generation.dist <- data %>% 
+                  dplyr:: select(Generation, NumCompaniesWorked, Attrition) %>% 
+                  ggplot() + geom_boxplot(aes(x=reorder(Generation, NumCompaniesWorked, FUN=median), 
+                                                        y=NumCompaniesWorked, fill=Generation)) + 
+                  theme_tufte() + facet_wrap(~Attrition) + 
+                  scale_fill_brewer(palette="RdBu") + coord_flip() + 
+                  labs(title="Knowing Past Generations",x="Generation", y="Number of Companies Previously Worked") + 
+                  theme(legend.position="bottom", legend.background = element_rect(fill="#FFF9F5",
+                                                    size=0.5, linetype="solid", 
+                                                    colour ="black")) + theme(strip.background = element_blank(), strip.text.x = element_blank(), 
+                       plot.title=element_text(hjust=0.5, color="white"), plot.background=element_rect(fill="#0D7680"),
+                                                                          axis.text.x=element_text(colour="white"), axis.text.y=element_text(colour="white"),
+                                                                          axis.title=element_text(colour="white"))
+
+generation.dist 
+```
+Note: Wrong, this is imbalanced data set so Cannot compare directly value like this, should compare percentage in each attrition (No , Yes)
+
+```{r}
+# 2.69
+overall.avg <- data %>% dplyr::select(Generation, NumCompaniesWorked) %>% summarize(avg_ov=mean(NumCompaniesWorked))
+overall.avg
+
+```
+```{r}
+# Let's find the Average Numbers of Companies worked by Generation
+avg.comp <- data %>% dplyr::select(Generation, NumCompaniesWorked, Attrition) %>% group_by(Generation, Attrition) %>%
+summarize(avg=mean(NumCompaniesWorked)) %>% 
+ggplot(aes(x=Generation, y=avg, color=Attrition)) + 
+  geom_point(size=3) + theme_tufte() +  # Draw points
+  geom_segment(aes(x=Generation, 
+                   xend=Generation, 
+                   y=min(avg), 
+                   yend=max(avg)), 
+               linetype="dashed", 
+               size=0.1,
+              color="white") +  
+  labs(title="", 
+       subtitle="Behavioral Difference between Generations",
+       y="Average Number of Companies worked for",
+      x="Generation") +  
+  coord_flip() + scale_color_manual(values=c("#58FA58", "#FA5858")) + 
+theme(legend.position="bottom", legend.background = element_rect(fill="#FFF9F5",
+                                  size=0.5, linetype="solid", 
+                                  colour ="black")) + theme(strip.background = element_blank(), strip.text.x = element_blank(), 
+     plot.title=element_text(hjust=0.5, color="white"),plot.subtitle=element_text(color="white"), plot.background=element_rect(fill="#0D7680"),
+                                                        axis.text.x=element_text(colour="white"), axis.text.y=element_text(colour="white"),
+                                                        axis.title=element_text(colour="white"))
+
+avg.comp
+```
+
+```{r}
+plot_grid(generation.dist, avg.comp, nrow=2)
+```
+Note: Wrong, this is imbalanced data set so Cannot compare directly value like this, should compare percentage in each attrition (No , Yes)
+
+# Attrition by Educational Level:
+```{r}
+library(forcats)
+```
+
+
+```{r}
+options(repr.plot.width=8, repr.plot.height=4) 
+
+# Give names for the different education levels.
+data$Educational_Levels <-  ifelse(data$Education == 1, "Without College D.",
+                            ifelse(data$Education == 2 , "College D.",
+                                  ifelse(data$Education == 3, "Bachelors D.",
+                                        ifelse(data$Education == 4, "Masters D.", "Phd D."))))
+
+# I want to know in terms of proportions if we are loosing key talent here.
+edu.level <- data %>% dplyr:: select(Educational_Levels, Attrition) %>% group_by(Educational_Levels, Attrition) %>% 
+summarize(n=n()) %>% 
+ggplot(aes(x=forcats::fct_reorder(Educational_Levels,n), y=n, fill=Attrition, color=Attrition)) + geom_bar(stat="identity") + facet_wrap(~Attrition) + 
+coord_flip() + scale_fill_manual(values=c("#2EF688", "#F63A2E")) + scale_color_manual(values=c("#09C873","#DD1509")) + 
+geom_label(aes(label=n, fill = Attrition), colour = "white", fontface = "italic") + 
+labs(x="", y="Number of Employees", title="Attrition by Educational Level") + theme_wsj() + 
+theme(legend.position="none", plot.title=element_text(hjust=0.5, size=14))
+
+edu.level
+```
+Note: Wrong, this is imbalanced data set so Cannot compare directly value like this, should compare percentage in each attrition (No , Yes)
+
+#4.3 The Impact of Income towards Attrition
+```{r}
+# Let's determine if income was a major factor when it came to leaving the company.
+# Let's start by taking the average monthly income of people who left the company and people who stayed in the company
+# Group by department 
+options(repr.plot.width=8, repr.plot.height=5) 
+
+
+avg.income <- data %>% dplyr::select(Department, MonthlyIncome, Attrition) %>% group_by(Attrition, Department) %>%
+summarize(avg.inc=mean(MonthlyIncome)) %>%
+ggplot(aes(x=reorder(Department, avg.inc), y=avg.inc, fill=Attrition)) + geom_bar(stat="identity", position="dodge") + facet_wrap(~Attrition) + 
+theme_minimal() + theme(axis.text.x = element_text(angle = 90), plot.title=element_text(hjust=0.5)) + 
+scale_fill_manual(values=c("lightgreen", "tomato2")) + 
+labs(y="Average Income", x="Department", title="Average Income by Department \n and Attrition Status") + 
+geom_text(aes(x=Department, y=0.01, label= paste0("$ ", round(avg.inc,2))),
+            hjust=-0.5, vjust=0, size=3, 
+            colour="black", fontface="bold",
+         angle=90)
+
+
+avg.income
+```
+
+# Determining Satisfaction by Income:
+```{r}
+
+# Turn the column to factor: One because it should not be considered an integer
+# Two: Will help us sort in an orderly manner.
+df$JobSatisfaction <- as.factor(data$JobSatisfaction)
+
+high.inc <- df %>% dplyr::select(JobSatisfaction, MonthlyIncome, Attrition) %>% group_by(JobSatisfaction, Attrition) %>%
+summarize(med=median(MonthlyIncome)) %>%
+ggplot(aes(x=fct_reorder(JobSatisfaction, -med), y=med, color=Attrition)) + 
+  geom_point(size=3) + 
+  geom_segment(aes(x=JobSatisfaction, 
+                   xend=JobSatisfaction, 
+                   y=0, 
+                   yend=med)) + facet_wrap(~Attrition) + 
+  labs(title="Is Income a Reason for Employees to Leave?", 
+       subtitle="by Attrition Status",
+      y="Median Income",
+      x="Level of Job Satisfaction") + 
+  theme(axis.text.x = element_text(angle=65, vjust=0.6), plot.title=element_text(hjust=0.5), strip.background = element_blank(),
+  strip.text = element_blank()) + 
+coord_flip() + theme_minimal() + scale_color_manual(values=c("#58FA58", "#FA5858")) + 
+geom_text(aes(x=JobSatisfaction, y=0.01, label= paste0("$ ", round(med,2))),
+            hjust=-0.5, vjust=-0.5, size=4, 
+            colour="black", fontface="italic",
+         angle=360)
+
+
+high.inc
+```
+# Income and the Level of Attrition:
+
+```{r}
+options(repr.plot.width=8, repr.plot.height=7) 
+
+per.sal <- data %>% dplyr::select(Attrition, PercentSalaryHike, MonthlyIncome) %>% 
+ggplot(aes(x=PercentSalaryHike, y=MonthlyIncome)) + geom_jitter(aes(col=Attrition), alpha=0.5) + 
+theme_economist() + theme(legend.position="none") + scale_color_manual(values=c("#58FA58", "#FA5858")) + 
+labs(title="Income and its Impact on Attrition") + theme(plot.title=element_text(hjust=0.5, color="white"), plot.background=element_rect(fill="#0D7680"),
+                                                        axis.text.x=element_text(colour="white"), axis.text.y=element_text(colour="white"),
+                                                        axis.title=element_text(colour="white"))
+
+perf.inc <- data %>% dplyr::select(PerformanceRating, MonthlyIncome, Attrition) %>% group_by(factor(PerformanceRating), Attrition) %>% 
+ggplot(aes(x=factor(PerformanceRating), y=MonthlyIncome, fill=Attrition)) + geom_violin() + coord_flip() + facet_wrap(~Attrition) + 
+scale_fill_manual(values=c("#58FA58", "#FA5858")) + theme_economist() + 
+theme(legend.position="bottom", strip.background = element_blank(), strip.text.x = element_blank(), 
+     plot.title=element_text(hjust=0.5, color="white"), plot.background=element_rect(fill="#0D7680"),
+                                                        axis.text.x=element_text(colour="white"), axis.text.y=element_text(colour="white"),
+                                                        axis.title=element_text(colour="white"), 
+     legend.text=element_text(color="white")) + 
+labs(x="Performance Rating",y="Monthly Income") 
+
+
+plot_grid(per.sal, perf.inc, nrow=2)
+```
+
+# 4.4 Working Environment
+
+Number of Employees by Job Role
+
+```{r}
+# Create a TreeMap with the number of Employees by JobRole
+library(treemapify)
+role.amount <- data %>% select(JobRole) %>% group_by(JobRole) %>% summarize(amount=n()) %>%
+ggplot(aes(area=amount, fill=JobRole, label=JobRole)) +  treemapify::geom_treemap() +
+  geom_treemap_text(grow = T, reflow = T, colour = "black") +
+  scale_fill_brewer(palette = "YlOrRd") +
+  theme(legend.position = "none") +
+  labs(
+    title = "Major Job Roles Inside the Organization",
+    caption = "The area of each tile represents the number of
+employees by type of job role.",
+    fill = "JobRole"
+  )
+
+role.amount
+```
+
+
+```{r}
+# Highest percentage of attrition by JobRole
+options(repr.plot.width=8, repr.plot.height=5) 
+
+# Median Salary
+job.sal <- data %>% select(JobRole, MonthlyIncome) %>% group_by(JobRole) %>% summarize(med=median(MonthlyIncome), avg=mean(MonthlyIncome))
+
+
+p1 <- ggplot(job.sal, aes(x=reorder(JobRole,-med), y=med)) +  geom_bar(stat="identity", width=.5, fill="#FE9A2E") + 
+  labs(title="Salary by Job Role", 
+       subtitle="Median",
+      x="Job Role",
+      y="Median Income") + 
+  theme(axis.text.x = element_text(angle=90, vjust=0.6))
+
+
+p2 <- ggplot(job.sal, aes(x=reorder(JobRole,-avg), y=avg)) +  geom_bar(stat="identity", width=.5, fill="#BE81F7") + 
+  labs(title="Salary by Job Role", 
+       subtitle="Mean",
+      x="Job Role",
+      y="Mean Income") + 
+  theme(axis.text.x = element_text(angle=90, vjust=0.6))
+
+
+plot_grid(p1, p2, ncol=2)
+```
+
+# 5. Correlations and Bi-variate Analysis:
+
+The higher the total working years the higher the monthly income of an employee.
+The higher the percent salary hike the higher the performance rating.
+The higher the years with current manager the higher the years since last promotion.
+The higher the age the higher the monthly income.
+
+```{r}
+library(ggcorrplot)
+nums <- select_if(data, is.numeric)
+corr <- round(cor(nums), 1)
+ggcorrplot::ggcorrplot(corr, 
+             type = "lower", 
+             lab = TRUE, 
+             lab_size = 3, 
+             method="square", 
+             colors = c("tomato2", "white", "#01A9DB"), 
+             title="Correlogram Employee Attritions", 
+             ggtheme=theme_minimal())
+```
+
+```{r}
+options(repr.plot.width=10, repr.plot.height=8) 
+
+# Positive Correlations
+p1 <- data %>% dplyr::select(TotalWorkingYears, MonthlyIncome) %>%
+ggplot(aes(x=TotalWorkingYears, y=MonthlyIncome)) + geom_point(colour = "#F2DFCE", alpha=1/2) + geom_smooth(method="loess",color="#EE4037") + 
+theme_economist() + theme(legend.position="bottom", strip.background = element_blank(), strip.text.x = element_blank(), 
+     plot.title=element_text(hjust=0.5, color="white"), plot.subtitle=element_text(hjust=0.5, color="white"), plot.background=element_rect(fill="#0D7680"),
+                                                        axis.text.x=element_text(colour="white"), axis.text.y=element_text(colour="white"),
+                                                        axis.title=element_text(colour="white")) + 
+labs(title="Positive Correlation", subtitle="Monthly Income vs Working Years")
+
+p2 <-  data %>% dplyr::select(PerformanceRating, PercentSalaryHike) %>%
+ggplot(aes(x=factor(PerformanceRating), y=PercentSalaryHike)) + geom_boxplot(colour = "#FE642E", fill="#A9D0F5") + 
+geom_jitter(color="#F2DFCE",alpha=1/3)  + 
+theme_economist() + theme(legend.position="bottom", strip.background = element_blank(), strip.text.x = element_blank(), 
+     plot.title=element_text(hjust=0.5, color="white"), plot.subtitle=element_text(hjust=0.5, color="white"), plot.background=element_rect(fill="#0D7680"),
+                                                        axis.text.x=element_text(colour="white"), axis.text.y=element_text(colour="white"),
+                                                        axis.title=element_text(colour="white")) + 
+labs(title="Possitive Correlation", subtitle="Percent Salary Hike vs Performance Rating", x="Performance Rating")
+
+# Years with Current Manager, Years since Last Promotion
+p3 <-  data %>% dplyr::select(YearsWithCurrManager, YearsSinceLastPromotion) %>%
+ggplot(aes(x=factor(YearsWithCurrManager), y=YearsSinceLastPromotion)) + geom_boxplot(colour = "#FE642E", fill="#A9D0F5") + 
+geom_jitter(color="#F2DFCE",alpha=1/3) + geom_smooth(method='loess',aes(group=1),color='#EE4037',lty=2,size=.5) + 
+theme_economist() + theme(legend.position="bottom", strip.background = element_blank(), strip.text.x = element_blank(), 
+     plot.title=element_text(hjust=0.5, color="white"),plot.subtitle=element_text(hjust=0.5, color="white"), plot.background=element_rect(fill="#0D7680"),
+                                                        axis.text.x=element_text(colour="white"), axis.text.y=element_text(colour="white"),
+                                                        axis.title=element_text(colour="white")) + 
+labs(title="Possitive Correlation", subtitle="Years since Last Promotions vs Years with Current Manager", x="Years with Current Manager")
+
+# Age and Monthly Income
+p4 <-  data %>% dplyr::select(Age, MonthlyIncome) %>%
+ggplot(aes(x=Age, y=MonthlyIncome)) + geom_point(colour = "#F2DFCE", alpha=1/2) + geom_smooth(method="loess", color="#EE4037") + 
+theme_economist() + theme(legend.position="bottom", strip.background = element_blank(), strip.text.x = element_blank(), 
+     plot.title=element_text(hjust=0.5, color="white"), plot.subtitle=element_text(hjust=0.5, color="white"), plot.background=element_rect(fill="#0D7680"),
+                                                        axis.text.x=element_text(colour="white"), axis.text.y=element_text(colour="white"),
+                                                        axis.title=element_text(colour="white")) + 
+labs(title="Positive Correlation", subtitle="Monthly Income vs Age")
+
+plot_grid(p1, p2, p3,p4, ncol=2, nrow=2)
+```
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
