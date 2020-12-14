@@ -505,7 +505,44 @@ ggradar::ggradar(plotdata)
 
 # px.parallel_coordinates chart
 ```{r}
+#install.packages("parcoords")
+library(parcoords)
+```
 
+```{r}
+data_parrallel_plot <-  data %>% 
+                          select_if(is.character) %>% 
+                          relocate(Attrition, .after = last_col())
+data_parrallel_plot
+```
+
+```{r}
+parcoords(
+ data_parrallel_plot,
+ reorderable = T,
+ brushMode = '1D-axes')
+```
+
+
+```{r}
+library(GGally)
+#set the value of alpha to 0.5
+ggparcoord(data_parrallel_plot, columns=1:8, groupColumn = 9, alphaLines = 0.5)
+```
+
+
+```{r}
+library(rggobi)
+ggobi(cr)
+cr
+```
+
+
+```{r}
+```
+
+
+```{r}
 ```
 
 

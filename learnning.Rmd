@@ -280,7 +280,7 @@ legend(x=0.7, y=1, legend = rownames(data[-c(1,2),]), bty = "n", pch=20 , col=co
 # Libraries
 library(GGally)
 library(dplyr)
-library(hrbrthemes)
+#library(hrbrthemes)
 
 # Data set is provided by R natively
 data <- iris
@@ -295,11 +295,33 @@ data %>%
     alphaLines = 1
     ) + 
   scale_color_manual(values=c( "#69b3a2", "#E8E8E8", "#E8E8E8") ) +
-  theme_ipsum()+
+  #theme_ipsum()+
   theme(
     legend.position="Default",
     plot.title = element_text(size=10)
   ) +
   xlab("")
+```
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
 ```
 
