@@ -38,6 +38,11 @@ is.ordered(f)
 ```{r}
 library(modeldata) # data for some ML model
 data("attrition")
+attrition
+```
+
+```{r}
+
 # mutate_if() is particularly useful for transforming variables from one type to another
 df <- attrition %>% mutate_if(is.ordered, factor, ordered = FALSE)
 

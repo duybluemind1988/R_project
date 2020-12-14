@@ -447,7 +447,7 @@ nums <- select_if(data, is.numeric)
 ```
 
 ```{r}
-
+library(ggcorrplot)
 corr <- round(cor(nums), 1)
 
 ggcorrplot(corr, 
@@ -530,14 +530,6 @@ library(GGally)
 ggparcoord(data_parrallel_plot, columns=1:8, groupColumn = 9, alphaLines = 0.5)
 ```
 
-
-```{r}
-library(rggobi)
-ggobi(cr)
-cr
-```
-
-
 ```{r}
 ```
 
@@ -579,35 +571,102 @@ library(rsample)   # for data splitting
 library(caret)     # for model packages
 ```
 ```{r}
-library(modeldata) # data for some ML model
-data("attrition")
-attrition
+path="WA_Fn-UseC_-HR-Employee-Attrition.csv"
+data <- fread(path)
+str(data)
+```
+# Delete unecessary columns
+```{r}
+data_reduce <-data %>% 
+              dplyr::select(-Over18,-EmployeeNumber, -EmployeeCount)
+
+dim(data_reduce)
+```
+# Getting dummy variables - one hot encoding
+
+First, let’s create our dummy object that we’ll use for the conversion. We’ll use the dummyVars() function from caret. Note how the formula is churn ~ . This is telling it not to convert churn as that’s our target, but look at all the other features (that’s what the period does) and convert if needed. I’ve also specified fullRank = TRUE so that it automatically drops one factor level which we want. The level dropped is the reference level then.
+
+```{r}
+data_reduce_dummy <- dummyVars(Attrition ~ ., data = data_reduce, fullRank = TRUE)
+data_reduce_dummy
 ```
 
 ```{r}
-# mutate_if() is particularly useful for transforming variables from one type to another
-#is.order: Performs check to determine if a vector is strictly increasing, strictly decreasing, not decreasing, or not increasing.
-df <- data %>% mutate_if(is.ordered, factor, ordered = FALSE)
+data_reduce <- predict(data_reduce_dummy, newdata = data_reduce)
+data_reduce <- data.frame(data_reduce)
+str(data_reduce)
 ```
 
 ```{r}
+data_reduce
+```
+```{r}
+Attrition_vals <- data %>% 
+  dplyr::select(Attrition)
+data_reduce <- cbind(data_reduce, Attrition_vals) # attach it back
+data_reduce
+```
+# Dealing with nuances in model preferences
+
+```{r}
+data_reduce$Attrition <-  factor(ifelse(data_reduce$Attrition == 'Yes', 1, 0))
+```
+# Dealing with nuances in my preferences
+
+When we one hot encoded it took the various levels found in the columns and then created column names that used those levels. The problem is that those values when in the columns had spaces, which it turned into periods in the column names. I can’t deal with periods and underscores in the same column names.
+```{r}
+colnames(data_reduce)
+```
+Let’s use some regex to replace all periods with underscores. Remember that period is a special character so you need to escape it with two backslashes ‘\’. I’m also going to add a ‘+’ to the end of my search string as ‘+’ tells it to look for one or more of the symbols. This way it’ll grab the double period too!
+```{r}
+library(stringr)
+colnames(data_reduce) <- colnames(data_reduce) %>% stringr::str_replace_all('\\.+', '_')
+colnames(data_reduce) # check!
+```
+# 4.3 Splitting into training and test sets
+```{r}
+# Method 1
 set.seed(123)  # for reproducibility
-churn_split <- initial_split(df, prop = .8, strata = "Attrition")
-churn_train <- training(churn_split)
-churn_test  <- testing(churn_split)
-dim(churn_train)
-dim(churn_test)
+churn_split <- rsample::initial_split(data_reduce, prop = .8, strata = "Attrition")
+train <- rsample::training(churn_split)
+test  <- rsample::testing(churn_split)
+dim(train)
+dim(test)
 ```
-# Multiple logistic regression
+
+
 ```{r}
-set.seed(123)
-cv_model <- train(
-  Attrition ~ ., 
-  data = churn_train, 
-  method = "glm",
-  family = "binomial",
-  trControl = trainControl(method = "cv", number = 5)
-)
+# Method 2
+data_split <- createDataPartition(data_reduce$Attrition, p = 0.8, list = FALSE)
+dim(data_reduce)
+dim(data_split)
+```
+
+So what’s in this ts_split object? Looking at the first 10 values we see that there is a continuous index but then under Resample1 we see that there are some randomly missing values… those are the 20% that weren’t selected!
+```{r}
+head(data_split, 10)
+```
+
+```{r}
+```
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
 ```
 
 
