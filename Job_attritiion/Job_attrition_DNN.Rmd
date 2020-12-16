@@ -12,6 +12,8 @@ library(tibble) # provide tibble class (better than traditional data frame)
 library(readr) # read_csv, tsv, delim, table, log....
 library(purrr) # map, map_dbl, split,
 library(data.table)
+library(rsample)   # for data splitting
+library(caret)     # for model packages
 ```
 
 ```{r}
@@ -47,7 +49,7 @@ summary(data)
 ```{r}
 psych::describe(data)
 ```
-# Check NA value
+# Check Null value
 
 ```{r}
 sum(is.na(data))
@@ -565,7 +567,7 @@ for (i in list(colnames(data))){
 }
 ```
 
-# 4. Machine learning
+# 4. Machine learning (ISTA 321)
 ```{r}
 library(rsample)   # for data splitting
 library(caret)     # for model packages
@@ -624,45 +626,426 @@ colnames(data_reduce) <- colnames(data_reduce) %>% stringr::str_replace_all('\\.
 colnames(data_reduce) # check!
 ```
 # 4.3 Splitting into training and test sets
+The caret package has function that makes this really easy. You can feed the function createDataPartition() your target, and your split ratio and it’ll give you back a list of row numbers that you can use to randomly select 80% of the data. Let’s see it in action.
 ```{r}
-# Method 1
-set.seed(123)  # for reproducibility
-churn_split <- rsample::initial_split(data_reduce, prop = .8, strata = "Attrition")
-train <- rsample::training(churn_split)
-test  <- rsample::testing(churn_split)
-dim(train)
-dim(test)
-```
-
-
-```{r}
-# Method 2
+# Method 2 From ISTA 321
 data_split <- createDataPartition(data_reduce$Attrition, p = 0.8, list = FALSE)
 dim(data_reduce)
 dim(data_split)
-```
+head(data_split, 10)
 
+```
 So what’s in this ts_split object? Looking at the first 10 values we see that there is a continuous index but then under Resample1 we see that there are some randomly missing values… those are the 20% that weren’t selected!
 ```{r}
-head(data_split, 10)
+features_train <- data_reduce[ data_split, !(names(data_reduce) %in% c('Attrition'))] 
+dim(features_train)
 ```
-
 ```{r}
-```
-
-```{r}
-```
-
-
-```{r}
+features_test <- data_reduce[ -data_split, !(names(data_reduce) %in% c('Attrition'))] 
+dim(features_test)
 ```
 
 
 ```{r}
+target_train <- data_reduce[ data_split, "Attrition"]
+target_test <- data_reduce[-data_split, "Attrition"]
+
+#check propation target
+table(target_train)
+table(target_test)
+prop.table(table(target_train))
+prop.table(table(target_test))
+```
+
+#  Centering and scaling
+We’ll use the preProcess() function to do our preprocessing. What’s great is that we can tell it all the things we want it to do at once within method = In this case we’ll tell it to center, scale, and even use KNN to impute missing values.
+
+```{r}
+preprocess_object <- preProcess(features_train, 
+                                  method = c('center', 'scale', 'knnImpute'))
+preprocess_object # We can look at the object and it'll tell us what it did
+```
+Now we can use ’predict()` to apply that preprocess object to our data (just like we used predict for creating our dummy variables).
+```{r}
+features_train <- predict(preprocess_object, newdata = features_train)
+features_test <- predict(preprocess_object, newdata = features_test)
+```
+A quick histogram shows that Age has been scaled
+```{r}
+hist(features_train$Age)
+```
+
+# Fitting our models
+
+Fitting a kNN model
+```{r}
+knn_fit <- knn3(features_train, target_train, k = 5)
+knn_fit # just check it
 ```
 
 
 ```{r}
+knn_pred <- predict(knn_fit, features_test, type = 'class' )
+predictions <- cbind(data.frame(target_test, knn_pred))
+summary(predictions)
+```
+```{r}
+confusionMatrix(knn_pred, target_test)
+```
+
+Fitting a logistic regression model
+```{r}
+full_train <- cbind(features_train, target_train)
+#glimpse(full_train)
+```
+
+
+```{r}
+log_train <- glm(target_train ~ ., family = 'binomial', data = full_train)
+summary(log_train)
+```
+Alright, now predict our test targets using our test features. Use type = 'response' so R knows to give you back the probability.
+
+```{r}
+log_pred <- predict(log_train, newdata = features_test, type = 'response')
+head(log_pred) # just look at the first few values... note the 0-1 scale.
+```
+We can convert these probabilities to classes. In this case anything greater than or equal to 0.5 is a 1 and everything else a 0.
+
+```{r}
+log_pred <- ifelse(log_pred >= 0.5, 1, 0)
+```
+
+```{r}
+predictions$log_pred <- factor(log_pred)
+summary(predictions)
+```
+
+
+```{r}
+confusionMatrix(factor(log_pred), target_test)
+```
+
+Fitting a linear discriminant analysis (LDA) model
+```{r}
+full_train[[37]]
+```
+
+```{r}
+library(MASS) # Load mass - install if needed
+lda_train <- lda(target_train ~ ., data = full_train) # fit model
+lda_pred <- predict(lda_train, newdata = features_test, type = 'response') # predict
+predictions$lda_pred <- lda_pred$class # add predictions to data frame
+summary(predictions)
+```
+
+# 4. Mahicne learning model (ML BOOK)
+```{r}
+library(rsample)   # for data splitting
+# Modeling packages
+library(caret)     # for logistic regression modeling
+# Model interpretability packages
+library(vip)       # variable importance
+```
+
+```{r}
+path="WA_Fn-UseC_-HR-Employee-Attrition.csv"
+data <- fread(path)
+dim(data)
+```
+Remove unnessary columns:
+```{r}
+data <-data %>%dplyr::select(-Over18,-EmployeeNumber, -EmployeeCount)
+dim(data)
+str(data)
+```
+Convert all character columns to factor
+```{r}
+# all character columns to factor:
+data <- mutate_if(data, is.character, as.factor)
+str(data)
+```
+
+
+```{r}
+# Create training (70%) and test (30%) sets for the 
+# rsample::attrition data.
+set.seed(123)  # for reproducibility
+churn_split <- initial_split(data, prop = .7, strata = "Attrition")
+churn_train <- training(churn_split)
+churn_test  <- testing(churn_split)
+```
+# Multiple logistic regression
+# MLP khong su dung preprocess
+```{r}
+set.seed(123)
+cv_model <- train(
+  Attrition ~ ., 
+  data = churn_train, 
+  method = "glm",
+  family = "binomial",
+  trControl = trainControl(method = "cv", number = 5)
+)
+```
+
+
+```{r}
+summary(cv_model)
+```
+
+
+```{r}
+# predict class
+pred_class <- predict(cv_model, churn_train)
+# create confusion matrix
+confusionMatrix(
+  data = pred_class, 
+  reference = churn_train$Attrition
+)
+# NOTE: dung theo kieu nay khong duoc do hieu nham positive class la No, sensitivity, specificity, pos , neg lon nguoc so voi binh thuong
+```
+```{r}
+pred_class <- predict(cv_model, churn_train)
+# create confusion matrix (pp chuan phai relevel)
+confusionMatrix(
+  data = relevel(pred_class, ref = "Yes"), 
+  reference = relevel(churn_train$Attrition, ref = "Yes")
+)
+```
+
+
+```{r}
+library(ROCR)
+# Compute predicted probabilities
+m1_prob <- predict(cv_model, churn_train, type = "prob")$Yes
+
+# Compute AUC metrics for cv_model1 and cv_model3
+perf1 <- prediction(m1_prob, churn_train$Attrition) %>%
+  performance(measure = "tpr", x.measure = "fpr")
+
+# Plot ROC curves for cv_model1 and cv_model3
+plot(perf1, col = "black", lty = 2)
+
+```
+
+
+```{r}
+vip(cv_model, num_features = 20)
+```
+Note: Neu chuyen cac column Job satisfaction tu int (1,2,3,4) thanh factor (low, normal, high) thi important feature explain se dien giai chinh xac column + factor tuong ung, vd: Job satisfaction Very_high, Job satisfaction _ Normal 
+
+# MLP Su dung preprocess 
+```{r}
+set.seed(123)
+cv_model <- train(
+  Attrition ~ ., 
+  data = churn_train, 
+  method = "glm",
+  family = "binomial",
+  preProcess = c("zv", "center", "scale"), # loai bo near zero/constant column, center and scale column value
+  trControl = trainControl(method = "cv", number = 5)
+)
+```
+
+```{r}
+pred_class <- predict(cv_model, churn_train)
+# create confusion matrix (pp chuan phai relevel)
+confusionMatrix(
+  data = relevel(pred_class, ref = "Yes"), 
+  reference = relevel(churn_train$Attrition, ref = "Yes")
+)
+```
+```{r}
+library(ROCR)
+# Compute predicted probabilities
+m1_prob <- predict(cv_model, churn_train, type = "prob")$Yes
+
+# Compute AUC metrics for cv_model1 and cv_model3
+perf1 <- prediction(m1_prob, churn_train$Attrition) %>%
+  performance(measure = "tpr", x.measure = "fpr")
+
+# Plot ROC curves for cv_model1 and cv_model3
+plot(perf1, col = "black", lty = 2)
+```
+
+
+```{r}
+vip(cv_model, num_features = 20)
+```
+
+# XGBoost
+```{r}
+# Read data
+path="WA_Fn-UseC_-HR-Employee-Attrition.csv"
+data <- fread(path)
+dim(data)
+# Remove unnessary columns:
+data <-data %>%dplyr::select(-Over18,-EmployeeNumber, -EmployeeCount)
+# all character columns to factor:
+data <- mutate_if(data, is.character, as.factor)
+# Create training (70%) and test (30%) sets for the 
+# rsample::attrition data.
+set.seed(123)  # for reproducibility
+churn_split <- initial_split(data, prop = .7, strata = "Attrition")
+churn_train <- training(churn_split)
+churn_test  <- testing(churn_split)
+dim(churn_train)
+dim(churn_test)
+```
+```{r}
+head(churn_train)
+```
+
+```{r}
+library(xgboost)
+```
+
+```{r}
+# Transform the two data sets into xgb.Matrix
+xgb.train = xgb.DMatrix(data=data.matrix(churn_train),label=churn_train$Attrition)
+xgb.test = xgb.DMatrix(data=data.matrix(churn_test),label=churn_test$Attrition)
+```
+
+
+```{r}
+# Define the parameters for multinomial classification
+num_class = length(levels(churn_test$Attrition))
+params = list(
+  booster="gbtree",
+  eta=0.001,
+  max_depth=5,
+  gamma=3,
+  subsample=0.75,
+  colsample_bytree=1,
+  objective="binary:logistic",
+  eval_metric="mlogloss",
+  num_class=num_class
+)
+```
+
+```{r}
+# Train the XGBoost classifer
+xgb.fit=xgb.train(
+  params=params,
+  data=xgb.train,
+  nrounds=25,
+  nthreads=1,
+  early_stopping_rounds=10,
+  watchlist=list(val1=xgb.train,val2=xgb.test),
+  verbose=0
+)
+
+# Review the final model and results
+xgb.fit
+```
+# 5 ML Follow statistic machine learning BOOK
+
+```{r}
+# Read data
+path="WA_Fn-UseC_-HR-Employee-Attrition.csv"
+data <- fread(path)
+dim(data)
+# Remove unnessary columns:
+data <-data %>%dplyr::select(-Over18,-EmployeeNumber, -EmployeeCount)
+# all character columns to factor:
+data <- mutate_if(data, is.character, as.factor)
+# Create training (70%) and test (30%) sets for the 
+# rsample::attrition data.
+set.seed(123)  # for reproducibility
+churn_split <- initial_split(data, prop = .8, strata = "Attrition")
+churn_train <- training(churn_split)
+churn_test  <- testing(churn_split)
+dim(churn_train)
+dim(churn_test)
+```
+At first glance, it might appear as if the use of createDataPartition() is no different than our previous use of sample(). However, createDataPartition() tries to ensure a split that has a similar distribution of the supplied variable in both datasets. See the documentation for details.
+```{r}
+set.seed(430)
+churn_split = createDataPartition(data$Attrition, p =0.8, list = FALSE)
+churn_train = data[default_idx, ]
+churn_test = data[-default_idx, ]
+dim(churn_train)
+dim(churn_test)
+```
+# Simple additive logistic regression.
+
+```{r}
+glm_mod = train(
+  form = Attrition ~ .,
+  data = churn_train,
+  trControl = trainControl(method = "cv", number = 5),
+  method = "glm",
+  family = "binomial"
+)
+glm_mod
+```
+
+```{r}
+#summary(glm_mod)
+```
+
+```{r}
+pred_class <- predict(glm_mod, churn_test)
+# create confusion matrix (pp chuan phai relevel)
+confusionMatrix(
+  data = relevel(pred_class, ref = "Yes"), 
+  reference = relevel(churn_test$Attrition, ref = "Yes")
+)
+```
+# KNN
+```{r}
+knn_mod = train(
+  Attrition ~ .,
+  data = churn_train,
+  method = "knn",
+  trControl = trainControl(method = "cv", number = 5)
+)
+knn_mod
+```
+Here we are again using 5-fold cross-validation and no pre-processing. Notice that we now have multiple results, for k = 5, k = 7, and k = 9.
+
+Let’s modifying this training by introducing pre-processing, and specifying our own tuning parameters, instead of the default values above.
+
+Perprocess nzv: For some other models, this might be an issue (especially if we resample or down-sample the data). We can add a filter to check for zero- or near zero-variance predictors prior to running the pre-processing calculations:
+```{r}
+knn_mod = train(
+  Attrition ~ .,
+  data = churn_train,
+  method = "knn",
+  trControl = trainControl(method = "cv", number = 5),
+  preProcess = c("nzv","center", "scale"),
+  tuneGrid = expand.grid(k = seq(1, 101, by = 2))
+)
+```
+
+
+```{r}
+head(knn_mod$results, 5)
+```
+
+
+```{r}
+plot(knn_mod)
+```
+
+
+```{r}
+knn_mod$bestTune
+```
+
+
+```{r}
+pred_class <- predict(knn_mod, churn_test)
+# create confusion matrix (pp chuan phai relevel)
+confusionMatrix(
+  data = relevel(pred_class, ref = "Yes"), 
+  reference = relevel(churn_test$Attrition, ref = "Yes")
+)
+```
+
+
+```{r}
+
 ```
 
 

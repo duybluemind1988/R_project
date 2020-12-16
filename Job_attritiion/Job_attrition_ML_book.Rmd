@@ -40,6 +40,9 @@ library(modeldata) # data for some ML model
 data("attrition")
 attrition
 ```
+```{r}
+str(attrition)
+```
 
 ```{r}
 
@@ -53,6 +56,11 @@ churn_split <- initial_split(df, prop = .7, strata = "Attrition")
 churn_train <- training(churn_split)
 churn_test  <- testing(churn_split)
 ```
+
+```{r}
+str(churn_train)
+```
+
 #**5.3 Simple logistic regression**
 
 We will fit two logistic regression models in order to predict the probability of an employee attriting. The first predicts the probability of attrition based on their monthly income (MonthlyIncome) and the second is based on whether or not the employee works overtime (OverTime). The glm() function fits generalized linear models, a class of models that includes both logistic regression and simple linear regression as special cases. The syntax of the glm() function is similar to that of lm(), except that we must pass the argument family = "binomial" in order to tell R to run a logistic regression rather than some other type of generalized linear model (the default is family = "gaussian", which is equivalent to ordinary linear regression assuming normally distributed errors).
@@ -103,7 +111,7 @@ cv_model1 <- train(
   data = churn_train, 
   method = "glm",
   family = "binomial",
-  trControl = trainControl(method = "cv", number = 10)
+  trControl = trainControl(method = "cv", number = 5)
 )
 
 set.seed(123)
@@ -112,7 +120,7 @@ cv_model2 <- train(
   data = churn_train, 
   method = "glm",
   family = "binomial",
-  trControl = trainControl(method = "cv", number = 10)
+  trControl = trainControl(method = "cv", number = 5)
 )
 
 set.seed(123)
@@ -121,7 +129,7 @@ cv_model3 <- train(
   data = churn_train, 
   method = "glm",
   family = "binomial",
-  trControl = trainControl(method = "cv", number = 10)
+  trControl = trainControl(method = "cv", number = 5)
 )
 
 # extract out of sample performance measures
