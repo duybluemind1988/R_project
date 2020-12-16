@@ -804,6 +804,7 @@ confusionMatrix(
 )
 # NOTE: dung theo kieu nay khong duoc do hieu nham positive class la No, sensitivity, specificity, pos , neg lon nguoc so voi binh thuong
 ```
+
 ```{r}
 pred_class <- predict(cv_model, churn_train)
 # create confusion matrix (pp chuan phai relevel)
@@ -855,6 +856,7 @@ confusionMatrix(
   reference = relevel(churn_train$Attrition, ref = "Yes")
 )
 ```
+
 ```{r}
 library(ROCR)
 # Compute predicted probabilities
@@ -873,71 +875,385 @@ plot(perf1, col = "black", lty = 2)
 vip(cv_model, num_features = 20)
 ```
 
-# XGBoost
+#  GBM from library gbm
+
+
 ```{r}
 # Read data
 path="WA_Fn-UseC_-HR-Employee-Attrition.csv"
 data <- fread(path)
 dim(data)
+
 # Remove unnessary columns:
 data <-data %>%dplyr::select(-Over18,-EmployeeNumber, -EmployeeCount)
 # all character columns to factor:
 data <- mutate_if(data, is.character, as.factor)
-# Create training (70%) and test (30%) sets for the 
-# rsample::attrition data.
-set.seed(123)  # for reproducibility
-churn_split <- initial_split(data, prop = .7, strata = "Attrition")
-churn_train <- training(churn_split)
-churn_test  <- testing(churn_split)
+data$Attrition<-ifelse(data$Attrition=="Yes", 1, 0)
+# Create training (80%) and test (20%) sets for the 
+set.seed(430)
+churn_split = createDataPartition(data$Attrition, p =0.8, list = FALSE)
+churn_train = data[churn_split, ]
+churn_test = data[-churn_split, ]
 dim(churn_train)
 dim(churn_test)
+
 ```
 ```{r}
 head(churn_train)
 ```
 
+
+```{r}
+library(gbm)      # for original implementation of regular and stochastic GBMs
+```
+
+ Zero- and Near Zero-Variance Predictors
+```{r}
+nzv <- nearZeroVar(churn_train)
+nzv
+```
+```{r}
+head(churn_train[[24]])
+```
+
+```{r}
+churn_train[,-nzv]
+```
+
+```{r}
+nzv <- nearZeroVar(churn_train)
+print(nzv)
+churn_train_nzv <- churn_train[,-24]
+dim(churn_train)
+dim(churn_train_nzv)
+```
+
+```{r}
+set.seed(123)  # for reproducibility
+gbm.model <- gbm(
+  formula = Attrition ~ .,
+  data = churn_train_nzv,
+  distribution = "bernoulli",  # SSE loss function
+  n.trees = 1000,
+  shrinkage = 0.1,
+  interaction.depth = 3,
+  n.minobsinnode = 10,
+  cv.folds = 5
+)
+```
+
+```{r}
+print(gbm.model )
+```
+
+```{r}
+best.iter = gbm.perf(gbm.model, method="cv")
+best.iter
+```
+
+```{r}
+summary(gbm.model)
+```
+```{r}
+library(vip)
+vip(gbm.model)
+```
+
+```{r}
+plot.gbm(gbm.model, 1, best.iter)
+plot.gbm(gbm.model, 2, best.iter) 
+plot.gbm(gbm.model, 3, best.iter)
+plot.gbm(gbm.model, 4, best.iter)
+```
+
+# GBM from Caret package
+
+```{r}
+# Read data
+path="WA_Fn-UseC_-HR-Employee-Attrition.csv"
+data <- fread(path)
+dim(data)
+
+# Remove unnessary columns:
+data <-data %>%dplyr::select(-Over18,-EmployeeNumber, -EmployeeCount)
+# all character columns to factor:
+data <- mutate_if(data, is.character, as.factor)
+#data$Attrition<-ifelse(data$Attrition=="Yes", 1, 0)
+# Create training (80%) and test (20%) sets for the 
+set.seed(430)
+churn_split = createDataPartition(data$Attrition, p =0.8, list = FALSE)
+churn_train = data[churn_split, ]
+churn_test = data[-churn_split, ]
+dim(churn_train)
+dim(churn_test)
+```
+```{r}
+churn_train_nzv <- churn_train[,-24]
+```
+
+Note: Target must be factor char, not numeric. Not include near zero
+```{r}
+
+set.seed(123)
+fitControl = trainControl(method="cv", number=5, returnResamp = "all")
+
+model2 = train(Attrition~., 
+               data=churn_train_nzv, 
+               method="gbm",
+               distribution="bernoulli",
+               trControl=fitControl, 
+               verbose=F
+    )
+```
+
+```{r}
+model2
+```
+```{r}
+confusionMatrix(model2)
+```
+```{r}
+churn_test_nzv <- churn_test[,-24]
+mPred = predict(model2, churn_test_nzv, na.action = na.pass)
+postResample(mPred, churn_test_nzv$Attrition)
+```
+
+
+```{r}
+confusionMatrix(mPred, churn_test_nzv$Attrition)
+# Note: need to change positive class to Yes
+```
+# XGBOOST
 ```{r}
 library(xgboost)
 ```
 
+
 ```{r}
-# Transform the two data sets into xgb.Matrix
-xgb.train = xgb.DMatrix(data=data.matrix(churn_train),label=churn_train$Attrition)
-xgb.test = xgb.DMatrix(data=data.matrix(churn_test),label=churn_test$Attrition)
+# Read data
+path="WA_Fn-UseC_-HR-Employee-Attrition.csv"
+data <- fread(path)
+dim(data)
+
+# Remove unnessary columns:
+data <-data %>%dplyr::select(-Over18,-EmployeeNumber, -EmployeeCount)
+# all character columns to factor:
+data <- mutate_if(data, is.character, as.factor)
+#data$Attrition<-ifelse(data$Attrition=="Yes", 1, 0)
+# Create training (80%) and test (20%) sets for the 
+set.seed(430)
+churn_split = createDataPartition(data$Attrition, p =0.8, list = FALSE)
+churn_train = data[churn_split, ]
+churn_test = data[-churn_split, ]
+dim(churn_train)
+dim(churn_test)
+```
+Up to this point, we dealt with basic data cleaning and data inconsistencies. To use xgboost package, keep these things in mind:
+1. Convert the categorical variables into numeric using one hot encoding
+2. For classification, if the dependent variable belongs to class factor, convert it to numeric
+```{r}
+train_labels <- churn_train$Attrition 
+test_label <- churn_test$Attrition
+
+new_train <- model.matrix(~.+0,data = churn_train[,-c("Attrition"),with=F]) 
+new_test <- model.matrix(~.+0,data = churn_test[,-c("Attrition"),with=F])
+
+#convert factor to numeric 
+train_labels <- as.numeric(train_labels)-1
+test_label <- as.numeric(test_label)-1
+```
+
+```{r}
+
+dtrain <- xgb.DMatrix(data = new_train,label = train_labels) 
+dtest <- xgb.DMatrix(data = new_test,label=test_label)
 ```
 
 
 ```{r}
-# Define the parameters for multinomial classification
-num_class = length(levels(churn_test$Attrition))
-params = list(
-  booster="gbtree",
-  eta=0.001,
-  max_depth=5,
-  gamma=3,
-  subsample=0.75,
-  colsample_bytree=1,
-  objective="binary:logistic",
-  eval_metric="mlogloss",
-  num_class=num_class
+#default parameters
+params <- list(booster = "gbtree", objective = "binary:logistic", eta=0.3, gamma=0, max_depth=6, min_child_weight=1, subsample=1, colsample_bytree=1)
+```
+
+
+```{r}
+xgbcv <- xgb.cv( params = params, data = dtrain, nrounds = 100, nfold = 5, showsd = T, stratified = T, print.every.n = 10, early.stop.round = 20, maximize = F)
+##best iteration = 79
+```
+
+```{r}
+min(xgbcv$test.error.mean)
+```
+
+```{r}
+xgb1 <- xgb.train (params = params, data = dtrain, nrounds = 79, watchlist = list(val=dtest,train=dtrain), print.every.n = 10, early.stop.round = 10, maximize = F , eval_metric = "error")
+```
+
+```{r}
+#model prediction
+xgbpred <- predict (xgb1,dtest)
+xgbpred <- ifelse (xgbpred > 0.5,1,0)
+```
+
+```{r}
+class(test_label)
+class(xgbpred)
+```
+
+```{r}
+#confusion matrix
+confusionMatrix(as.factor(xgbpred), as.factor(test_label))
+```
+```{r}
+#view variable importance plot
+mat <- xgb.importance (feature_names = colnames(new_train),model = xgb1)
+xgb.plot.importance (importance_matrix = mat[1:20]) 
+```
+# GBM from H20 package
+```{r}
+# Read data
+path="WA_Fn-UseC_-HR-Employee-Attrition.csv"
+data <- fread(path)
+dim(data)
+
+# Remove unnessary columns:
+data <-data %>%dplyr::select(-Over18,-EmployeeNumber, -EmployeeCount)
+# all character columns to factor:
+data <- mutate_if(data, is.character, as.factor)
+#data$Attrition<-ifelse(data$Attrition=="Yes", 1, 0)
+# Create training (80%) and test (20%) sets for the 
+set.seed(430)
+churn_split = createDataPartition(data$Attrition, p =0.8, list = FALSE)
+churn_train = data[churn_split, ]
+churn_test = data[-churn_split, ]
+dim(churn_train)
+dim(churn_test)
+```
+
+```{r}
+# create feature names
+y <- "Attrition"
+x <- setdiff(names(churn_train), y)
+```
+
+```{r}
+library(h2o)
+h2o.no_progress()
+h2o.init(max_mem_size = "5g")
+```
+
+
+```{r}
+# turn training set into h2o object
+train.h2o <- as.h2o(churn_train)
+
+```
+
+
+```{r}
+# training basic GBM model with defaults
+h2o.fit1 <- h2o.gbm(
+  x = x,
+  y = y,
+  training_frame = train.h2o,
+  nfolds = 5
 )
+
+# assess model results
+h2o.fit1
+```
+Similar to XGBoost, we can incorporate automated stopping so that we can crank up the number of trees but terminate training once model improvement decreases or stops. There is also an option to terminate training after so much time has passed (see max_runtime_secs). In this example, I train a default model with 5,000 trees but stop training after 10 consecutive trees have no improvement on the cross-validated error. In this case, training stops after 3828 trees and has a cross-validated RMSE of $24,684.
+
+Must drop constant columns before H2O
+```{r}
+train.h2o_nzv <- train.h2o[,-24]
 ```
 
 ```{r}
-# Train the XGBoost classifer
-xgb.fit=xgb.train(
-  params=params,
-  data=xgb.train,
-  nrounds=25,
-  nthreads=1,
-  early_stopping_rounds=10,
-  watchlist=list(val1=xgb.train,val2=xgb.test),
-  verbose=0
+# create feature names
+y <- "Attrition"
+x <- setdiff(names(train.h2o_nzv), y)
+```
+
+```{r}
+# training basic GBM model with defaults
+h2o.fit2 <- h2o.gbm(
+  x = x,
+  y = y,
+  training_frame = train.h2o_nzv,
+  nfolds = 5,
+  ntrees = 5000,
+  stopping_rounds = 10,
+  stopping_tolerance = 0,
+  seed = 123
 )
 
-# Review the final model and results
-xgb.fit
+# model stopped after xx trees
+h2o.fit2@parameters$ntrees
 ```
+
+
+```{r}
+h2o.fit2
+```
+```{r}
+# cross validated RMSE
+h2o.rmse(h2o.fit2, xval = TRUE)
+```
+```{r}
+h2o.varimp_plot(h2o.fit2, num_of_features = 10)
+```
+```{r}
+h2o.partialPlot(h2o.fit2, data = train.h2o, cols = "MonthlyIncome")
+```
+```{r}
+# get a few observations to perform local interpretation on
+# convert test set to h2o object
+test.h2o <- as.h2o(churn_test)
+test.h2o_nzv <- test.h2o[,-24]
+local_obs <- test.h2o_nzv[1:2, ]
+local_obs
+# apply LIME
+library(lime)
+explainer <- lime(churn_train_nzv, h2o.fit2)
+explainer
+explanation <- explain(local_obs, explainer, n_features = 5)
+plot_features(explanation)
+```
+Predict
+```{r}
+# convert test set to h2o object
+test.h2o <- as.h2o(churn_test)
+test.h2o_nzv <- test.h2o[,-24]
+```
+
+
+```{r}
+# evaluate performance on new data
+h2o.performance(model = h2o.fit2, newdata = test.h2o)
+```
+
+
+```{r}
+predict_value <-h2o.predict(h2o.fit2, newdata = test.h2o)
+```
+
+```{r}
+predict_value$predict
+test.h2o$Attrition
+class(predict_value$predict)
+class(test.h2o$Attrition)
+```
+```{r}
+class(test.h2o$Attrition)
+class(as.factor(test.h2o$Attrition))
+```
+
+
+```{r}
+confusionMatrix(as.factor(predict_value$predict),as.factor(test.h2o$Attrition))
+```
+
 # 5 ML Follow statistic machine learning BOOK
 
 ```{r}
@@ -959,11 +1275,12 @@ dim(churn_train)
 dim(churn_test)
 ```
 At first glance, it might appear as if the use of createDataPartition() is no different than our previous use of sample(). However, createDataPartition() tries to ensure a split that has a similar distribution of the supplied variable in both datasets. See the documentation for details.
+
 ```{r}
 set.seed(430)
 churn_split = createDataPartition(data$Attrition, p =0.8, list = FALSE)
-churn_train = data[default_idx, ]
-churn_test = data[-default_idx, ]
+churn_train = data[churn_split, ]
+churn_test = data[-churn_split, ]
 dim(churn_train)
 dim(churn_test)
 ```
