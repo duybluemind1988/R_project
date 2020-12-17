@@ -1,0 +1,2591 @@
+---
+title: "R not Notebook"
+output: html_document #html_notebook
+---
+## Chapter 3 Feature & Target Engineering
+**Library**
+```{r}
+#install.packages('AmesHousing')
+# Helper packages
+library(dplyr)    # for data manipulation
+library(ggplot2)  # for awesome graphics
+library(visdat)   # for additional visualizations
+# Feature engineering packages
+library(caret)    # for various ML tasks
+library(recipes)  # for feature engineering tasks
+# Modeling process packages
+library(rsample)   # for resampling procedures
+library(h2o)       # for resampling and model training
+# h2o set-up 
+#h2o.no_progress()  # turn off h2o progress bars
+#h2o.init()         # launch h2o
+```
+
+**Stratified sampling with the rsample package**
+```{r}
+# Ames housing data
+ames <- AmesHousing::make_ames()
+#ames.h2o <- as.h2o(ames)
+dim(ames) #2930 rows, 81 columns
+set.seed(123)
+split <- initial_split(ames, prop = 0.7, 
+                       strata = "Sale_Price")
+ames_train  <- training(split)
+ames_test   <- testing(split)
+```
+
+```{r}
+ames
+```
+
+#**3.2 Target engineering**
+
+Option 1: normalize with a log transformation. This will transform most right skewed distributions to be approximately normal. One way to do this is to simply log transform the training and test set in a manual, single step manner similar to:
+
+However, we should think of the preprocessing as creating a blueprint to be re-applied strategically. For this, you can use the recipe package or something similar (e.g., caret::preProcess()). This will not return the actual log transformed values but, rather, a blueprint to be applied later.
+```{r}
+ames_recipe <- recipe(Sale_Price ~ ., data = ames_train) %>%
+  step_log(all_outcomes())
+```
+Option 2: use a Box Cox transformation. A Box Cox transformation is more flexible than (but also includes as a special case) the log transformation and will find an appropriate transformation from a family of power transforms that will transform the variable as close as possible to a normal distribution (Box and Cox 1964; Carroll and Ruppert 1981). 
+
+#**3.3 Dealing with missingness**
+
+```{r}
+sum(is.na(AmesHousing::ames_raw)) #13997 so we will check in raw data
+sum(is.na(ames)) # 0
+```
+It is important to understand the distribution of missing values in a data set in order to determine the best approach for preprocessing. Heat maps are an efficient way to visualize the distribution of missing values for small- to medium-sized data sets. The code is.na(<data-frame-name>) will return a matrix of the same dimension as the given data frame, but each cell will contain either TRUE (if the corresponding value is missing) or FALSE (if the corresponding value is not missing). 
+```{r}
+#visual by ggplot
+AmesHousing::ames_raw %>%
+  is.na() %>%
+  reshape2::melt() %>%
+  ggplot(aes(Var2, Var1, fill=value)) + 
+  geom_raster() + 
+  coord_flip() +
+  scale_y_continuous(NULL, expand = c(0, 0)) +
+  scale_fill_grey(name = "", 
+                  labels = c("Present", 
+                             "Missing")) +
+  xlab("Observation") +
+  theme(axis.text.y  = element_text(size = 4))
+```
+
+```{r}
+# visual by vis_miss
+vis_miss(AmesHousing::ames_raw, cluster = TRUE)
+```
+
+#**3.3.2 Imputation**
+
+3.3.2.1 Estimated statistic
+An elementary approach to imputing missing values for a feature is to compute descriptive statistics such as the mean, median, or mode (for categorical) and use that value to replace 
+
+However, it is important to remember that imputation should be performed within the resampling process and as your data set gets larger, repeated model-based imputation can compound the computational demands. Thus, you must weigh the pros and cons of the two approaches. The following would build onto our ames_recipe and impute all missing values for the Gr_Liv_Area variable with the median value:
+```{r}
+ames_recipe %>%
+  step_medianimpute(Gr_Liv_Area)
+```
+An alternative is to use grouped statistics to capture expected values for observations that fall into similar groups. However, this becomes infeasible for larger data sets. Modeling imputation can automate this process for you and the two most common methods include K-nearest neighbor and tree-based imputation, which are discussed next.
+
+3.3.2.2 K-nearest neighbor
+K-nearest neighbor (KNN) imputes values by identifying observations with missing values, then identifying other observations that are most similar based on the other available features, and using the values from these nearest neighbor observations to impute missing values.
+
+We discuss KNN for predictive modeling in Chapter 8; the imputation application works in a similar manner. In KNN imputation, the missing value for a given observation is treated as the targeted response and is predicted based on the average (for quantitative values) or the mode (for qualitative values) of the k nearest neighbors.
+```{r}
+ames_recipe %>%
+  step_knnimpute(all_predictors(), neighbors = 6)
+```
+3.3.2.3 Tree-based
+As previously discussed, several implementations of decision trees (Chapter 9) and their derivatives can be constructed in the presence of missing values. Thus, they provide a good alternative for imputation. As discussed in Chapters 9-11, single trees have high variance but aggregating across many trees creates a robust, low variance predictor. Random forest imputation procedures have been studied (Shah et al. 2014; Stekhoven 2015); however, they require significant computational demands in a resampling environment (Kuhn and Johnson 2019). Bagged trees (Chapter 10) offer a compromise between predictive accuracy and computational burden.
+
+Similar to KNN imputation, observations with missing values are identified and the feature containing the missing value is treated as the target and predicted using bagged decision trees.
+
+```{r}
+ames_recipe %>%
+  step_bagimpute(all_predictors())
+```
+#**3.4 Feature filtering**
+
+Zero and near-zero variance variables are low-hanging fruit to eliminate. Zero variance variables, meaning the feature only contains a single unique value, provides no useful information to a model. Some algorithms are unaffected by zero variance features. However, features that have near-zero variance also offer very little, if any, information to a model. Furthermore, they can cause problems during resampling as there is a high probability that a given sample will only contain a single unique value (the dominant value) for that feature. A rule of thumb for detecting near-zero variance features is:
+
+The fraction of unique values over the sample size is low (say ≤10%).
+The ratio of the frequency of the most prevalent value to the frequency of the second most prevalent value is large (say ≥ 20%).
+
+If both of these criteria are true then it is often advantageous to remove the variable from the model. For the Ames data, we do not have any zero variance predictors but there are 20 features that meet the near-zero threshold.
+
+```{r}
+caret::nearZeroVar(ames_train, saveMetrics = TRUE) %>% 
+  tibble::rownames_to_column() %>% 
+  filter(nzv)
+```
+#**3.5 Numeric feature engineering**
+3.5.1 Skewness
+
+Similar to the process discussed to normalize target variables, parametric models that have distributional assumptions (e.g., GLMs, and regularized models) can benefit from minimizing the skewness of numeric features. When normalizing many variables, it’s best to use the Box-Cox (when feature values are strictly positive) or Yeo-Johnson (when feature values are not strictly positive) procedures as these methods will identify if a transformation is required and what the optimal transformation will be.
+
+
+
+```{r}
+# Normalize all numeric columns
+recipe(Sale_Price ~ ., data = ames_train) %>%
+  step_YeoJohnson(all_numeric())   
+```
+3.5.2 Standardization
+
+For these models and modeling components, it is often a good idea to standardize the features. Standardizing features includes centering and scaling so that numeric variables have zero mean and unit variance, which provides a common comparable unit of measure across all the variables.
+
+Some packages (e.g., glmnet, and caret) have built-in options to standardize and some do not (e.g., keras for neural networks). However, you should standardize your variables within the recipe blueprint so that both training and test data standardization are based on the same mean and variance. This helps to minimize data leakage.
+```{r}
+ames_recipe %>%
+  step_center(all_numeric(), -all_outcomes()) %>%
+  step_scale(all_numeric(), -all_outcomes())
+```
+#**3.6 Categorical feature engineering**
+#3.6.1 Lumping
+
+Sometimes features will contain levels that have very few observations. For example, there are 28 unique neighborhoods represented in the Ames housing data but several of them only have a few observations.
+
+```{r}
+count(ames_train, Neighborhood) %>% arrange(n)
+```
+Even numeric features can have similar distributions. For example, Screen_Porch has 92% values recorded as zero (zero square footage meaning no screen porch) and the remaining 8% have unique dispersed values.
+
+```{r}
+count(ames_train, Screen_Porch) %>% arrange(n)
+```
+Sometimes we can benefit from collapsing, or “lumping” these into a lesser number of categories. In the above examples, we may want to collapse all levels that are observed in less than 10% of the training sample into an “other” category. We can use step_other() to do so. However, lumping should be used sparingly as there is often a loss in model performance (Kuhn and Johnson 2013).
+
+Tree-based models often perform exceptionally well with high cardinality features and are not as impacted by levels with small representation.
+
+```{r}
+# Lump levels for two features
+lumping <- recipe(Sale_Price ~ ., data = ames_train) %>%
+  step_other(Neighborhood, threshold = 0.01, 
+             other = "other") %>%
+  step_other(Screen_Porch, threshold = 0.1, 
+             other = ">0")
+lumping
+```
+
+
+```{r}
+# Apply this blue print --> you will learn about this at 
+# the end of the chapter
+apply_2_training <- prep(lumping, training = ames_train) %>%
+  bake(ames_train)
+```
+
+
+```{r}
+# New distribution of Neighborhood
+count(apply_2_training, Neighborhood) %>% arrange(n)
+# New distribution of Screen_Porch
+count(apply_2_training, Screen_Porch) %>% arrange(n)
+```
+#3.6.2 One-hot & dummy encoding
+
+Many models require that all predictor variables be numeric. Consequently, we need to intelligently transform any categorical variables into numeric representations so that these algorithms can compute. Some packages automate this process (e.g., h2o and caret) while others do not (e.g., glmnet and keras). There are many ways to recode categorical variables as numeric (e.g., one-hot, ordinal, binary, sum, and Helmert).
+
+```{r}
+# Lump levels for two features
+recipe(Sale_Price ~ ., data = ames_train) %>%
+  step_dummy(all_nominal(), one_hot = TRUE)
+
+```
+#3.6.3 Label encoding
+
+Label encoding is a pure numeric conversion of the levels of a categorical variable. If a categorical variable is a factor and it has pre-specified levels then the numeric conversion will be in level order. If no levels are specified, the encoding will be based on alphabetical order. For example, the MS_SubClass variable has 16 levels, which we can recode numerically with step_integer().
+
+```{r}
+# Original categories
+count(ames_train, MS_SubClass)
+```
+```{r}
+# Label encoded
+recipe(Sale_Price ~ ., data = ames_train) %>%
+  step_integer(MS_SubClass) %>%
+  prep(ames_train) %>%
+  bake(ames_train) %>%
+  count(MS_SubClass)
+```
+We should be careful with label encoding unordered categorical features because most models will treat them as ordered numeric features. If a categorical feature is naturally ordered then label encoding is a natural choice (most commonly referred to as ordinal encoding). For example, the various quality features in the Ames housing data are ordinal in nature (ranging from Very_Poor to Very_Excellent).
+
+```{r}
+ames_train %>% select(contains("Qual"))
+# Original categories
+count(ames_train, Overall_Qual)
+# Label encoded
+recipe(Sale_Price ~ ., data = ames_train) %>%
+  step_integer(Overall_Qual) %>%
+  prep(ames_train) %>%
+  bake(ames_train) %>%
+  count(Overall_Qual)
+```
+#**3.7 Dimension reduction**
+
+Dimension reduction is an alternative approach to filter out non-informative features without manually removing them. We discuss dimension reduction topics in depth later in the book (Chapters 17-19) so please refer to those chapters for details.
+
+However, we wanted to highlight that it is very common to include these types of dimension reduction approaches during the feature engineering process. For example, we may wish to reduce the dimension of our features with principal components analysis (Chapter 17) and retain the number of components required to explain, say, 95% of the variance and use these components as features in downstream modeling.
+
+```{r}
+recipe(Sale_Price ~ ., data = ames_train) %>%
+  step_center(all_numeric()) %>%
+  step_scale(all_numeric()) %>%
+  step_pca(all_numeric(), threshold = .95)
+```
+#**3.8 Proper implementation**
+
+We stated at the beginning of this chapter that we should think of feature engineering as creating a blueprint rather than manually performing each task individually. This helps us in two ways: (1) thinking sequentially and (2) to apply appropriately within the resampling process.
+
+3.8.1 Sequential steps
+Thinking of feature engineering as a blueprint forces us to think of the ordering of our preprocessing steps. Although each particular problem requires you to think of the effects of sequential preprocessing, there are some general suggestions that you should consider:
+
++ If using a log or Box-Cox transformation, don’t center the data first or do any operations that might make the data non-positive. Alternatively, use the Yeo-Johnson transformation so you don’t have to worry about this.
++ One-hot or dummy encoding typically results in sparse data which many algorithms can operate efficiently on. If you standardize sparse data you will create dense data and you loose the computational efficiency. Consequently, it’s often preferred to standardize your numeric features and then one-hot/dummy encode.
++ If you are lumping infrequently occurring categories together, do so before one-hot/dummy encoding.
++ Although you can perform dimension reduction procedures on categorical features, it is common to primarily do so on numeric features when doing so for feature engineering purposes.
+
+While your project’s needs may vary, here is a suggested order of potential steps that should work for most problems:
+
+- Filter out zero or near-zero variance features.
+- Perform imputation if required.
+- Normalize to resolve numeric feature skewness.
+- Standardize (center and scale) numeric features.
+- Perform dimension reduction (e.g., PCA) on numeric features.
+- One-hot or dummy encode categorical features.
+
+--------------------------------------------------------------------
+#**3.8.3 Putting the process together**
+To illustrate how this process works together via R code, let’s do a simple re-assessment on the ames data set that we did at the end of the last chapter (Section 2.7) and see if some simple feature engineering improves our prediction error. But first, we’ll formally introduce the recipes package, which we’ve been implicitly illustrating throughout.
+
+The recipes package allows us to develop our feature engineering blueprint in a sequential nature. The idea behind recipes is similar to caret::preProcess() where we want to create the preprocessing blueprint but apply it later and within each resample.17
+
+There are three main steps in creating and applying feature engineering with recipes:
+VERY IMPORTANT
+- recipe: where you define your feature engineering steps to create your blueprint.
+- prepare: estimate feature engineering parameters based on training data.
+- bake: apply the blueprint to new data.
+
+The first step is where you define your blueprint (aka recipe). With this process, you supply the formula of interest (the target variable, features, and the data these are based on) with recipe() and then you sequentially add feature engineering steps with step_xxx(). For example, the following defines Sale_Price as the target variable and then uses all the remaining columns as features based on ames_train. We then:
+
+- Remove near-zero variance features that are categorical (aka nominal).
+- Ordinal encode our quality-based features (which are inherently ordinal).
+- Center and scale (i.e., standardize) all numeric features.
+- Perform dimension reduction by applying PCA to all numeric features.
+
+```{r}
+blueprint <- recipe(Sale_Price ~ ., data = ames_train) %>%
+  step_nzv(all_nominal())  %>% #Remove near-zero variance features 
+  step_integer(matches("Qual|Cond|QC|Qu")) %>% # Ordinal encoder
+  step_center(all_numeric(), -all_outcomes()) %>%
+  step_scale(all_numeric(), -all_outcomes()) %>%
+  step_pca(all_numeric(), -all_outcomes()) #Perform dimension reduction
+  
+blueprint
+```
+Next, we need to train this blueprint on some training data. Remember, there are many feature engineering steps that we do not want to train on the test data (e.g., standardize and PCA) as this would create data leakage. So in this step we estimate these parameters based on the training data of interest.
+
+```{r}
+prepare <- prep(blueprint, training = ames_train)
+prepare
+```
+Lastly, we can apply our blueprint to new data (e.g., the training data or future test data) with bake()
+
+```{r}
+baked_train <- bake(prepare, new_data = ames_train)
+baked_test <- bake(prepare, new_data = ames_test)
+baked_train
+```
+
+
+```{r}
+dim(ames_train)
+dim(baked_train) # PCA apply to reduce dim
+```
+Consequently, the goal is to develop our blueprint, then within each resample iteration we want to apply prep() and bake() to our resample training and validation data. Luckily, the caret package simplifies this process. We only need to specify the blueprint and caret will automatically prepare and bake within each resample. We illustrate with the ames housing example.
+# **BEST METHOD IN CHAP 3 - COMBINE ALL**
+First, we create our feature engineering blueprint to perform the following tasks:
+
+- Filter out near-zero variance features for categorical features.
+- Ordinally encode all quality features, which are on a 1–10 Likert scale.
+- Standardize (center and scale) all numeric features.
+- One-hot encode our remaining categorical features.
+
+```{r}
+# Note: ames_train already remove all missing value so no need to handle missing value like raw data (drop, impute median/mode, predict with KNN, Tree...algorithm)
+blueprint <- recipe(Sale_Price ~ ., data = ames_train) %>%
+  step_nzv(all_nominal()) %>%
+  step_integer(matches("Qual|Cond|QC|Qu")) %>%
+  step_center(all_numeric(), -all_outcomes()) %>%
+  step_scale(all_numeric(), -all_outcomes()) %>%
+  step_dummy(all_nominal(), -all_outcomes(), one_hot = TRUE)
+```
+
+Next, we apply the same resampling method and hyperparameter search grid as we did in Section 2.7. The only difference is when we train our resample models with train(), we supply our blueprint as the first argument and then caret takes care of the rest.
+# DO PARALLEL
+```{r}
+library(doParallel)
+cl <-makePSOCKcluster(5)
+registerDoParallel(cl)
+```
+
+```{r}
+# Specify resampling plan 
+cv <- trainControl(
+  method = "repeatedcv", 
+  number = 5, #10
+  repeats = 1 #5
+)
+
+# Construct grid of hyperparameter values
+hyper_grid <- expand.grid(k = seq(2, 25, by = 1))
+# Each parameter turning will have 5 cv for evaluation (repates 1 in each cv) 
+# Tune a knn model using grid search
+knn_fit2 <- train(
+  blueprint, 
+  data = ames_train, 
+  method = "knn", 
+  trControl = cv, 
+  tuneGrid = hyper_grid,
+  metric = "RMSE"
+)
+```
+
+
+```{r}
+# print model results
+knn_fit2
+```
+
+
+```{r}
+# plot cross validation results
+ggplot(knn_fit2)
+```
+By applying a handful of the preprocessing techniques discussed throughout this chapter, we were able to reduce our prediction error by over 10,000$ (compare to 43,439$ with no feature engineer). The chapters that follow will look to see if we can continue reducing our error by applying different algorithms and feature engineering blueprints.
+
+# Chapter 4 Linear Regression
+```{r}
+# Helper packages
+library(dplyr)    # for data manipulation
+library(ggplot2)  # for awesome graphics
+
+# Modeling packages
+library(caret)    # for cross-validation, etc.
+library(recipes)  # for feature engineering tasks
+# Modeling process packages
+library(rsample)   # for resampling procedures
+
+# Model interpretability packages
+library(vip)      # variable importance
+```
+
+We’ll also continue working with the ames_train data set created in Section 2.7.
+
+```{r}
+# Ames housing data
+ames <- AmesHousing::make_ames()
+#ames.h2o <- as.h2o(ames)
+dim(ames) #2930 rows, 81 columns
+set.seed(123)
+split <- initial_split(ames, prop = 0.7, 
+                       strata = "Sale_Price")
+ames_train  <- training(split)
+ames_test   <- testing(split)
+```
+
+
+```{r}
+model1 <- lm(Sale_Price ~ Gr_Liv_Area, data = ames_train)
+summary(model1) 
+```
+The estimated coefficients from our model are β0= 8732.94 and  β1 =114.88. To interpret, we estimate that the mean selling price increases by 114.88 for each additional one square foot of above ground living space. This simple description of the relationship between the sale price and square footage using a single number (i.e., the slope) is what makes linear regression such an intuitive and popular modeling tool.
+
+```{r}
+sigma(model1)    # RMSE
+sigma(model1)^2  # MSE
+```
+In R, we can construct such (one-at-a-time) confidence intervals for each coefficient using confint(). For example, a 95% confidence intervals for the coefficients in our SLR example can be computed using
+
+```{r}
+confint(model1, level = 0.95)
+```
+To interpret, we estimate with 95% confidence that the mean selling price increases between 109.91 and 119.84 for each additional one square foot of above ground living space. We can also conclude that the slope  β1 is significantly different from zero (or any other pre-specified value not included in the interval) at the  α = 0.05 level. This is also supported by the output from summary().
+
+Most statistical software, including R, will include estimated standard errors, t-statistics, etc. as part of its regression output. However, it is important to remember that such quantities depend on three major assumptions of the linear regression model:
+
+- (1) Independent observations
+- (2) The random errors have mean zero, and constant variance
+- (3) The random errors are normally distributed
+
+If any or all of these assumptions are violated, then remedial measures need to be taken. For instance, weighted least squares (and other procedures) can be used when the constant variance assumption is violated. Transformations (of both the response and features) can also help to correct departures from these assumptions. The residuals are extremely useful in helping to identify how parametric models depart from such assumptions.
+# **Check Assumptions Automatically**
+```{r}
+# Check assumption 2:
+mean(model1$residuals) 
+# Check assumption 3: (see below)
+#par(mfrow=c(2,2))
+#plot(model1)
+```
+This pattern is indicated by the red line, which should be approximately flat if the disturbances are homoscedastic.
+
+```{r}
+#install.packages('gvlma')
+library(gvlma)
+par(mfrow=c(2,2))  # draw 4 plots in same window
+model1 <- lm(Sale_Price ~ Gr_Liv_Area, data = ames_train)
+gvlma::gvlma(model1)
+par(mfrow=c(2,2))
+plot(model1)
+```
+
+
+```{r}
+#par(mfrow=c(2,2))
+#plot(model1)
+```
+
+#**4.3 Multiple linear regression**
+```{r}
+(model2 <- lm(Sale_Price ~ Gr_Liv_Area + Year_Built, data = ames_train))
+```
+Alternatively, we can use update() to update the model formula used in model1. The new formula can use a . as shorthand for keep everything on either the left or right hand side of the formula, and a + or - can be used to add or remove terms from the original model, respectively. In the case of adding Year_Built to model1, we could’ve used:
+
+```{r}
+(model2 <- update(model1, . ~ . + Year_Built))
+```
+```{r}
+# Check assumption:
+library(gvlma)
+par(mfrow=c(2,2))  # draw 4 plots in same window
+gvlma::gvlma(model2)
+par(mfrow=c(2,2))
+plot(model2)
+```
+
+The LS estimates of the regression coefficients are  
+β1=99.176 and  β2= 1093.485 (the estimated intercept is -2123054.207. In other words, every one square foot increase to above ground square footage is associated with an additional $99.18 in mean selling price when holding the year the house was built constant. Likewise, for every year newer a home is there is approximately an increase of $1,093.48 in selling price when holding the above ground square footage constant.
+
+Note that in R, we use the : operator to include an interaction (technically, we could use * as well, but x1 * x2 is shorthand for x1 + x2 + x1:x2 so is slightly redundant):
+
+```{r}
+lm(Sale_Price ~ Gr_Liv_Area + Year_Built + Gr_Liv_Area:Year_Built, data = ames_train)
+```
+
+Interaction effects are quite prevalent in predictive modeling. Since linear models are an example of parametric modeling, it is up to the analyst to decide if and when to include interaction effects. In later chapters, we’ll discuss algorithms that can automatically detect and incorporate interaction effects (albeit in different ways). It is also important to understand a concept called the hierarchy principle—which demands that all lower-order terms corresponding to an interaction be retained in the model—when considering interaction effects in linear regression models.
+
+```{r}
+# include all possible main effects
+model3 <- lm(Sale_Price ~ ., data = ames_train) 
+
+# print estimated coefficients in a tidy data frame
+broom::tidy(model3)  
+```
+#**4.4 Assessing model accuracy**
+We can use the caret::train() function to train a linear model (i.e., method = "lm") using cross-validation (or a variety of other validation methods). In practice, a number of factors should be considered in determining a “best” model (e.g., time constraints, model production cost, predictive accuracy, etc.). The benefit of caret is that it provides built-in cross-validation capabilities, whereas the lm() function does not19. The following code chunk uses caret::train() to refit model1 using 10-fold cross-validation:
+
+```{r}
+# Train model using 10-fold cross-validation
+set.seed(123)  # for reproducibility
+(cv_model1 <- caret::train(
+  form = Sale_Price ~ Gr_Liv_Area, 
+  data = ames_train, 
+  method = "lm",
+  trControl = trainControl(method = "cv", number = 10)
+))
+
+```
+The resulting cross-validated RMSE is $56,410.89 (this is the average RMSE across the 10 CV folds). How should we interpret this? When applied to unseen data, the predictions this model makes are, on average, about $56,410.89 off from the actual sale price.
+
+We can perform cross-validation on the other two models in a similar fashion, which we do in the code chunk below.
+
+```{r}
+# model 2 CV
+set.seed(123)
+cv_model2 <- train(
+  Sale_Price ~ Gr_Liv_Area + Year_Built, 
+  data = ames_train, 
+  method = "lm",
+  trControl = trainControl(method = "cv", number = 10)
+)
+
+# model 3 CV
+set.seed(123)
+cv_model3 <- train(
+  Sale_Price ~ ., 
+  data = ames_train, 
+  method = "lm",
+  trControl = trainControl(method = "cv", number = 10)
+)
+
+# Extract out of sample performance measures
+summary(resamples(list(
+  model1 = cv_model1, 
+  model2 = cv_model2, 
+  model3 = cv_model3
+)))
+```
+Extracting the results for each model, we see that by adding more information via more predictors, we are able to improve the out-of-sample cross validation performance metrics. Specifically, our cross-validated RMSE reduces from $46,292.38 (the model with two predictors) down to $26,098.00 (for our full model). In this case, the model with all possible main effects performs the “best” (compared with the other two).
+
+#**4.5 Model concerns**
+As previously stated, linear regression has been a popular modeling tool due to the ease of interpreting the coefficients. However, linear regression makes several strong assumptions that are often violated as we include more predictors in our model. Violation of these assumptions can lead to flawed interpretation of the coefficients and prediction results.
+
+1. Linear relationship: Linear regression assumes a linear relationship between the predictor and the response variable. However, as discussed in Chapter 3, non-linear relationships can be made linear (or near-linear) by applying transformations to the response and/or predictors. For example, Figure 4.3 illustrates the relationship between sale price and the year a home was built. The left plot illustrates the non-linear relationship that exists. However, we can achieve a near-linear relationship by log transforming sale price, although some non-linearity still exists for older homes.
+
+```{r}
+p1 <- ggplot(ames_train, aes(Year_Built, Sale_Price)) + 
+  geom_point(size = 1, alpha = .4) +
+  geom_smooth(se = FALSE) +
+  scale_y_continuous("Sale price", labels = scales::dollar) +
+  xlab("Year built") +
+  ggtitle(paste("Non-transformed variables with a\n",
+                "non-linear relationship."))
+
+p2 <- ggplot(ames_train, aes(Year_Built, Sale_Price)) + 
+  geom_point(size = 1, alpha = .4) + 
+  geom_smooth(method = "lm", se = FALSE) +
+  scale_y_log10("Sale price", labels = scales::dollar, 
+                breaks = seq(0, 400000, by = 100000)) +
+  xlab("Year built") +
+  ggtitle(paste("Transforming variables can provide a\n",
+                "near-linear relationship."))
+
+gridExtra::grid.arrange(p1, p2, nrow = 1)
+```
+2. Constant variance among residuals: Linear regression assumes the variance among error terms (e1,e2,e3.. ) are constant (this assumption is referred to as homoscedasticity). If the error variance is not constant, the p-values and confidence intervals for the coefficients will be invalid. Similar to the linear relationship assumption, non-constant variance can often be resolved with variable transformations or by including additional predictors. For example, Figure 4.4 shows the residuals vs. predicted values for model1 and model3. model1 displays a classic violation of constant variance as indicated by the cone-shaped pattern. However, model3 appears to have near-constant variance.
+
+The broom::augment function is an easy way to add model results to each observation (i.e. predicted values, residuals).
+
+#**summarizes key information about models with broom **
+
+```{r}
+#devtools::install_github("tidymodels/broom")
+#library(tidymodels) # include broom
+library(broom)
+tidy(cv_model1$finalModel) #summarizes information about model components
+glance(cv_model1$finalModel) #reports information about the entire model
+# It cannot show .resid, only .std.resid
+augment(cv_model1$finalModel,data = ames_train) #adds informations about observations to a dataset
+augment(cv_model1$finalModel, newdata = ames_train) %>% 
+  names()
+# It can show .resid
+model <- lm(Sale_Price ~ Gr_Liv_Area, data= ames_train)
+augment(model, newdata = ames_train) %>% 
+  names()
+```
+
+NOTE: Cannot show .resid from cvmodel, only show .resid in lm not cv
+```{r}
+
+#df1 <- broom::augment(cv_model1$finalModel, data = ames_train) #cannot show .resid
+
+model1 <- lm(Sale_Price ~ Gr_Liv_Area, data= ames_train)
+df1 <- broom::augment(model1, data = ames_train)
+
+p1 <- ggplot(df1, aes(.fitted, .resid)) + 
+  geom_point(size = 1, alpha = .4) +
+  xlab("Predicted values") +
+  ylab("Residuals") +
+  ggtitle("Model 1", subtitle = "Sale_Price ~ Gr_Liv_Area")
+
+#df2 <- broom::augment(cv_model3$finalModel, data = ames_train) #cannot show .resid
+
+model3 <- lm(Sale_Price ~ ., data= ames_train)
+df2 <- broom::augment(model3, data = ames_train)
+
+p2 <- ggplot(df2, aes(.fitted, .resid)) + 
+  geom_point(size = 1, alpha = .4)  +
+  xlab("Predicted values") +
+  ylab("Residuals") +
+  ggtitle("Model 3", subtitle = "Sale_Price ~ .")
+
+summary(cv_model1)
+summary(cv_model3)
+head(df1)
+head(df2)
+gridExtra::grid.arrange(p1, p2, nrow = 1)
+```
+Figure 4.4: Linear regression assumes constant variance among the residuals. model1 (left) shows definitive signs of heteroskedasticity whereas model3 (right) appears to have constant variance.
+
+3. No autocorrelation: Linear regression assumes the errors are independent and uncorrelated. If in fact, there is correlation among the errors, then the estimated standard errors of the coefficients will be biased leading to prediction intervals being narrower than they should be. For example, the left plot in Figure 4.5 displays the residuals ( y-axis) vs. the observation ID (x-axis) for model1. A clear pattern exists suggesting that information about  ϵ1 provides information about  ϵ2.
+
+This pattern is a result of the data being ordered by neighborhood, which we have not accounted for in this model. Consequently, the residuals for homes in the same neighborhood are correlated (homes within a neighborhood are typically the same size and can often contain similar features). Since the Neighborhood predictor is included in model3 (right plot), the correlation in the errors is reduced.
+
+```{r}
+df1 <- mutate(df1, id = row_number())
+df2 <- mutate(df2, id = row_number())
+
+p1 <- ggplot(df1, aes(id, .resid)) + 
+  geom_point(size = 1, alpha = .4) +
+  xlab("Row ID") +
+  ylab("Residuals") +
+  ggtitle("Model 1", subtitle = "Correlated residuals.")
+
+p2 <- ggplot(df2, aes(id, .resid)) + 
+  geom_point(size = 1, alpha = .4) +
+  xlab("Row ID") +
+  ylab("Residuals") +
+  ggtitle("Model 3", subtitle = "Uncorrelated residuals.")
+
+gridExtra::grid.arrange(p1, p2, nrow = 1)
+```
+
+
+```{r}
+last_col_num<-ncol(df1) # last column number
+dim(df1) #2053 x 88
+df1[,(last_col_num-2):last_col_num]
+```
+5. No or little multicollinearity: Collinearity refers to the situation in which two or more predictor variables are closely related to one another. The presence of collinearity can pose problems in the OLS, since it can be difficult to separate out the individual effects of collinear variables on the response. In fact, collinearity can cause predictor variables to appear as statistically insignificant when in fact they are significant. This obviously leads to an inaccurate interpretation of coefficients and makes it difficult to identify influential predictors.
+
+In ames, for example, Garage_Area and Garage_Cars are two variables that have a correlation of 0.89 and both variables are strongly related to our response variable (Sale_Price). Looking at our full model where both of these variables are included, we see that Garage_Cars is found to be statistically significant but Garage_Area is not:
+
+```{r}
+# fit with two strongly correlated variables
+summary(cv_model3) %>%
+  broom::tidy() %>%
+  filter(term %in% c("Garage_Area", "Garage_Cars"))
+```
+
+```{r}
+#convert to data.frame
+as.data.frame(coef(summary(cv_model3))) %>% 
+  filter(term %in% c("Garage_Area", "Garage_Cars"))
+```
+
+
+```{r}
+#cannot filter unnamed column in R
+a<-as.data.frame(coef(summary(cv_model3)))
+a
+
+```
+```{r}
+# model without Garage_Area
+set.seed(123)
+mod_wo_Garage_Cars <- train(
+  Sale_Price ~ ., 
+  data = select(ames_train, -Garage_Cars), 
+  method = "lm",
+  trControl = trainControl(method = "cv", number = 10)
+)
+
+summary(mod_wo_Garage_Cars) %>%
+  broom::tidy() %>%
+  filter(term == "Garage_Area")
+```
+
+#**4.6 Principal component regression**
+
+```{r}
+# perform 10-fold cross validation on a PCR model tuning the 
+# number of principal components to use as predictors from 1-100
+set.seed(123)
+cv_model_pcr <- train(
+  Sale_Price ~ ., 
+  data = ames_train, 
+  method = "pcr",
+  trControl = trainControl(method = "cv", number = 5),
+  preProcess = c("zv", "center", "scale"),
+  tuneLength = 100
+  )
+
+# model with lowest RMSE
+cv_model_pcr$bestTune
+##    ncomp
+## 97    97
+
+# results for model with lowest RMSE
+cv_model_pcr$results %>%
+  dplyr::filter(ncomp == pull(cv_model_pcr$bestTune))
+##   ncomp     RMSE  Rsquared      MAE   RMSESD RsquaredSD    MAESD
+## 1    97 30135.51 0.8615453 20143.42 5191.887 0.03764501 1696.534
+
+# plot cross-validated RMSE
+ggplot(cv_model_pcr)
+
+```
+
+
+#** BEST METHOD**
+#**4.7 Partial least squares**
+
+```{r}
+# perform 10-fold cross validation on a PLS model tuning the 
+# number of principal components to use as predictors from 1-30
+set.seed(123)
+cv_model_pls <- train(
+  Sale_Price ~ ., 
+  data = ames_train, 
+  method = "pls",
+  trControl = trainControl(method = "cv", number = 5),
+  preProcess = c("zv", "center", "scale"),
+  tuneLength = 30
+)
+
+# model with lowest RMSE
+cv_model_pls$bestTune
+##    ncomp
+## 20    20
+
+# results for model with lowest RMSE
+cv_model_pls$results %>%
+  dplyr::filter(ncomp == pull(cv_model_pls$bestTune))
+##   ncomp     RMSE  Rsquared      MAE   RMSESD RsquaredSD   MAESD
+## 1    20 25459.51 0.8998194 16022.68 5243.478 0.04278512 1665.61
+
+# plot cross-validated RMSE
+ggplot(cv_model_pls)
+```
+#**4.8 Feature interpretation**
+The monotonic relationship means that a given predictor variable will always have a positive or negative relationship. But how do we determine the most influential variables?
+
+Variable importance seeks to identify those variables that are most influential in our model. For linear regression models, this is most often measured by the absolute value of the t-statistic for each model parameter used; though simple, the results can be hard to interpret when the model includes interaction effects and complex transformations (in Chapter 16 we’ll discuss model-agnostic approaches that don’t have this issue). For a PLS model, variable importance can be computed using the weighted sums of the absolute regression coefficients. The weights are a function of the reduction of the RSS across the number of PLS components and are computed separately for each outcome. Therefore, the contribution of the coefficients are weighted proportionally to the reduction in the RSS.
+```{r}
+vip(cv_model_pls, num_features = 20, method = "model")
+```
+
+
+```{r}
+#install.packages('pdp')
+library(pdp)
+pdp::partial(cv_model_pls, "Gr_Liv_Area", grid.resolution = 20, plot = TRUE)
+pdp::partial(cv_model_pls, "Total_Bsmt_SF", grid.resolution = 20, plot = TRUE)
+
+```
+#**4.9 Final thoughts**
+
+Linear regression is usually the first supervised learning algorithm you will learn. The approach provides a solid fundamental understanding of the supervised learning task; however, as we’ve discussed there are several concerns that result from the assumptions required. Although extensions of linear regression that integrate dimension reduction steps into the algorithm can help address some of the problems with linear regression, more advanced supervised algorithms typically provide greater flexibility and improved accuracy. Nonetheless, understanding linear regression provides a foundation that will serve you well in learning these more advanced methods.
+
+# **Chapter 6 Regularized Regression**
+
+Linear models (LMs) provide a simple, yet effective, approach to predictive modeling. Moreover, when certain assumptions required by LMs are met (e.g., constant variance), the estimated coefficients are unbiased and, of all linear unbiased estimates, have the lowest variance. However, in today’s world, data sets being analyzed typically contain a large number of features. As the number of features grow, certain assumptions typically break down and these models tend to overfit the training data, causing our out of sample error to increase. Regularization methods provide a means to constrain or regularize the estimated coefficients, which can reduce the variance and decrease out of sample error.
+```{r}
+#install.packages("glmnet")
+# Helper packages
+library(recipes)  # for feature engineering
+library(rsample) # for resamples  (initial_split)
+
+# Modeling packages
+library(glmnet)   # for implementing regularized regression
+library(caret)    # for automating the tuning process
+
+# Model interpretability packages
+library(vip)      # for variable importance
+```
+
+```{r}
+# Ames housing data
+ames <- AmesHousing::make_ames()
+#ames.h2o <- as.h2o(ames)
+dim(ames) #2930 rows, 81 columns
+set.seed(123)
+split <- initial_split(ames, prop = 0.7, 
+                       strata = "Sale_Price")
+ames_train  <- training(split)
+ames_test   <- testing(split)
+```
+the OLS objective function performs quite well when our data adhere to a few key assumptions:
+
+- Linear relationship;
+- There are more observations (n) than features (p) (n>p);
+- No or little multicollinearity.
+
+The objective function of a regularized regression model is similar to OLS, albeit with a penalty term P:
+
+minimize (SSE+P)
+
+This penalty parameter constrains the size of the coefficients such that the only way the coefficients can increase is if we experience a comparable decrease in the sum of squared errors (SSE).
+
+There are three common penalty parameters we can implement:
+
+1. Ridge;
+2. Lasso (or LASSO);
+3. Elastic net (or ENET), which is a combination of ridge and lasso.
+
+#**6.3 Implementation**
+
+First, we illustrate an implementation of regularized regression using the direct engine glmnet. This will provide you with a strong sense of what is happening with a regularized model. Realize there are other implementations available (e.g., h2o, elasticnet, penalized). Then, in Section 6.4, we’ll demonstrate how to apply a regularized model so we can properly compare it with our previous predictive models.
+
+The glmnet package is extremely efficient and fast, even on very large data sets (mostly due to its use of Fortran to solve the lasso problem via coordinate descent); note, however, that it only accepts the non-formula XY interface (2.3.1) so prior to modeling we need to separate our feature and target sets.
+
+```{r}
+# Create training  feature matrices
+#
+# model.matrix creates a design (or model) matrix, e.g., by expanding factors to a set of dummy variables #(depending on the contrasts) and expanding interactions similarly.
+# we use model.matrix(...)[, -1] to discard the intercept
+X <- model.matrix(Sale_Price ~ ., ames_train)[, -1]
+
+# transform y with log transformation
+Y <- log(ames_train$Sale_Price)
+```
+```{r}
+dim(X)
+dim(ames_train)
+length(Y)
+print("ames_train names:  ")
+names(ames_train)
+print("X names: ")
+head(names(as.data.frame(X)))
+```
+
+To apply a regularized model we can use the glmnet::glmnet() function. The alpha parameter tells glmnet to perform a ridge (alpha = 0), lasso (alpha = 1), or elastic net (0 < alpha < 1) model. By default, glmnet will do two things that you should be aware of:
+
+1. Since regularized methods apply a penalty to the coefficients, we need to ensure our coefficients are on a common scale. If not, then predictors with naturally larger values (e.g., total square footage) will be penalized more than predictors with naturally smaller values (e.g., total number of rooms). By default, glmnet automatically standardizes your features. If you standardize your predictors prior to glmnet you can turn this argument off with standardize = FALSE.
+
+2. glmnet will fit ridge models across a wide range of λ values, which is illustrated in Figure 6.5.
+
+```{r}
+# Apply ridge regression to ames data
+ridge <- glmnet(
+  x = X,
+  y = Y,
+  alpha = 0
+)
+
+plot(ridge, xvar = "lambda")
+```
+
+Figure 6.5: Coefficients for our ridge regression model as  λ grows from  0 → ∞.
+
+```{r}
+# lambdas applied to penalty parameter
+ridge$lambda %>% head()
+## [1] 285.8055 260.4153 237.2807 216.2014 196.9946 179.4942
+
+# small lambda results in large coefficients
+coef(ridge)[c("Latitude", "Overall_QualVery_Excellent"), 100]
+##                   Latitude Overall_QualVery_Excellent 
+##                  0.4048216                  0.1423770
+
+# large lambda results in small coefficients
+coef(ridge)[c("Latitude", "Overall_QualVery_Excellent"), 1]  
+##                                      Latitude 
+## 0.0000000000000000000000000000000000063823847 
+##                    Overall_QualVery_Excellent 
+## 0.0000000000000000000000000000000000009838114
+
+```
+#**6.4 Tuning**
+
+```{r}
+# Apply CV ridge regression to Ames data
+ridge <- cv.glmnet(
+  x = X,
+  y = Y,
+  alpha = 0
+)
+
+# Apply CV lasso regression to Ames data
+lasso <- cv.glmnet(
+  x = X,
+  y = Y,
+  alpha = 1
+)
+
+# plot results
+par(mfrow = c(1, 2))
+plot(ridge, main = "Ridge penalty\n\n")
+plot(lasso, main = "Lasso penalty\n\n")
+```
+
+
+```{r}
+# Ridge model
+min(ridge$cvm)       # minimum MSE
+## [1] 0.01748122
+ridge$lambda.min     # lambda for this min MSE
+## [1] 0.1051301
+
+ridge$cvm[ridge$lambda == ridge$lambda.1se]  # 1-SE rule
+## [1] 0.01975572
+ridge$lambda.1se  # lambda for this MSE
+## [1] 0.4657917
+
+# Lasso model
+min(lasso$cvm)       # minimum MSE
+## [1] 0.01754244
+lasso$lambda.min     # lambda for this min MSE
+## [1] 0.00248579
+lasso$nzero[lasso$lambda == lasso$lambda.min] # No. of coef | Min MSE
+## s51 
+## 139
+
+lasso$cvm[lasso$lambda == lasso$lambda.1se]  # 1-SE rule
+## [1] 0.01979976
+lasso$lambda.1se  # lambda for this MSE
+## [1] 0.01003518
+lasso$nzero[lasso$lambda == lasso$lambda.1se] # No. of coef | 1-SE MSE
+## s36 
+##  64
+```
+Above, we saw that both ridge and lasso penalties provide similar MSEs; however, these plots illustrate that ridge is still using all 294 features whereas the lasso model can get a similar MSE while reducing the feature set from 294 down to 139. However, there will be some variability with this MSE and we can reasonably assume that we can achieve a similar MSE with a slightly more constrained model that uses only 64 features. Although this lasso model does not offer significant improvement over the ridge model, we get approximately the same accuracy by using only 64 features! If describing and interpreting the predictors is an important component of your analysis, this may significantly aid your endeavor.
+
+```{r}
+# Ridge model
+ridge_min <- glmnet(
+  x = X,
+  y = Y,
+  alpha = 0
+)
+
+# Lasso model
+lasso_min <- glmnet(
+  x = X,
+  y = Y,
+  alpha = 1
+)
+
+par(mfrow = c(1, 2))
+# plot ridge model
+plot(ridge_min, xvar = "lambda", main = "Ridge penalty\n\n")
+abline(v = log(ridge$lambda.min), col = "red", lty = "dashed")
+abline(v = log(ridge$lambda.1se), col = "blue", lty = "dashed")
+
+# plot lasso model
+plot(lasso_min, xvar = "lambda", main = "Lasso penalty\n\n")
+abline(v = log(lasso$lambda.min), col = "red", lty = "dashed")
+abline(v = log(lasso$lambda.1se), col = "blue", lty = "dashed")
+```
+Often, the optimal model contains an alpha somewhere between 0–1, thus we want to tune both the  
+λ and the alpha parameters. As in Chapters 4 and 5, we can use the caret package to automate the tuning process. This ensures that any feature engineering is appropriately applied within each resample. The following performs a grid search over 10 values of the alpha parameter between 0–1 and ten values of the lambda parameter from the lowest to highest lambda values identified by glmnet.
+
+The following snippet of code shows that the model that minimized RMSE used an alpha of 0.1 and  
+λ of 0.02. The minimum RMSE of 0.1277585  slightly improves upon the full ridge and lasso models produced earlier
+#**BEST METHOD IN THIS CHAPTER**
+```{r}
+library(doParallel)
+cl <-makePSOCKcluster(5)
+registerDoParallel(cl)
+```
+
+
+```{r}
+# for reproducibility
+set.seed(123)
+
+# grid search across 
+cv_glmnet <- train(
+  x = X,
+  y = Y,
+  method = "glmnet",
+  preProc = c("zv", "center", "scale"),
+  trControl = trainControl(method = "cv", number = 5),
+  tuneLength = 10
+)
+
+# model with lowest RMSE
+cv_glmnet$bestTune
+##   alpha     lambda
+## 7   0.1 0.02007035
+
+# results for model with lowest RMSE
+cv_glmnet$results %>%
+  filter(alpha == cv_glmnet$bestTune$alpha, lambda == cv_glmnet$bestTune$lambda)
+##   alpha     lambda      RMSE  Rsquared        MAE     RMSESD RsquaredSD
+## 1   0.1 0.02007035 0.1277585 0.9001487 0.08102427 0.02235901  0.0346677
+##         MAESD
+## 1 0.005667366
+
+# plot cross-validated RMSE
+ggplot(cv_glmnet)
+```
+
+
+```{r}
+# predict sales price on training data
+pred <- predict(cv_glmnet, X)
+
+# compute RMSE of transformed predicted
+RMSE(exp(pred), exp(Y))
+## [1] 19905.05
+```
+#**6.5 Feature interpretation**
+
+```{r}
+vip(cv_glmnet, num_features = 20, geom = "point")
+```
+#**6.7 Final thoughts**
+
+Regularized regression provides many great benefits over traditional GLMs when applied to large data sets with lots of features. It provides a great option for handling the  n>pproblem, helps minimize the impact of multicollinearity, and can perform automated feature selection. It also has relatively few hyperparameters which makes them easy to tune, computationally efficient compared to other algorithms discussed in later chapters, and memory efficient.
+
+However, regularized regression does require some feature preprocessing. Notably, all inputs must be numeric; however, some packages (e.g., caret and h2o) automate this process. They cannot automatically handle missing data, which requires you to remove or impute them prior to modeling. Similar to GLMs, they are also not robust to outliers in both the feature and target. Lastly, regularized regression models still assume a monotonic linear relationship (always increasing or decreasing in a linear fashion). It is also up to the analyst whether or not to include specific interaction effects.
+
+#**Chapter 7 Multivariate Adaptive Regression Splines**
+
+The previous chapters discussed algorithms that are intrinsically linear. Many of these models can be adapted to nonlinear patterns in the data by manually adding nonlinear model terms (e.g., squared terms, interaction effects, and other transformations of the original features); however, to do so you the analyst must know the specific nature of the nonlinearities and interactions a priori. Alternatively, there are numerous algorithms that are inherently nonlinear. When using these models, the exact form of the nonlinearity does not need to be known explicitly or specified prior to model training. Rather, these algorithms will search for, and discover, nonlinearities and interactions in the data that help maximize predictive accuracy.
+
+This chapter discusses multivariate adaptive regression splines (MARS) (Friedman 1991), an algorithm that automatically creates a piecewise linear model which provides an intuitive stepping block into nonlinearity after grasping the concept of multiple linear regression. Future chapters will focus on other nonlinear algorithms.
+```{r}
+# Helper packages
+library(dplyr)     # for data wrangling
+library(ggplot2)   # for awesome plotting
+library(rsample) # for resamples  (initial_split)
+# Modeling packages
+library(earth)     # for fitting MARS models
+library(caret)     # for automating the tuning process
+
+# Model interpretability packages
+library(vip)       # for variable importance
+library(pdp)       # for variable relationships
+```
+#**7.3 Fitting a basic MARS model**
+```{r}
+# Ames housing data
+ames <- AmesHousing::make_ames()
+#ames.h2o <- as.h2o(ames)
+dim(ames) #2930 rows, 81 columns
+set.seed(123)
+split <- initial_split(ames, prop = 0.7, 
+                       strata = "Sale_Price")
+ames_train  <- training(split)
+ames_test   <- testing(split)
+```
+
+```{r}
+# Fit a basic MARS model
+mars1 <- earth(
+  Sale_Price ~ .,  
+  data = ames_train   
+)
+
+# Print model summary
+print(mars1)
+```
+It also shows us that 36 of 39 terms were used from 27 of the 307 original predictors. But what does this mean? If we were to look at all the coefficients, we would see that there are 36 terms in our model (including the intercept). These terms include hinge functions produced from the original 307 predictors (307 predictors because the model automatically dummy encodes categorical features).
+```{r}
+summary(mars1) %>% .$coefficients %>% head(10)
+```
+
+```{r}
+plot(mars1, which = 1)
+```
+Figure 7.3: Model summary capturing GCV  
+R2 (left-hand y-axis and solid black line) based on the number of terms retained (x-axis) which is based on the number of predictors used to make those terms (right-hand side y-axis). For this model, 35 non-intercept terms were retained which are based on 27 predictors. Any additional terms retained in the model, over and above these 35, result in less than 0.001 improvement in the GCV  R2.
+
+ In addition to pruning the number of knots, earth::earth() allows us to also assess potential interactions between different hinge functions. The following illustrates this by including a degree = 2 argument. You can see that now our model includes interaction terms between a maximum of two hinge functions 
+```{r}
+# Fit a basic MARS model
+mars2 <- earth(
+  Sale_Price ~ .,  
+  data = ames_train,
+  degree = 2
+)
+
+# check out the first 10 coefficient terms
+summary(mars2) %>% .$coefficients %>% head(10)
+```
+
+#**7.4 Tuning**
+#**BEST MODEL**
+There are two important tuning parameters associated with our MARS model: the maximum degree of interactions and the number of terms retained in the final model. We need to perform a grid search to identify the optimal combination of these hyperparameters that minimize prediction error (the above pruning process was based only on an approximation of CV model performance on the training data rather than an exact k-fold CV process). As in previous chapters, we’ll perform a CV grid search to identify the optimal hyperparameter mix. Below, we set up a grid that assesses 30 different combinations of interaction complexity (degree) and the number of terms to retain in the final model (nprune).
+
+Rarely is there any benefit in assessing greater than 3-rd degree interactions and we suggest starting out with 10 evenly spaced values for nprune and then you can always zoom in to a region once you find an approximate optimal solution.
+```{r}
+# create a tuning grid
+hyper_grid <- expand.grid(
+  degree = 1:3, 
+  nprune = seq(2, 100, length.out = 10) %>% floor()
+)
+
+head(hyper_grid)
+```
+
+As in the previous chapters, we can use caret to perform a grid search using 10-fold CV. The model that provides the optimal combination includes second degree interaction effects and retains 56 terms. The cross-validated RMSE for these models is displayed in Figure 7.4; the optimal model’s cross-validated RMSE was $26,817.
+```{r}
+library(doParallel)
+cl <-makePSOCKcluster(5)
+registerDoParallel(cl)
+```
+
+VERY IMPORTANT: This grid search took roughly five minutes to complete.
+```{r}
+# Cross-validated model
+set.seed(123)  # for reproducibility
+cv_mars <- train(
+  x = subset(ames_train, select = -Sale_Price),
+  y = ames_train$Sale_Price,
+  method = "earth",
+  metric = "RMSE",
+  trControl = trainControl(method = "cv", number = 5),
+  tuneGrid = hyper_grid
+)
+
+```
+
+```{r}
+# View results
+cv_mars$bestTune
+##    nprune degree
+## 16     56      2
+
+cv_mars$results %>%
+  filter(nprune == cv_mars$bestTune$nprune, degree == cv_mars$bestTune$degree)
+##   degree nprune    RMSE  Rsquared      MAE   RMSESD RsquaredSD    MAESD
+## 1      2     56 26817.1 0.8838914 16439.15 11683.73 0.09785945 1678.672
+
+ggplot(cv_mars)
+```
+The above grid search helps to focus where we can further refine our model tuning. As a next step, we could perform a grid search that focuses in on a refined grid space for nprune (e.g., comparing 45–65 terms retained). However, for brevity we’ll leave this as an exercise for the reader.
+
+So how does this compare to our previously built models for the Ames housing data? The following table compares the cross-validated RMSE for our tuned MARS model to an ordinary multiple regression model along with tuned principal component regression (PCR), partial least squares (PLS), and regularized regression (elastic net) models.
+
+Although the MARS model did not have a lower MSE than the elastic net and PLS models, you can see that the the median RMSE of all the cross validation iterations was lower. However, there is one fold (Fold08) that had an extremely large RMSE that is skewing the mean RMSE for the MARS model. This would be worth exploring as there are likely some unique observations that are skewing the results.
+
+```{r}
+cv_mars$resample
+```
+
+#**7.5 Feature interpretation**
+```{r}
+# variable importance plots
+p1 <- vip(cv_mars, num_features = 40, geom = "point", value = "gcv") + ggtitle("GCV")
+p2 <- vip(cv_mars, num_features = 40, geom = "point", value = "rss") + ggtitle("RSS")
+
+gridExtra::grid.arrange(p1, p2, ncol = 2)
+```
+Its important to realize that variable importance will only measure the impact of the prediction error as features are included; however, it does not measure the impact for particular hinge functions created for a given feature. For example, in Figure 7.5 we see that Gr_Liv_Area and Year_Built are the two most influential variables; however, variable importance does not tell us how our model is treating the non-linear patterns for each feature. Also, if we look at the interaction terms our model retained, we see interactions between different hinge functions.
+
+```{r}
+# extract coefficients, convert to tidy data frame, and
+# filter for interaction terms
+cv_mars$finalModel %>%
+  coef() %>%  
+  broom::tidy() %>%  
+  filter(stringr::str_detect(names, "\\*")) 
+```
+To better understand the relationship between these features and Sale_Price, we can create partial dependence plots (PDPs) for each feature individually and also together. The individual PDPs illustrate that our model found that one knot in each feature provides the best fit. For example, as homes exceed 2,787 square feet, each additional square foot demands a higher marginal increase in sale price than homes with less than 2,787 square feet. Similarly, for homes built in 2004 or later, there is a greater marginal effect on sales price based on the age of the home than for homes built prior to 2004. The interaction plot (far right figure) illustrates the stronger effect these two features have when combined.
+
+```{r}
+# Construct partial dependence plots
+p1 <- partial(cv_mars, pred.var = "Gr_Liv_Area", grid.resolution = 10) %>% 
+  autoplot()
+p2 <- partial(cv_mars, pred.var = "Year_Built", grid.resolution = 10) %>% 
+  autoplot()
+p3 <- partial(cv_mars, pred.var = c("Gr_Liv_Area", "Year_Built"), 
+              grid.resolution = 10) %>% 
+  plotPartial(levelplot = FALSE, zlab = "yhat", drape = TRUE, colorkey = TRUE, 
+              screen = list(z = -20, x = -60))
+
+# Display plots side by side
+gridExtra::grid.arrange(p1, p2, p3, ncol = 3)
+```
+#**7.7 Final thoughts**
+
+There are several advantages to MARS. First, MARS naturally handles mixed types of predictors (quantitative and qualitative). MARS considers all possible binary partitions of the categories for a qualitative predictor into two groups.25 Each group then generates a pair of piecewise indicator functions for the two categories. MARS also requires minimal feature engineering (e.g., feature scaling) and performs automated feature selection. For example, since MARS scans each predictor to identify a split that improves predictive accuracy, non-informative features will not be chosen. Furthermore, highly correlated predictors do not impede predictive accuracy as much as they do with OLS models.
+
+However, one disadvantage to MARS models is that they’re typically slower to train. Since the algorithm scans each value of each predictor for potential cutpoints, computational performance can suffer as both  n and p increase. Also, although correlated predictors do not necessarily impede model performance, they can make model interpretation difficult. When two features are nearly perfectly correlated, the algorithm will essentially select the first one it happens to come across when scanning the features. Then, since it randomly selected one, the correlated feature will likely not be included as it adds no additional explanatory power.
+
+#**Chapter 9 Decision Trees**
+Tree-based models are a class of nonparametric algorithms that work by partitioning the feature space into a number of smaller (non-overlapping) regions with similar response values using a set of splitting rules. Predictions are obtained by fitting a simpler model (e.g., a constant like the average response value) in each region. Such divide-and-conquer methods can produce simple rules that are easy to interpret and visualize with tree diagrams. As we’ll see, decision trees offer many benefits; however, they typically lack in predictive performance compared to more complex algorithms like neural networks and MARS. However, future chapters will discuss powerful ensemble algorithms—like random forests and gradient boosting machines—which are constructed by combining together many decision trees in a clever way. This chapter will provide you with a strong foundation in decision trees.
+
+
+```{r}
+# Helper packages
+library(dplyr)       # for data wrangling
+library(ggplot2)     # for awesome plotting
+library(rsample) # for resamples  (initial_split)
+# Modeling packages
+library(rpart)       # direct engine for decision tree application
+library(caret)       # meta engine for decision tree application
+
+# Model interpretability packages
+library(rpart.plot)  # for plotting decision trees
+library(vip)         # for feature importance
+library(pdp)         # for feature effects
+```
+
+
+```{r}
+# Ames housing data
+ames <- AmesHousing::make_ames()
+#ames.h2o <- as.h2o(ames)
+dim(ames) #2930 rows, 81 columns
+set.seed(123)
+split <- initial_split(ames, prop = 0.7, 
+                       strata = "Sale_Price")
+ames_train  <- training(split)
+ames_test   <- testing(split)
+```
+
+We can fit a regression tree using rpart and then visualize it using rpart.plot. The fitting process and the visual output of regression trees and classification trees are very similar. Both use the formula method for expressing the model (similar to lm()). However, when fitting a regression tree, we need to set method = "anova". By default, rpart() will make an intelligent guess as to what method to use based on the data type of your response column, but it’s good practice to set this explicitly.
+
+```{r}
+ames_dt1 <- rpart(
+  formula = Sale_Price ~ .,
+  data    = ames_train,
+  method  = "anova"
+)
+ames_dt1
+```
+
+```{r}
+rpart.plot(ames_dt1)
+```
+Prunning:
+
+An alternative to explicitly specifying the depth of a decision tree is to grow a very large, complex tree and then prune it back to find an optimal subtree. We find the optimal subtree by using a cost complexity parameter ( α ) that penalizes our objective function in Equation (9.1) for the number of terminal nodes of the tree ( T) as in Equation (9.2).
+
+
+Behind the scenes rpart() is automatically applying a range of cost complexity ( αvalues to prune the tree). To compare the error for each  α value, rpart() performs a 10-fold CV (by default). In this example we find diminishing returns after 12 terminal nodes as illustrated in Figure 9.10 ( y -axis is the CV error, lower  
+x -axis is the cost complexity ( α) value, upper  
+x -axis is the number of terminal nodes (i.e., tree size =  |T|). You may also notice the dashed line which goes through the point  |T|=8
+ . Breiman (1984) suggested that in actual practice, it’s common to instead use the smallest tree within 1 standard error (SE) of the minimum CV error (this is called the 1-SE rule). Thus, we could use a tree with 8 terminal nodes and reasonably expect to experience similar results within a small margin of error.
+```{r}
+plotcp(ames_dt1)
+```
+Figure 9.10: Pruning complexity parameter (cp) plot illustrating the relative cross validation error (y-axis) for various cp values (lower x-axis). Smaller cp values lead to larger trees (upper x-axis). Using the 1-SE rule, a tree size of 10-12 provides optimal cross validation results.
+
+To illustrate the point of selecting a tree with 11 terminal nodes (or 8 if you go by the 1-SE rule), we can force rpart() to generate a full tree by setting cp = 0 (no penalty results in a fully grown tree). Figure 9.11 shows that after 11 terminal nodes, we see diminishing returns in error reduction as the tree grows deeper. Thus, we can significantly prune our tree and still achieve minimal expected error.
+
+```{r}
+ames_dt2 <- rpart(
+    formula = Sale_Price ~ .,
+    data    = ames_train,
+    method  = "anova", 
+    control = list(cp = 0, xval = 10)
+)
+
+plotcp(ames_dt2)
+abline(v = 11, lty = "dashed")
+```
+So, by default, rpart() is performing some automated tuning, with an optimal subtree of 10 total splits, 11 terminal nodes, and a cross-validated SSE of 0.292. Although rpart() does not provide the RMSE or other metrics, you can use caret. In both cases, smaller penalties (deeper trees) are providing better CV results.
+```{r}
+# rpart cross validation results
+ames_dt1$cptable
+##            CP nsplit rel error    xerror       xstd
+## 1  0.47940879      0 1.0000000 1.0014737 0.06120398
+## 2  0.11290476      1 0.5205912 0.5226036 0.03199501
+## 3  0.06999005      2 0.4076864 0.4098819 0.03111581
+## 4  0.02758522      3 0.3376964 0.3572726 0.02222507
+## 5  0.02347276      4 0.3101112 0.3339952 0.02184348
+## 6  0.02201070      5 0.2866384 0.3301630 0.02446178
+## 7  0.02039233      6 0.2646277 0.3244948 0.02421833
+## 8  0.01190364      7 0.2442354 0.3062031 0.02641595
+## 9  0.01116365      8 0.2323317 0.3025968 0.02708786
+## 10 0.01103581      9 0.2211681 0.2971663 0.02704837
+## 11 0.01000000     10 0.2101323 0.2920442 0.02704791
+```
+
+#**BESTMODEL**
+```{r}
+# caret cross validation results
+ames_dt3 <- train(
+  Sale_Price ~ .,
+  data = ames_train,
+  method = "rpart",
+  trControl = trainControl(method = "cv", number = 10),
+  tuneLength = 20
+)
+
+ggplot(ames_dt3)
+```
+#**9.6 Feature interpretation**
+
+```{r}
+vip(ames_dt3, num_features = 40, bar = FALSE)
+```
+
+
+```{r}
+# Construct partial dependence plots
+p1 <- partial(ames_dt3, pred.var = "Gr_Liv_Area") %>% autoplot()
+p2 <- partial(ames_dt3, pred.var = "Year_Built") %>% autoplot()
+p3 <- partial(ames_dt3, pred.var = c("Gr_Liv_Area", "Year_Built")) %>% 
+  plotPartial(levelplot = FALSE, zlab = "yhat", drape = TRUE, 
+              colorkey = TRUE, screen = list(z = -20, x = -60))
+
+# Display plots side by side
+gridExtra::grid.arrange(p1, p2, p3, ncol = 3)
+```
+#**Chapter 10 Bagging**
+
+In Section 2.4.2 we learned about bootstrapping as a resampling procedure, which creates b new bootstrap samples by drawing samples with replacement of the original training data. This chapter illustrates how we can use bootstrapping to create an ensemble of predictions. Bootstrap aggregating, also called bagging, is one of the first ensemble algorithms28 machine learning practitioners learn and is designed to improve the stability and accuracy of regression and classification algorithms. By model averaging, bagging helps to reduce variance and minimize overfitting. Although it is usually applied to decision tree methods, it can be used with any type of method.
+
+```{r}
+# Helper packages
+library(dplyr)       # for data wrangling
+library(ggplot2)     # for awesome plotting
+library(doParallel)  # for parallel backend to foreach
+library(foreach)     # for parallel processing with for loops
+
+# Modeling packages
+library(caret)       # for general model fitting
+library(rpart)       # for fitting decision trees
+library(ipred)       # for fitting bagged decision trees
+```
+The bagging() function comes from the ipred package and we use nbagg to control how many iterations to include in the bagged model and coob = TRUE indicates to use the OOB error rate. By default, bagging() uses rpart::rpart() for decision tree base learners but other base learners are available. Since bagging just aggregates a base learner, we can tune the base learner parameters as normal. Here, we pass parameters to rpart() with the control parameter and we build deep trees (no pruning) that require just two observations in a node to split.
+
+```{r}
+# make bootstrapping reproducible
+set.seed(123)
+
+# train bagged model
+ames_bag1 <- bagging(
+  formula = Sale_Price ~ .,
+  data = ames_train,
+  nbagg = 100,  
+  coob = TRUE,
+  control = rpart.control(minsplit = 2, cp = 0)
+)
+
+ames_bag1
+## 
+## Bagging regression trees with 100 bootstrap replications 
+## 
+## Call: bagging.data.frame(formula = Sale_Price ~ ., data = ames_train, 
+##     nbagg = 100, coob = TRUE, control = rpart.control(minsplit = 2, 
+##         cp = 0))
+## 
+## Out-of-bag estimate of root mean squared error:  25528.78
+```
+We can also apply bagging within caret and use 10-fold CV to see how well our ensemble will generalize. We see that the cross-validated RMSE for 200 trees is similar to the OOB estimate (difference of 495). However, using the OOB error took 58 seconds to compute whereas performing the following 10-fold CV took roughly 26 minutes on our machine!
+
+```{r}
+cl <- makeCluster(8) # use 8 workers
+registerDoParallel(cl) # register the parallel backend
+
+ames_bag2 <- train(
+  Sale_Price ~ .,
+  data = ames_train,
+  method = "treebag",
+  trControl = trainControl(method = "cv", number = 5),
+  nbagg = 200,  
+  control = rpart.control(minsplit = 2, cp = 0)
+)
+ames_bag2
+## Bagged CART 
+## 
+## 2054 samples
+##   80 predictor
+## 
+## No pre-processing
+## Resampling: Cross-Validated (10 fold) 
+## Summary of sample sizes: 1849, 1848, 1848, 1849, 1849, 1847, ... 
+## Resampling results:
+## 
+##   RMSE      Rsquared   MAE     
+##   26957.06  0.8900689  16713.14
+```
+#**10.4 Easily parallelize**
+As stated in Section 10.2, bagging can become computationally intense as the number of iterations increases. Fortunately, the process of bagging involves fitting models to each of the bootstrap samples which are completely independent of one another. This means that each model can be trained in parallel and the results aggregated in the end for the final model. Consequently, if you have access to a large cluster or number of cores, you can more quickly create bagged ensembles on larger data sets.
+
+The following illustrates parallelizing the bagging algorithm (with b=160 decision trees) on the Ames housing data using eight cores and returning the predictions for the test data for each of the trees.
+
+```{r}
+# Create a parallel socket cluster
+cl <- makeCluster(8) # use 8 workers
+registerDoParallel(cl) # register the parallel backend
+
+# Fit trees in parallel and compute predictions on the test set
+predictions <- foreach(
+  icount(160), 
+  .packages = "rpart", 
+  .combine = cbind
+  ) %dopar% {
+    # bootstrap copy of training data
+    index <- sample(nrow(ames_train), replace = TRUE)
+    ames_train_boot <- ames_train[index, ]  
+  
+    # fit tree to bootstrap copy
+    bagged_tree <- rpart(
+      Sale_Price ~ ., 
+      control = rpart.control(minsplit = 2, cp = 0),
+      data = ames_train_boot
+      ) 
+    
+    predict(bagged_tree, newdata = ames_test)
+}
+
+predictions[1:5, 1:7]
+##   result.1 result.2 result.3 result.4 result.5 result.6 result.7
+## 1   176500   187000   179900   187500   187500   187500   187500
+## 2   180000   254000   251000   240000   180000   180000   221000
+## 3   175000   174000   192000   192000   185000   178900   163990
+## 4   197900   157000   217500   215000   180000   210000   218500
+## 5   120000   129000   130000   143000   136500   153600   148500
+```
+We can then do some data wrangling to compute and plot the RMSE as additional trees are added. Our results, illustrated in Figure 10.3, closely resemble the results obtained in Figure 10.2. This also illustrates how the OOB error closely approximates the test error.
+
+```{r}
+predictions %>%
+  as.data.frame() %>%
+  mutate(
+    observation = 1:n(),
+    actual = ames_test$Sale_Price) %>%
+  tidyr::gather(tree, predicted, -c(observation, actual)) %>%
+  group_by(observation) %>%
+  mutate(tree = stringr::str_extract(tree, '\\d+') %>% as.numeric()) %>%
+  ungroup() %>%
+  arrange(observation, tree) %>%
+  group_by(observation) %>%
+  mutate(avg_prediction = cummean(predicted)) %>%
+  group_by(tree) %>%
+  summarize(RMSE = RMSE(avg_prediction, actual)) %>%
+  ggplot(aes(tree, RMSE)) +
+  geom_line() +
+  xlab('Number of trees')
+```
+```{r}
+# Shutdown parallel cluster
+stopCluster(cl)
+```
+#**10.5 Feature interpretation**
+
+```{r}
+vip::vip(ames_bag2, num_features = 40, bar = FALSE)
+```
+
+
+```{r}
+# Construct partial dependence plots
+p1 <- pdp::partial(
+  ames_bag2, 
+  pred.var = "Lot_Area",
+  grid.resolution = 20
+  ) %>% 
+  autoplot()
+
+p2 <- pdp::partial(
+  ames_bag2, 
+  pred.var = "Lot_Frontage", 
+  grid.resolution = 20
+  ) %>% 
+  autoplot()
+
+gridExtra::grid.arrange(p1, p2, nrow = 1)
+```
+#**Chapter 11 Random Forests**
+
+Random forests are a modification of bagged decision trees that build a large collection of de-correlated trees to further improve predictive performance. They have become a very popular “out-of-the-box” or “off-the-shelf” learning algorithm that enjoys good predictive performance with relatively little hyperparameter tuning. Many modern implementations of random forests exist; however, Leo Breiman’s algorithm (Breiman 2001) has largely become the authoritative procedure. This chapter will cover the fundamentals of random forests.
+
+```{r}
+#install.packages("ranger")
+# Helper packages
+library(dplyr)    # for data wrangling
+library(ggplot2)  # for awesome graphics
+library(rsample) # for resamples  (initial_split)
+
+# Modeling packages
+library(ranger)   # a c++ implementation of random forest 
+library(h2o)      # a java-based implementation of random forest
+
+```
+#**11.2 Extending bagging**
+
+Random forests are built using the same fundamental principles as decision trees (Chapter 9) and bagging (Chapter 10). Bagging trees introduces a random component into the tree building process by building many trees on bootstrapped copies of the training data. Bagging then aggregates the predictions across all the trees; this aggregation reduces the variance of the overall procedure and results in improved predictive performance. However, as we saw in Section 10.6, simply bagging trees results in tree correlation that limits the effect of variance reduction.
+
+Random forests help to reduce tree correlation by injecting more randomness into the tree-growing process.29 More specifically, while growing a decision tree during the bagging process, random forests perform split-variable randomization where each time a split is to be performed, the search for the split variable is limited to a random subset of  mtry of the original features. T
+
+1.  Given a training data set
+2.  Select number of trees to build (n_trees)
+3.  for i = 1 to n_trees do
+4.  |  Generate a bootstrap sample of the original data
+5.  |  Grow a regression/classification tree to the bootstrapped data
+6.  |  for each split do
+7.  |  | Select m_try variables at random from all p variables
+8.  |  | Pick the best variable/split-point among the m_try
+9.  |  | Split the node into two child nodes
+10. |  end
+11. | Use typical tree model stopping criteria to determine when a 
+    | tree is complete (but do not prune)
+12. end
+13. Output ensemble of trees 
+
+When  m try = p, the algorithm is equivalent to bagging decision trees.
+```{r}
+library(rsample) # for resamples  (initial_split)
+# Ames housing data
+ames <- AmesHousing::make_ames()
+#ames.h2o <- as.h2o(ames)
+dim(ames) #2930 rows, 81 columns
+set.seed(123)
+split <- initial_split(ames, prop = 0.7, 
+                       strata = "Sale_Price")
+ames_train  <- training(split)
+ames_test   <- testing(split)
+```
+
+```{r}
+# number of features
+n_features <- length(setdiff(names(ames_train), "Sale_Price"))
+print(n_features)
+# train a default random forest model
+ames_rf1 <- ranger(
+  Sale_Price ~ ., 
+  data = ames_train,
+  mtry = floor(n_features / 3),
+  respect.unordered.factors = "order",
+  seed = 123
+)
+
+# get OOB RMSE
+(default_rmse <- sqrt(ames_rf1$prediction.error))
+## [1] 24859.27
+
+```
+
+
+```{r}
+ames_rf1
+```
+#11.4 Hyperparameters
+
+- The number of trees in the forest
+- The number of features to consider at any given split:  m try
+- The complexity of each tree
+- The sampling scheme
+- The splitting rule to use during tree construction
+
+This grid search takes approximately 2 minutes.
+#**ranger Grid search**
+```{r}
+# create hyperparameter grid
+hyper_grid <- expand.grid(
+  mtry = floor(n_features * c(.05, .15, .25, .333, .4)),
+  min.node.size = c(1, 3, 5, 10), 
+  replace = c(TRUE, FALSE),                               
+  sample.fraction = c(.5, .63, .8),                       
+  rmse = NA                                               
+)
+print(hyper_grid)
+
+# execute full cartesian grid search
+for(i in seq_len(nrow(hyper_grid))) {
+  # fit model for ith hyperparameter combination
+  fit <- ranger(
+    formula         = Sale_Price ~ ., 
+    data            = ames_train, 
+    num.trees       = n_features * 10,
+    mtry            = hyper_grid$mtry[i],
+    min.node.size   = hyper_grid$min.node.size[i],
+    replace         = hyper_grid$replace[i],
+    sample.fraction = hyper_grid$sample.fraction[i],
+    verbose         = FALSE,
+    seed            = 123,
+    respect.unordered.factors = 'order',
+  )
+  # export OOB error 
+  hyper_grid$rmse[i] <- sqrt(fit$prediction.error)
+}
+
+# assess top 10 models
+hyper_grid %>%
+  arrange(rmse) %>%
+  mutate(perc_gain = (default_rmse - rmse) / default_rmse * 100) %>%
+  head(10)
+##    mtry min.node.size replace sample.fraction     rmse perc_gain
+## 1    32             1   FALSE             0.8 23975.32  3.555819
+## 2    32             3   FALSE             0.8 24022.97  3.364127
+## 3    32             5   FALSE             0.8 24032.69  3.325041
+## 4    26             3   FALSE             0.8 24103.53  3.040058
+## 5    20             1   FALSE             0.8 24132.35  2.924142
+## 6    26             5   FALSE             0.8 24144.38  2.875752
+## 7    20             3   FALSE             0.8 24194.64  2.673560
+## 8    26             1   FALSE             0.8 24216.02  2.587589
+## 9    32            10   FALSE             0.8 24224.18  2.554755
+## 10   20             5   FALSE             0.8 24249.46  2.453056
+```
+However, as we add more hyperparameters and values to search across and as our data sets become larger, you can see how a full Cartesian search can become exhaustive and computationally expensive. In addition to full Cartesian search, the h2o package provides a random grid search that allows you to jump from one random combination to another and it also provides early stopping rules that allow you to stop the grid search once a certain condition is met (e.g., a certain number of models have been trained, a certain runtime has elapsed, or the accuracy has stopped improving by a certain amount). Although using a random discrete search path will likely not find the optimal model, it typically does a good job of finding a very good model.
+
+To fit a random forest model with h2o, we first need to initiate our h2o session.
+#**H2O implementation**
+
+```{r}
+h2o.no_progress()
+h2o.init(max_mem_size = "5g")
+# convert training data to h2o object
+train_h2o <- as.h2o(ames_train)
+
+# set the response column to Sale_Price
+response <- "Sale_Price"
+n_features <- length(setdiff(names(ames_train), "Sale_Price"))
+# set the predictor names
+predictors <- setdiff(colnames(ames_train), response)
+
+h2o_rf1 <- h2o.randomForest(
+    x = predictors, 
+    y = response,
+    training_frame = train_h2o, 
+    ntrees = n_features * 10,
+    seed = 123
+)
+
+h2o_rf1
+```
+
+
+```{r}
+# hyperparameter grid
+hyper_grid <- list(
+  mtries = floor(n_features * c(.05, .15, .25, .333, .4)),
+  min_rows = c(1, 3, 5, 10),
+  max_depth = c(10, 20, 30),
+  sample_rate = c(.55, .632, .70, .80)
+)
+
+# random grid search strategy
+search_criteria <- list(
+  strategy = "RandomDiscrete",
+  stopping_metric = "mse",
+  stopping_tolerance = 0.001,   # stop if improvement is < 0.1%
+  stopping_rounds = 10,         # over the last 10 models
+  max_runtime_secs = 60*5      # or stop search after 5 min.
+)
+```
+This grid search takes 5 minutes.
+```{r}
+# perform grid search 
+random_grid <- h2o.grid(
+  algorithm = "randomForest",
+  grid_id = "rf_random_grid",
+  x = predictors, 
+  y = response, 
+  training_frame = train_h2o,
+  hyper_params = hyper_grid,
+  ntrees = n_features * 10,
+  seed = 123,
+  stopping_metric = "RMSE",   
+  stopping_rounds = 10,           # stop if last 10 trees added 
+  stopping_tolerance = 0.005,     # don't improve RMSE by 0.5%
+  search_criteria = search_criteria
+)
+```
+
+
+```{r}
+# collect the results and sort by our model performance metric 
+# of choice
+random_grid_perf <- h2o.getGrid(
+  grid_id = "rf_random_grid", 
+  sort_by = "mse", 
+  decreasing = FALSE
+)
+random_grid_perf
+```
+
+#11.6 Feature interpretation
+
+```{r}
+# re-run model with impurity-based variable importance
+rf_impurity <- ranger(
+  formula = Sale_Price ~ ., 
+  data = ames_train, 
+  num.trees = 2000,
+  mtry = 32,
+  min.node.size = 1,
+  sample.fraction = .80,
+  replace = FALSE,
+  importance = "impurity",
+  respect.unordered.factors = "order",
+  verbose = FALSE,
+  seed  = 123
+)
+
+# re-run model with permutation-based variable importance
+rf_permutation <- ranger(
+  formula = Sale_Price ~ ., 
+  data = ames_train, 
+  num.trees = 2000,
+  mtry = 32,
+  min.node.size = 1,
+  sample.fraction = .80,
+  replace = FALSE,
+  importance = "permutation",
+  respect.unordered.factors = "order",
+  verbose = FALSE,
+  seed  = 123
+)
+```
+
+
+```{r}
+p1 <- vip::vip(rf_impurity, num_features = 25, bar = FALSE)
+p2 <- vip::vip(rf_permutation, num_features = 25, bar = FALSE)
+
+gridExtra::grid.arrange(p1, p2, nrow = 1)
+```
+#**Chapter 12 Gradient Boosting**
+```{r}
+# Helper packages
+#install.packages("xgboost")
+library(dplyr)    # for general data wrangling needs
+
+# Modeling packages
+library(gbm)      # for original implementation of regular and stochastic GBMs
+library(h2o)      # for a java-based implementation of GBM variants
+library(xgboost)  # for fitting extreme gradient boosting
+```
+
+```{r}
+library(rsample) # for resamples  (initial_split)
+# Ames housing data
+ames <- AmesHousing::make_ames()
+#ames.h2o <- as.h2o(ames)
+dim(ames) #2930 rows, 81 columns
+set.seed(123)
+split <- initial_split(ames, prop = 0.7, 
+                       strata = "Sale_Price")
+ames_train  <- training(split)
+ames_test   <- testing(split)
+```
+```{r}
+library(doParallel)
+cl <-makePSOCKcluster(5)
+registerDoParallel(cl)
+```
+
+
+```{r}
+# run a basic GBM model
+set.seed(123)  # for reproducibility
+ames_gbm1 <- gbm(
+  formula = Sale_Price ~ .,
+  data = ames_train,
+  distribution = "gaussian",  # SSE loss function
+  n.trees = 5000,
+  shrinkage = 0.1,
+  interaction.depth = 3,
+  n.minobsinnode = 10,
+  cv.folds = 5
+)
+
+# find index for number trees with minimum CV error
+best <- which.min(ames_gbm1$cv.error)
+
+# get MSE and compute RMSE
+sqrt(ames_gbm1$cv.error[best])
+## [1] 23240.38
+#Our results show a cross-validated SSE of 23240 which was achieved with 1219 trees.
+
+# plot error curve
+gbm.perf(ames_gbm1, method = "cv")
+```
+#12.3.3 General tuning strategy
+
+The following grid search took us about 10 minutes.
+
+```{r}
+# create grid search
+hyper_grid <- expand.grid(
+  learning_rate = c(0.3, 0.1, 0.05, 0.01, 0.005),
+  RMSE = NA,
+  trees = NA,
+  time = NA
+)
+
+# execute grid search
+for(i in seq_len(nrow(hyper_grid))) {
+
+  # fit gbm
+  set.seed(123)  # for reproducibility
+  train_time <- system.time({
+    m <- gbm(
+      formula = Sale_Price ~ .,
+      data = ames_train,
+      distribution = "gaussian",
+      n.trees = 5000, 
+      shrinkage = hyper_grid$learning_rate[i], 
+      interaction.depth = 3, 
+      n.minobsinnode = 10,
+      cv.folds = 10 
+   )
+  })
+  
+  # add SSE, trees, and training time to results
+  hyper_grid$RMSE[i]  <- sqrt(min(m$cv.error))
+  hyper_grid$trees[i] <- which.min(m$cv.error)
+  hyper_grid$Time[i]  <- train_time[["elapsed"]]
+
+}
+
+# results
+arrange(hyper_grid, RMSE)
+##   learning_rate  RMSE trees  time
+## 1         0.050 21382  2375 129.5
+## 2         0.010 21828  4982 126.0
+## 3         0.100 22252   874 137.6
+## 4         0.005 23136  5000 136.8
+## 5         0.300 24454   427 139.9
+```
+Next, we’ll set our learning rate at the optimal level (0.05) and tune the tree specific hyperparameters (interaction.depth and n.minobsinnode). Adjusting the tree-specific parameters provides us with an additional 600 reduction in RMSE.
+
+This grid search takes about 30 minutes.
+
+```{r}
+# search grid
+hyper_grid <- expand.grid(
+  n.trees = 6000,
+  shrinkage = 0.01,
+  interaction.depth = c(3, 5, 7),
+  n.minobsinnode = c(5, 10, 15)
+)
+
+# create model fit function
+model_fit <- function(n.trees, shrinkage, interaction.depth, n.minobsinnode) {
+  set.seed(123)
+  m <- gbm(
+    formula = Sale_Price ~ .,
+    data = ames_train,
+    distribution = "gaussian",
+    n.trees = n.trees,
+    shrinkage = shrinkage,
+    interaction.depth = interaction.depth,
+    n.minobsinnode = n.minobsinnode,
+    cv.folds = 10
+  )
+  # compute RMSE
+  sqrt(min(m$cv.error))
+}
+
+# perform search grid with functional programming
+hyper_grid$rmse <- purrr::pmap_dbl(
+  hyper_grid,
+  ~ model_fit(
+    n.trees = ..1,
+    shrinkage = ..2,
+    interaction.depth = ..3,
+    n.minobsinnode = ..4
+    )
+)
+
+# results
+arrange(hyper_grid, rmse)
+##   n.trees shrinkage interaction.depth n.minobsinnode  rmse
+## 1    4000      0.05                 5              5 20699
+## 2    4000      0.05                 3              5 20723
+## 3    4000      0.05                 7              5 21021
+## 4    4000      0.05                 3             10 21382
+## 5    4000      0.05                 5             10 21915
+## 6    4000      0.05                 5             15 21924
+## 7    4000      0.05                 3             15 21943
+## 8    4000      0.05                 7             10 21999
+## 9    4000      0.05                 7             15 22348
+```
+
+#12.4 Stochastic GBMs
+
+```{r}
+# refined hyperparameter grid
+hyper_grid <- list(
+  sample_rate = c(0.5, 0.75, 1),              # row subsampling
+  col_sample_rate = c(0.5, 0.75, 1),          # col subsampling for each split
+  col_sample_rate_per_tree = c(0.5, 0.75, 1)  # col subsampling for each tree
+)
+
+# random grid search strategy
+search_criteria <- list(
+  strategy = "RandomDiscrete",
+  stopping_metric = "mse",
+  stopping_tolerance = 0.001,   
+  stopping_rounds = 10,         
+  max_runtime_secs = 60*60      
+)
+
+# perform grid search 
+grid <- h2o.grid(
+  algorithm = "gbm",
+  grid_id = "gbm_grid",
+  x = predictors, 
+  y = response,
+  training_frame = train_h2o,
+  hyper_params = hyper_grid,
+  ntrees = 6000,
+  learn_rate = 0.01,
+  max_depth = 7,
+  min_rows = 5,
+  nfolds = 10,
+  stopping_rounds = 10,
+  stopping_tolerance = 0,
+  search_criteria = search_criteria,
+  seed = 123
+)
+
+# collect the results and sort by our model performance metric of choice
+grid_perf <- h2o.getGrid(
+  grid_id = "gbm_grid", 
+  sort_by = "mse", 
+  decreasing = FALSE
+)
+
+grid_perf
+## H2O Grid Details
+## ================
+## 
+## Grid ID: gbm_grid 
+## Used hyper parameters: 
+##   -  col_sample_rate 
+##   -  col_sample_rate_per_tree 
+##   -  sample_rate 
+## Number of models: 18 
+## Number of failed models: 0 
+## 
+## Hyper-Parameter Search Summary: ordered by increasing mse
+##    col_sample_rate col_sample_rate_per_tree sample_rate         model_ids                  mse
+## 1              0.5                      0.5         0.5  gbm_grid_model_8  4.462965966345138E8
+## 2              0.5                      1.0         0.5  gbm_grid_model_3  4.568248274796835E8
+## 3              0.5                     0.75        0.75 gbm_grid_model_12 4.6466647244785947E8
+## 4             0.75                      0.5        0.75  gbm_grid_model_5  4.689665768861389E8
+## 5              1.0                     0.75         0.5 gbm_grid_model_14 4.7010349266737276E8
+## 6              0.5                      0.5        0.75 gbm_grid_model_10  4.713882927949245E8
+## 7             0.75                      1.0         0.5  gbm_grid_model_4  4.729884840420368E8
+## 8              1.0                      1.0         0.5  gbm_grid_model_1  4.770705550988762E8
+## 9              1.0                     0.75        0.75  gbm_grid_model_6 4.9292332262147874E8
+## 10            0.75                      1.0        0.75 gbm_grid_model_13  4.985715082289563E8
+## 11            0.75                      0.5         1.0  gbm_grid_model_2 5.0271257831462187E8
+## 12            0.75                     0.75        0.75 gbm_grid_model_15 5.0981695262733763E8
+## 13            0.75                     0.75         1.0  gbm_grid_model_9 5.3137490858680266E8
+## 14            0.75                      1.0         1.0 gbm_grid_model_11   5.77518690995319E8
+## 15             1.0                      1.0         1.0  gbm_grid_model_7  6.037512241688542E8
+## 16             1.0                     0.75         1.0 gbm_grid_model_16 1.9742225720119803E9
+## 17             0.5                      1.0        0.75 gbm_grid_model_17 4.1339991380839005E9
+## 18             1.0                      0.5         1.0 gbm_grid_model_18  5.949489361558916E
+
+```
+
+
+```{r}
+# Grab the model_id for the top model, chosen by cross validation error
+best_model_id <- grid_perf@model_ids[[1]]
+best_model <- h2o.getModel(best_model_id)
+
+# Now let’s get performance metrics on the best model
+h2o.performance(model = best_model, xval = TRUE)
+## H2ORegressionMetrics: gbm
+## ** Reported on cross-validation data. **
+## ** 10-fold cross-validation on training data (Metrics computed for combined holdout predictions) **
+## 
+## MSE:  446296597
+## RMSE:  21125.73
+## MAE:  13045.95
+## RMSLE:  0.1240542
+## Mean Residual Deviance :  446296597
+```
+#12.5 XGBoost
+
+```{r}
+library(recipes)
+xgb_prep <- recipe(Sale_Price ~ ., data = ames_train) %>%
+  step_integer(all_nominal()) %>%
+  prep(training = ames_train, retain = TRUE) %>%
+  juice()
+
+X <- as.matrix(xgb_prep[setdiff(names(xgb_prep), "Sale_Price")])
+Y <- xgb_prep$Sale_Price
+```
+
+```{r}
+set.seed(123)
+ames_xgb <- xgb.cv(
+  data = X,
+  label = Y,
+  nrounds = 6000,
+  objective = "reg:linear",
+  early_stopping_rounds = 50, 
+  nfold = 10,
+  params = list(
+    eta = 0.1,
+    max_depth = 3,
+    min_child_weight = 3,
+    subsample = 0.8,
+    colsample_bytree = 1.0),
+  verbose = 0
+)  
+
+# minimum test CV RMSE
+min(ames_xgb$evaluation_log$test_rmse_mean)
+## [1] 20488
+```
+GRID SEARCH
+
+```{r}
+# hyperparameter grid
+hyper_grid <- expand.grid(
+  eta = 0.01,
+  max_depth = 3, 
+  min_child_weight = 3,
+  subsample = 0.5, 
+  colsample_bytree = 0.5,
+  gamma = c(0, 1, 10, 100, 1000),
+  lambda = c(0, 1e-2, 0.1, 1, 100, 1000, 10000),
+  alpha = c(0, 1e-2, 0.1, 1, 100, 1000, 10000),
+  rmse = 0,          # a place to dump RMSE results
+  trees = 0          # a place to dump required number of trees
+)
+
+# grid search
+for(i in seq_len(nrow(hyper_grid))) {
+  set.seed(123)
+  m <- xgb.cv(
+    data = X,
+    label = Y,
+    nrounds = 4000,
+    objective = "reg:linear",
+    early_stopping_rounds = 50, 
+    nfold = 10,
+    verbose = 0,
+    params = list( 
+      eta = hyper_grid$eta[i], 
+      max_depth = hyper_grid$max_depth[i],
+      min_child_weight = hyper_grid$min_child_weight[i],
+      subsample = hyper_grid$subsample[i],
+      colsample_bytree = hyper_grid$colsample_bytree[i],
+      gamma = hyper_grid$gamma[i], 
+      lambda = hyper_grid$lambda[i], 
+      alpha = hyper_grid$alpha[i]
+    ) 
+  )
+  hyper_grid$rmse[i] <- min(m$evaluation_log$test_rmse_mean)
+  hyper_grid$trees[i] <- m$best_iteration
+}
+
+# results
+hyper_grid %>%
+  filter(rmse > 0) %>%
+  arrange(rmse) %>%
+  glimpse()
+## Observations: 98
+## Variables: 10
+## $ eta              <dbl> 0.01, 0.01, 0.01, 0.01, 0.01, 0.0…
+## $ max_depth        <dbl> 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, …
+## $ min_child_weight <dbl> 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, …
+## $ subsample        <dbl> 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5…
+## $ colsample_bytree <dbl> 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5…
+## $ gamma            <dbl> 0, 1, 10, 100, 1000, 0, 1, 10, 10…
+## $ lambda           <dbl> 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, …
+## $ alpha            <dbl> 0.00, 0.00, 0.00, 0.00, 0.00, 0.1…
+## $ rmse             <dbl> 20488, 20488, 20488, 20488, 20488…
+## $ trees            <dbl> 3944, 3944, 3944, 3944, 3944, 381…
+```
+
+
+```{r}
+# optimal parameter list
+params <- list(
+  eta = 0.01,
+  max_depth = 3,
+  min_child_weight = 3,
+  subsample = 0.5,
+  colsample_bytree = 0.5
+)
+
+# train final model
+xgb.fit.final <- xgboost(
+  params = params,
+  data = X,
+  label = Y,
+  nrounds = 3944,
+  objective = "reg:linear",
+  verbose = 0
+)
+```
+12.6 Feature interpretation
+
+```{r}
+# variable importance plot
+vip::vip(xgb.fit.final) 
+```
+
+#**Chapter 15 Stacked Models**
+
+```{r}
+# Helper packages
+library(rsample)   # for creating our train-test splits
+library(recipes)   # for minor feature engineering tasks
+
+# Modeling packages
+library(h2o)       # for fitting stacked models
+```
+
+
+```{r}
+# Load and split the Ames housing data
+ames <- AmesHousing::make_ames()
+set.seed(123)  # for reproducibility
+split <- initial_split(ames, strata = "Sale_Price")
+ames_train <- training(split)
+ames_test <- testing(split)
+```
+
+```{r}
+# Make sure we have consistent categorical levels
+blueprint <- recipe(Sale_Price ~ ., data = ames_train) %>%
+  step_other(all_nominal(), threshold = 0.005)
+
+# Create training & test sets for h2o
+h2o.init()
+train_h2o <- prep(blueprint, training = ames_train, retain = TRUE) %>%
+  juice() %>%
+  as.h2o()
+test_h2o <- prep(blueprint, training = ames_train) %>%
+  bake(new_data = ames_test) %>%
+  as.h2o()
+
+# Get response and feature names
+Y <- "Sale_Price"
+X <- setdiff(names(ames_train), Y)
+```
+
+#**15.3 Stacking existing models**
+
+```{r}
+# Train & cross-validate a GLM model
+best_glm <- h2o.glm(
+  x = X, y = Y, training_frame = train_h2o, alpha = 0.1,
+  remove_collinear_columns = TRUE, nfolds = 5, fold_assignment = "Modulo",
+  keep_cross_validation_predictions = TRUE, seed = 123
+)
+
+# Train & cross-validate a RF model
+best_rf <- h2o.randomForest(
+  x = X, y = Y, training_frame = train_h2o, ntrees = 1000, mtries = 20,
+  max_depth = 30, min_rows = 1, sample_rate = 0.8, nfolds = 5,
+  fold_assignment = "Modulo", keep_cross_validation_predictions = TRUE,
+  seed = 123, stopping_rounds = 50, stopping_metric = "RMSE",
+  stopping_tolerance = 0
+)
+
+# Train & cross-validate a GBM model
+best_gbm <- h2o.gbm(
+  x = X, y = Y, training_frame = train_h2o, ntrees = 5000, learn_rate = 0.01,
+  max_depth = 7, min_rows = 5, sample_rate = 0.8, nfolds = 5,
+  fold_assignment = "Modulo", keep_cross_validation_predictions = TRUE,
+  seed = 123, stopping_rounds = 50, stopping_metric = "RMSE",
+  stopping_tolerance = 0
+)
+
+# Train & cross-validate an XGBoost model
+best_xgb <- h2o.xgboost(
+  x = X, y = Y, training_frame = train_h2o, ntrees = 5000, learn_rate = 0.05,
+  max_depth = 3, min_rows = 3, sample_rate = 0.8, categorical_encoding = "Enum",
+  nfolds = 5, fold_assignment = "Modulo", 
+  keep_cross_validation_predictions = TRUE, seed = 123, stopping_rounds = 50,
+  stopping_metric = "RMSE", stopping_tolerance = 0
+)
+```
+We can now use h2o.stackedEnsemble() to stack these models. Note how we feed the base learner models into the base_models = list() argument. Here, we apply a random forest model as the metalearning algorithm. However, you could also apply regularized regression, GBM, or a neural network as the metalearner (see ?h2o.stackedEnsemble for details).
+
+```{r}
+# Train a stacked tree ensemble
+ensemble_tree <- h2o.stackedEnsemble(
+  x = X, y = Y, training_frame = train_h2o, model_id = "my_tree_ensemble",
+  base_models = list(best_glm, best_rf, best_gbm, best_xgb),
+  metalearner_algorithm = "drf"
+)
+```
+
+Since our ensemble is built on the CV results of the base learners, but has no cross-validation results of its own, we’ll use the test data to compare our results. If we assess the performance of our base learners on the test data we see that the stochastic GBM base learner has the lowest RMSE of 20859.92. The stacked model achieves a small 1% performance gain with an RMSE of 20664.56.
+```{r}
+# Get results from base learners
+get_rmse <- function(model) {
+  results <- h2o.performance(model, newdata = test_h2o)
+  results@metrics$RMSE
+}
+list(best_glm, best_rf, best_gbm, best_xgb) %>%
+  purrr::map_dbl(get_rmse)
+## [1] 30024.67 23075.24 20859.92 21391.20
+
+# Stacked results
+h2o.performance(ensemble_tree, newdata = test_h2o)@metrics$RMSE
+## [1] 20664.56
+```
+We previously stated that the biggest gains are usually produced when we are stacking base learners that have high variability, and uncorrelated, predicted values. If we assess the correlation of the CV predictions we can see strong correlation across the base learners, especially with three tree-based learners. Consequentley, stacking provides less advantage in this situation since the base learners have highly correlated predictions; however, a 1% performance improvement can still be considerable improvement depending on the business context.
+
+```{r}
+data_compare<-data.frame(
+                GLM_pred = as.vector(h2o.getFrame(best_glm@model$cross_validation_holdout_predictions_frame_id$name)),
+                RF_pred = as.vector(h2o.getFrame(best_rf@model$cross_validation_holdout_predictions_frame_id$name)),
+                GBM_pred = as.vector(h2o.getFrame(best_gbm@model$cross_validation_holdout_predictions_frame_id$name)),
+                XGB_pred = as.vector(h2o.getFrame(best_xgb@model$cross_validation_holdout_predictions_frame_id$name))
+              )
+data_compare
+
+```
+
+
+```{r}
+data_compare %>% cor()
+##           GLM_pred   RF_pred  GBM_pred  XGB_pred
+## GLM_pred 1.0000000 0.9390229 0.9291982 0.9345048
+## RF_pred  0.9390229 1.0000000 0.9920349 0.9821944
+## GBM_pred 0.9291982 0.9920349 1.0000000 0.9854160
+## XGB_pred 0.9345048 0.9821944 0.9854160 1.0000000
+```
+#**15.4 Stacking a grid search**
+An alternative ensemble approach focuses on stacking multiple models generated from the same base learner. In each of the previous chapters, you learned how to perform grid searches to automate the tuning process. Often we simply select the best performing model in the grid search but we can also apply the concept of stacking to this process.
+
+Many times, certain tuning parameters allow us to find unique patterns within the data. By stacking the results of a grid search, we can capitalize on the benefits of each of the models in our grid search to create a meta model. For example, the following performs a random grid search across a wide range of GBM hyperparameter settings. We set the search to stop after 25 models have run.
+
+```{r}
+
+h2o.init(max_mem_size = "10g")
+
+train_h2o <- as.h2o(ames_train)
+response <- "Sale_Price"
+predictors <- setdiff(colnames(ames_train), response)
+
+# Define GBM hyperparameter grid
+hyper_grid <- list(
+  max_depth = c(1, 3, 5),
+  min_rows = c(1, 5, 10),
+  learn_rate = c(0.01, 0.05, 0.1),
+  learn_rate_annealing = c(0.99, 1),
+  sample_rate = c(0.5, 0.75, 1),
+  col_sample_rate = c(0.8, 0.9, 1)
+)
+
+# Define random grid search criteria
+search_criteria <- list(
+  strategy = "RandomDiscrete",
+  max_models = 25
+)
+
+# Build random grid search 
+random_grid <- h2o.grid(
+  algorithm = "gbm", grid_id = "gbm_grid", x = X, y = Y,
+  training_frame = train_h2o, hyper_params = hyper_grid,
+  search_criteria = search_criteria, ntrees = 5000, stopping_metric = "RMSE",     
+  stopping_rounds = 10, stopping_tolerance = 0, nfolds = 5, 
+  fold_assignment = "Modulo", keep_cross_validation_predictions = TRUE,
+  seed = 123
+)
+
+```
+
+
+```{r}
+# Sort results by RMSE
+h2o.getGrid(
+  grid_id = "gbm_grid", 
+  sort_by = "rmse"
+)
+```
+
+
+```{r}
+# Grab the model_id for the top model, chosen by validation error
+best_model_id <- random_grid_perf@model_ids[[1]]
+best_model <- h2o.getModel(best_model_id)
+h2o.performance(best_model, newdata = test_h2o)
+## H2ORegressionMetrics: gbm
+## 
+## MSE:  466551295
+## RMSE:  21599.8
+## MAE:  13697.78
+## RMSLE:  0.1090604
+## Mean Residual Deviance :  466551295
+```
+
+Rather than use the single best model, we can combine all the models in our grid search using a super learner. In this example, our super learner does not provide any performance gains because the hyperparameter settings of the leading models have low variance which results in predictions that are highly correlated. However, in cases where you see high variability across hyperparameter settings for your leading models, stacking the grid search or even the leaders in the grid search can provide significant performance gains.
+
+```{r}
+# Train a stacked ensemble using the GBM grid
+ensemble <- h2o.stackedEnsemble(
+  x = X, y = Y, training_frame = train_h2o, model_id = "ensemble_gbm_grid",
+  base_models = random_grid@model_ids, metalearner_algorithm = "gbm"
+)
+
+# Eval ensemble performance on a test set
+h2o.performance(ensemble, newdata = test_h2o)
+## H2ORegressionMetrics: stackedensemble
+## 
+## MSE:  469579433
+## RMSE:  21669.78
+## MAE:  13499.93
+## RMSLE:  0.1061244
+## Mean Residual Deviance :  469579433
+```
+
+#**15.5 Automated machine learning**
+The following performs an automated search for two hours, which ended up assessing 80 models. h2o.automl() will automatically use the same folds for stacking so you do not need to specify fold_assignment = "Modulo". This allows for consistent model comparison across the same CV sets. We see that most of the leading models are GBM variants and achieve an RMSE in the 22000–23000 range. As you probably noticed, this was not as good as some of our best models we found using our own GBM grid searches (reference Chapter 12). However, we could start this AutoML procedure and then spend our two hours performing other tasks while h2o automatically assesses these 80 models. The AutoML procedure then provides us direction for further analysis. In this case, we could start by further assessing the hyperparameter settings in the top five GBM models to see if there were common attributes that could point us to additional grid searches worth exploring.
+
+```{r}
+# Use AutoML to find a list of candidate models (i.e., leaderboard)
+auto_ml <- h2o.automl(
+  x = X, y = Y, training_frame = train_h2o, nfolds = 5, 
+  max_runtime_secs = 60 * 120, max_models = 50,
+  keep_cross_validation_predictions = TRUE, sort_metric = "RMSE", seed = 123,
+  stopping_rounds = 50, stopping_metric = "RMSE", stopping_tolerance = 0
+)
+```
+
+
+```{r}
+# Assess the leader board; the following truncates the results to show the top 
+# and bottom 15 models. You can get the top model with auto_ml@leader
+auto_ml@leaderboard %>% 
+  as.data.frame() %>%
+  dplyr::select(model_id, rmse) %>%
+  dplyr::slice(1:25)
+##                                               model_id   rmse
+## 1                     XGBoost_1_AutoML_20190220_084553   22229.97
+## 2            GBM_grid_1_AutoML_20190220_084553_model_1   22437.26
+## 3            GBM_grid_1_AutoML_20190220_084553_model_3   22777.57
+## 4                         GBM_2_AutoML_20190220_084553   22785.60
+## 5                         GBM_3_AutoML_20190220_084553   23133.59
+## 6                         GBM_4_AutoML_20190220_084553   23185.45
+## 7                     XGBoost_2_AutoML_20190220_084553   23199.68
+## 8                     XGBoost_1_AutoML_20190220_075753   23231.28
+## 9                         GBM_1_AutoML_20190220_084553   23326.57
+## 10           GBM_grid_1_AutoML_20190220_075753_model_2   23330.42
+## 11                    XGBoost_3_AutoML_20190220_084553   23475.23
+## 12       XGBoost_grid_1_AutoML_20190220_084553_model_3   23550.04
+## 13      XGBoost_grid_1_AutoML_20190220_075753_model_15   23640.95
+## 14       XGBoost_grid_1_AutoML_20190220_084553_model_8   23646.66
+## 15       XGBoost_grid_1_AutoML_20190220_084553_model_6   23682.37
+## ...                                                ...        ...
+## 65           GBM_grid_1_AutoML_20190220_084553_model_5   33971.32
+## 66           GBM_grid_1_AutoML_20190220_075753_model_8   34489.39
+## 67  DeepLearning_grid_1_AutoML_20190220_084553_model_3   36591.73
+## 68           GBM_grid_1_AutoML_20190220_075753_model_6   36667.56
+## 69      XGBoost_grid_1_AutoML_20190220_084553_model_13   40416.32
+## 70           GBM_grid_1_AutoML_20190220_075753_model_9   47744.43
+## 71    StackedEnsemble_AllModels_AutoML_20190220_084553   49856.66
+## 72    StackedEnsemble_AllModels_AutoML_20190220_075753   59127.09
+## 73 StackedEnsemble_BestOfFamily_AutoML_20190220_084553   76714.90
+## 74 StackedEnsemble_BestOfFamily_AutoML_20190220_075753   76748.40
+## 75           GBM_grid_1_AutoML_20190220_075753_model_5   78465.26
+## 76           GBM_grid_1_AutoML_20190220_075753_model_3   78535.34
+## 77           GLM_grid_1_AutoML_20190220_075753_model_1   80284.34
+## 78           GLM_grid_1_AutoML_20190220_084553_model_1   80284.34
+## 79       XGBoost_grid_1_AutoML_20190220_075753_model_4   92559.44
+## 80      XGBoost_grid_1_AutoML_20190220_075753_model_10  125384.88
+
+```
+
+#**Chapter 20 K-means Clustering**
+
+```{r}
+# Helper packages
+library(dplyr)       # for data manipulation
+library(ggplot2)     # for data visualization
+library(stringr)     # for string functionality
+
+# Modeling packages
+library(cluster)     # for general clustering algorithms
+library(factoextra)  # for visualizing cluster results
+```
+
+```{r}
+# Full ames data set --> recode ordinal variables to numeric
+ames_full <- AmesHousing::make_ames() %>%
+  mutate_if(str_detect(names(.), 'Qual|Cond|QC|Qu'), as.numeric)
+
+# One-hot encode --> retain only the features and not sale price
+full_rank  <- caret::dummyVars(Sale_Price ~ ., data = ames_full, 
+                               fullRank = TRUE)
+ames_1hot <- predict(full_rank, ames_full)
+
+# Scale data
+ames_1hot_scaled <- scale(ames_1hot)
+
+# New dimensions
+dim(ames_1hot_scaled)
+## [1] 2930  240
+```
+```{r}
+sum(is.na(ames_1hot_scaled))
+colSums(is.na(ames_1hot_scaled))
+```
+
+```{r}
+# Cannot use Kmean with NA rows
+set.seed(123)
+
+fviz_nbclust(
+  ames_1hot_scaled, 
+  kmeans, 
+  method = "wss", 
+  k.max = 25, 
+  verbose = FALSE
+)
+```
+
+
+```{r}
+# Original data minus Sale_Price
+ames_full <- AmesHousing::make_ames() %>% select(-Sale_Price)
+
+# Compute Gower distance for original data
+gower_dst <- daisy(ames_full, metric = "gower")
+```
+
+
+```{r}
+# You can supply the Gower distance matrix to several clustering algos
+pam_gower <- pam(x = gower_dst, k = 8, diss = TRUE)
+diana_gower <- diana(x = gower_dst, diss = TRUE)
+agnes_gower <- agnes(x = gower_dst, diss = TRUE)
+```
+#20.8 Alternative partitioning methods
+
+As your data grow in dimensions you are likely to introduce more outliers; since k-means uses the mean, it is not robust to outliers. An alternative to this is to use partitioning around medians (PAM), which has the same algorithmic steps as k-means but uses the median rather than the mean to determine the centroid; making it more robust to outliers. Unfortunately, this robustness comes with an added computational expense (J. Friedman, Hastie, and Tibshirani 2001).
+
+```{r}
+fviz_nbclust(
+  ames_1hot_scaled, 
+  pam, 
+  method = "wss", 
+  k.max = 25, 
+  verbose = FALSE
+)
+```
+
+#**Chapter 21 Hierarchical Clustering**
+
+Hierarchical clustering is an alternative approach to k-means clustering for identifying groups in a data set. In contrast to k-means, hierarchical clustering will create a hierarchy of clusters and therefore does not require us to pre-specify the number of clusters. Furthermore, hierarchical clustering has an added advantage over k-means clustering in that its results can be easily visualized using an attractive tree-based representation called a dendrogram.
+
+```{r}
+# Helper packages
+library(dplyr)       # for data manipulation
+library(ggplot2)     # for data visualization
+
+# Modeling packages
+library(cluster)     # for general clustering algorithms
+library(factoextra)  # for visualizing cluster results
+```
+
+
+```{r}
+ames_scale <- AmesHousing::make_ames() %>%
+  select_if(is.numeric) %>%  # select numeric columns
+  select(-Sale_Price) %>%    # remove target column
+  mutate_all(as.double) %>%  # coerce to double type
+  scale()                    # center & scale the resulting columns
+```
+
+#21.3.1 Agglomerative hierarchical clustering
+```{r}
+# For reproducibility
+set.seed(123)
+
+# Dissimilarity matrix
+d <- dist(ames_scale, method = "euclidean")
+
+# Hierarchical clustering using Complete Linkage
+hc1 <- hclust(d, method = "complete" )
+```
+
+
+```{r}
+# For reproducibility
+set.seed(123)
+
+# Compute maximum or complete linkage clustering with agnes
+hc2 <- agnes(ames_scale, method = "complete")
+
+# Agglomerative coefficient
+hc2$ac
+## [1] 0.926775
+```
+
+This grid search took a little over 3 minutes.
+
+```{r}
+# methods to assess
+m <- c( "average", "single", "complete", "ward")
+names(m) <- c( "average", "single", "complete", "ward")
+
+# function to compute coefficient
+ac <- function(x) {
+  agnes(ames_scale, method = x)$ac
+}
+
+# get agglomerative coefficient for each linkage method
+purrr::map_dbl(m, ac)
+##   average    single  complete      ward 
+## 0.9139303 0.8712890 0.9267750 0.9766577
+```
+
+#21.3.2 Divisive hierarchical clustering
+```{r}
+# compute divisive hierarchical clustering
+hc4 <- diana(ames_scale)
+
+# Divise coefficient; amount of clustering structure found
+hc4$dc
+## [1] 0.9191094
+```
+
+21.4 Determining optimal clusters
+
+```{r}
+# Plot cluster results
+p1 <- fviz_nbclust(ames_scale, FUN = hcut, method = "wss", 
+                   k.max = 10) +
+  ggtitle("(A) Elbow method")
+p2 <- fviz_nbclust(ames_scale, FUN = hcut, method = "silhouette", 
+                   k.max = 10) +
+  ggtitle("(B) Silhouette method")
+p3 <- fviz_nbclust(ames_scale, FUN = hcut, method = "gap_stat", 
+                   k.max = 10) +
+  ggtitle("(C) Gap statistic")
+
+# Display plots side by side
+gridExtra::grid.arrange(p1, p2, p3, nrow = 1)
+```
+
+#21.5 Working with dendrograms
+```{r}
+# Construct dendorgram for the Ames housing example
+hc5 <- hclust(d, method = "ward.D2" )
+dend_plot <- fviz_dend(hc5)
+dend_data <- attr(dend_plot, "dendrogram")
+dend_cuts <- cut(dend_data, h = 8)
+fviz_dend(dend_cuts$lower[[2]])
+```
+
+
+```{r}
+# Ward's method
+hc5 <- hclust(d, method = "ward.D2" )
+
+# Cut tree into 4 groups
+sub_grp <- cutree(hc5, k = 8)
+
+# Number of members in each cluster
+table(sub_grp)
+## sub_grp
+##    1    2    3    4    5    6    7    8 
+## 1363  567  650   36  123  156   24   11
+```
+
+
+```{r}
+# Plot full dendogram
+fviz_dend(
+  hc5,
+  k = 8,
+  horiz = TRUE,
+  rect = TRUE,
+  rect_fill = TRUE,
+  rect_border = "jco",
+  k_colors = "jco",
+  cex = 0.1
+)
+```
+
+
+```{r}
+dend_plot <- fviz_dend(hc5)                # create full dendogram
+dend_data <- attr(dend_plot, "dendrogram") # extract plot info
+dend_cuts <- cut(dend_data, h = 70.5)      # cut the dendogram at 
+                                           # designated height
+# Create sub dendrogram plots
+p1 <- fviz_dend(dend_cuts$lower[[1]])
+p2 <- fviz_dend(dend_cuts$lower[[1]], type = 'circular')
+
+# Side by side plots
+gridExtra::grid.arrange(p1, p2, nrow = 1)
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+

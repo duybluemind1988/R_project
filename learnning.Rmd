@@ -412,7 +412,76 @@ ggplot(my_data,aes(predicted, observed)) + geom_point(color = "darkred", alpha =
          axis.title.x = element_text(size=14), axis.title.y = element_text(size=14))
 ```
 
+```{r}
+# Injecting missing value
+set.seed(86)
+iris[sample(1:nrow(iris), 5), "Sepal.Width"] <- NA
+iris[sample(1:nrow(iris), 10), "Petal.Length"] <- NA
+iris[sample(1:nrow(iris), 8), "Sepal.Length"] <- NA
+iris
+```
+
 
 ```{r}
+# Using is.na() function
+any(is.na(iris))
+```
+
+
+```{r}
+# Using complete.cases() function to get percentage of missing value
+nrow(iris[!complete.cases(iris), ])/nrow(iris)*100
+```
+
+```{r}
+# Looking at the missing data pattern
+library(mice)
+md.pattern(iris)
+```
+```{r}
+# Deleting missing observations
+iris <- iris[complete.cases(iris), ]
+# or we can use na.omit() function
+iris <- na.omit(iris)
+ 
+# Ignoring missing values while building lm model
+lm(mpg ~ cyl + disp, data=mtcars, na.action=na.omit)
+```
+
+
+```{r}
+## Removing columns with more than 30% NA
+iris[, -which(colMeans(is.na(iris)) > 0.3)]
+```
+
+
+```{r}
+# Using impute function from Hmisc package
+library(Hmisc)
+impute(iris$Sepal.Length, mean)  # replace with mean
+impute(iris$Sepal.Length, median)  # median
+```
+
+
+```{r}
+# Filling missing values with Mean
+iris$Sepal.Length[is.na(iris$Sepal.Length)] = mean(iris$Sepal.Length, na.rm=TRUE)
+# alternative way is to use ifelse
+iris = transform(iris, y = ifelse(is.na(iris), mean(iris, na.rm=TRUE), Sepal.Length))
+```
+
+
+```{r}
+library(mice)
+# Imputing the values using mice
+imputed_iris <- mice(iris, m=5, method = 'pmm', seed = 101)
+# checking the summary
+summary(imputed_iris)
+```
+
+
+```{r}
+# Checking imputed values of sleep variable
+imputed_iris$imp
 ```
 

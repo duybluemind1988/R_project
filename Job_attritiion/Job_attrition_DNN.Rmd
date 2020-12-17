@@ -548,15 +548,18 @@ data %>%
   select_if(is.character)
 # select_if(~!is.numeric(.))
 ```
+
 ```{r}
 # Get all character columns
 data %>% 
   select_if(is.numeric)
 # select_if(~!is.numeric(.))
 ```
+
 ```{r}
 class(colnames(data))
 ```
+
 ```{r}
 list(colnames(data))
 ```
@@ -572,6 +575,7 @@ for (i in list(colnames(data))){
 library(rsample)   # for data splitting
 library(caret)     # for model packages
 ```
+
 ```{r}
 path="WA_Fn-UseC_-HR-Employee-Attrition.csv"
 data <- fread(path)
@@ -987,6 +991,7 @@ churn_test = data[-churn_split, ]
 dim(churn_train)
 dim(churn_test)
 ```
+
 ```{r}
 churn_train_nzv <- churn_train[,-24]
 ```

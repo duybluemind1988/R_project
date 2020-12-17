@@ -2,27 +2,660 @@
 title: "House_price"
 output: html_document
 ---
-
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+```{r}
+#library(tidyverse)# include dplyr, tidr, ggplot2, tibble, readr, purr
+library(dplyr) # mutate, select, filter, summarize, arrange, group by 
+library(tidyr) # gather, spread, separate, extract, unite, %>%
+library(ggplot2)
+library(tibble) # provide tibble class (better than traditional data frame)
+library(readr) # read_csv, tsv, delim, table, log....
+library(purrr) # map, map_dbl, split,
+library(data.table)
+library(rsample)   # for data splitting
+library(caret)     # for model packages
 ```
 
-## R Markdown
-
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
-
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
-
-```{r cars}
-summary(cars)
+# Get and summary data
+```{r}
+path="house_price_train.csv"
+data <- fread(path)
+data
 ```
 
-## Including Plots
+Here's a brief version of what you'll find in the data description file.
 
-You can also embed plots, for example:
-
-```{r pressure, echo=FALSE}
-plot(pressure)
+SalePrice - the property's sale price in dollars. This is the target variable that you're trying to predict.
+MSSubClass: The building class
+MSZoning: The general zoning classification
+LotFrontage: Linear feet of street connected to property
+LotArea: Lot size in square feet
+Street: Type of road access
+Alley: Type of alley access
+LotShape: General shape of property
+LandContour: Flatness of the property
+Utilities: Type of utilities available
+LotConfig: Lot configuration
+LandSlope: Slope of property
+Neighborhood: Physical locations within Ames city limits
+Condition1: Proximity to main road or railroad
+Condition2: Proximity to main road or railroad (if a second is present)
+BldgType: Type of dwelling
+HouseStyle: Style of dwelling
+OverallQual: Overall material and finish quality
+OverallCond: Overall condition rating
+YearBuilt: Original construction date
+YearRemodAdd: Remodel date
+RoofStyle: Type of roof
+RoofMatl: Roof material
+Exterior1st: Exterior covering on house
+Exterior2nd: Exterior covering on house (if more than one material)
+MasVnrType: Masonry veneer type
+MasVnrArea: Masonry veneer area in square feet
+ExterQual: Exterior material quality
+ExterCond: Present condition of the material on the exterior
+Foundation: Type of foundation
+BsmtQual: Height of the basement
+BsmtCond: General condition of the basement
+BsmtExposure: Walkout or garden level basement walls
+BsmtFinType1: Quality of basement finished area
+BsmtFinSF1: Type 1 finished square feet
+BsmtFinType2: Quality of second finished area (if present)
+BsmtFinSF2: Type 2 finished square feet
+BsmtUnfSF: Unfinished square feet of basement area
+TotalBsmtSF: Total square feet of basement area
+Heating: Type of heating
+HeatingQC: Heating quality and condition
+CentralAir: Central air conditioning
+Electrical: Electrical system
+1stFlrSF: First Floor square feet
+2ndFlrSF: Second floor square feet
+LowQualFinSF: Low quality finished square feet (all floors)
+GrLivArea: Above grade (ground) living area square feet
+BsmtFullBath: Basement full bathrooms
+BsmtHalfBath: Basement half bathrooms
+FullBath: Full bathrooms above grade
+HalfBath: Half baths above grade
+Bedroom: Number of bedrooms above basement level
+Kitchen: Number of kitchens
+KitchenQual: Kitchen quality
+TotRmsAbvGrd: Total rooms above grade (does not include bathrooms)
+Functional: Home functionality rating
+Fireplaces: Number of fireplaces
+FireplaceQu: Fireplace quality
+GarageType: Garage location
+GarageYrBlt: Year garage was built
+GarageFinish: Interior finish of the garage
+GarageCars: Size of garage in car capacity
+GarageArea: Size of garage in square feet
+GarageQual: Garage quality
+GarageCond: Garage condition
+PavedDrive: Paved driveway
+WoodDeckSF: Wood deck area in square feet
+OpenPorchSF: Open porch area in square feet
+EnclosedPorch: Enclosed porch area in square feet
+3SsnPorch: Three season porch area in square feet
+ScreenPorch: Screen porch area in square feet
+PoolArea: Pool area in square feet
+PoolQC: Pool quality
+Fence: Fence quality
+MiscFeature: Miscellaneous feature not covered in other categories
+MiscVal: $Value of miscellaneous feature
+MoSold: Month Sold
+YrSold: Year Sold
+SaleType: Type of sale
+SaleCondition: Condition of sale
+```{r}
+# Using an insightful summary with skim and kable
+data %>% glimpse()
+```
+```{r}
+library(psych)
+describe(data)
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+# Check null value
+
+```{r}
+dim(data)
+sum(is.na(data))
+```
+```{r}
+null_value <- sapply(data, function(x) sum(is.na(x)))
+class(null_value)
+null_value_df <- as.data.frame(null_value) %>% arrange(desc(null_value)) %>% filter(null_value > 0)
+# Name the unnamed first column
+null_value_df <- cbind(Features= rownames(null_value_df), null_value_df)
+rownames(null_value_df) <- NULL
+# Add percentage column
+total_rows <- dim(data)[1]
+null_value_df <- null_value_df %>% mutate(percentage=null_value/total_rows*100)
+null_value_df
+```
+
+```{r}
+library(Tmisc)
+Tmisc::gg_na(data)
+```
+```{r}
+#install.packages("VIM")
+library(VIM)
+VIM::aggr(data)
+```
+
+
+```{r}
+aggr_plot <- VIM::aggr(data, col=c('navyblue','red'), numbers=TRUE, sortVars=TRUE, labels=names(data), cex.axis=.7, gap=3, ylab=c("Histogram of missing data","Pattern"))
+```
+
+# Compute correlation matrix
+
+```{r}
+
+corr_matrix <- cor(data %>% select_if(is.numeric))
+corr_matrix <- round(corr_matrix,2)
+class(corr_matrix)
+corr_matrix_df <- as.data.frame(apply(corr_matrix, 2, unlist)) %>% select(SalePrice) %>% arrange(desc(SalePrice))
+# Name the unnamed first column
+corr_matrix_df <- cbind(Features= rownames(corr_matrix_df), corr_matrix_df)
+rownames(corr_matrix_df) <- NULL
+corr_matrix_df
+```
+```{r}
+# Top 10 for correlation
+top_10 <-corr_matrix_df[1:11,1]
+top_20 <-corr_matrix_df[1:21,1]
+class(top_20)
+top_20
+```
+
+
+# Correlation plot
+```{r}
+#install.packages('data.table', dependencies = TRUE)
+#install.packages("DataExplorer", dependencies = TRUE)
+library(DataExplorer)
+DataExplorer::plot_correlation(data %>% select(top_20))
+```
+
+
+```{r}
+#install.packages("dlookr")
+library(dlookr)
+plot_correlate(data %>% select(top_20))
+```
+
+The function corrplot() takes the correlation matrix as the first argument. The second argument (type=“upper”) is used to display only the upper triangular of the correlation matrix.
+
+```{r}
+library(corrplot)
+corrplot(corr_matrix, type = "upper", #order = "alphabet", 
+         tl.col = "black", tl.srt = 45)
+```
+Positive correlations are displayed in blue and negative correlations in red color. Color intensity and the size of the circle are proportional to the correlation coefficients. In the right side of the correlogram, the legend color shows the correlation coefficients and the corresponding colors.
+
+```{r}
+corrplot.mixed(corr_matrix)
+```
+
+
+```{r}
+library("PerformanceAnalytics")
+chart.Correlation(data %>% select(top_10), histogram=TRUE, pch=19)
+```
+
+# DataExplorer package
+
+```{r}
+library(DataExplorer)
+#DataExplorer::create_report(data) # Create full HTML report
+create_report(data, y = "SalePrice")
+```
+
+```{r}
+## View basic description for airquality data
+introduce(data)
+```
+
+```{r}
+## Plot basic description for airquality data
+plot_intro(data)
+```
+
+
+```{r}
+## View missing value distribution for airquality data
+plot_missing(data)
+```
+
+
+```{r}
+## Left: frequency distribution of all discrete variables
+plot_bar(data)
+```
+
+
+```{r}
+## Right: `price` distribution of all discrete variables
+plot_bar(data, with = "SalePrice")
+```
+```{r}
+head(data,10)
+```
+
+```{r}
+## View frequency distribution by a discrete variable
+plot_bar(data, by = "Condition1")
+```
+
+```{r}
+## View histogram of all continuous variables
+plot_histogram(data)
+```
+```{r}
+## View estimated density distribution of all continuous variables
+plot_density(data)
+```
+
+
+```{r}
+## View quantile-quantile plot of all continuous variables
+plot_qq(data)
+```
+
+
+```{r}
+## View quantile-quantile plot of all continuous variables by feature `cut`
+plot_qq(data, by = "BldgType")
+```
+
+
+```{r}
+## View overall correlation heatmap
+plot_correlation(data %>% select(top_20))
+```
+
+
+```{r}
+## View bivariate continuous distribution based on `cut`
+plot_boxplot(data,by="Utilities")
+```
+
+
+```{r}
+## Scatterplot `price` with all other continuous features
+plot_scatterplot(split_columns(data)$continuous, by = "SalePrice", sampled_rows = 1000L)
+```
+# Plotting PCA (Principal Component Analysis)
+# Remove column which null value > 50%
+```{r}
+null_value_df
+```
+```{r}
+null_col <- null_value_df %>% filter(percentage > 40) %>% select(Features)
+null_col
+```
+```{r}
+null_col$Features
+```
+
+
+```{r}
+data_rm_null_col <- select(data,-null_col$Features)
+dim(data)
+dim(data_rm_null_col)
+```
+# Impute remaining null column (ERROR)
+
+
+```{r}
+```
+
+
+
+
+# Remove Near Zero-Variance Predictors
+```{r}
+# Column value number have missing data
+which(names(data_rm_null_col)%in%c(null_value_df$Features))
+```
+
+```{r}
+nzv <- nearZeroVar(data_rm_null_col)
+class(nzv)
+nzv
+data_rm_nzv <- select(data_rm_null_col,-nzv)
+dim(data_rm_null_col)
+dim(data_rm_nzv)
+```
+
+```{r}
+null_value <- sapply(data_rm_nzv, function(x) sum(is.na(x)))
+as.data.frame(null_value) %>% arrange(desc(null_value)) %>% filter(null_value > 0)
+```
+# Remove all NA row
+```{r}
+data_no_null <- na.omit(data_rm_nzv)
+```
+
+# Visualize principal component analysis (error)
+```{r}
+DataExplorer::plot_prcomp(data_no_null, maxcat = 5L)
+```
+
+```{r}
+library(factoextra)
+```
+
+Visualize eigenvalues (scree plot). Show the percentage of variances explained by each principal component.
+```{r}
+res.pca <- prcomp(data_no_null %>% select_if(is.numeric), scale = TRUE)
+fviz_eig(res.pca)
+```
+Graph of individuals. Individuals with a similar profile are grouped together.
+
+```{r}
+fviz_pca_ind(res.pca,
+             col.ind = "cos2", # Color by the quality of representation
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             repel = TRUE     # Avoid text overlapping
+             )
+```
+
+Graph of variables. Positive correlated variables point to the same side of the plot. Negative correlated variables point to opposite sides of the graph.
+```{r}
+fviz_pca_var(res.pca,
+             col.var = "contrib", # Color by contributions to the PC
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             repel = TRUE     # Avoid text overlapping
+             )
+```
+
+Biplot of individuals and variables
+```{r}
+fviz_pca_biplot(res.pca, repel = TRUE,
+                col.var = "#2E9FDF", # Variables color
+                col.ind = "#696969"  # Individuals color
+                )
+```
+
+
+```{r}
+# Eigenvalues
+eig.val <- get_eigenvalue(res.pca)
+eig.val
+  
+# Results for Variables
+res.var <- get_pca_var(res.pca)
+res.var$coord          # Coordinates
+res.var$contrib        # Contributions to the PCs
+res.var$cos2           # Quality of representation 
+# Results for individuals
+res.ind <- get_pca_ind(res.pca)
+res.ind$coord          # Coordinates
+res.ind$contrib        # Contributions to the PCs
+res.ind$cos2           # Quality of representation
+```
+
+# Exploratory Data Analysis
+https://cran.r-project.org/web/packages/dlookr/vignettes/EDA.html
+```{r}
+head(data)
+```
+# Test of normality on numeric variables using normality()
+
+normality() performs a normality test on numerical data. Shapiro-Wilk normality test is performed. When the number of observations is greater than 5000, it is tested after extracting 5000 samples by random simple sampling.
+
+The variables of tbl_df object returned by normality() are as follows.
+
+- statistic : Statistics of the Shapiro-Wilk test
+- p_value : p-value of the Shapiro-Wilk test
+- sample : Number of sample observations performed Shapiro-Wilk test
+normality() performs the normality test for all numerical variables of carseats as follows.:
+```{r}
+normality(data)
+```
+
+You can use dplyr to sort variables that do not follow a normal distribution in order of p_value:
+```{r}
+data %>%
+  normality() %>%
+  filter(p_value <= 0.01) %>% 
+  arrange(abs(p_value))
+```
+
+
+```{r}
+# Select columns by name
+plot_normality(data, GrLivArea,GarageArea)
+```
+```{r}
+plot_correlate(data,SalePrice)
+```
+
+# EDA when target variable is categorical variable
+```{r}
+head(data %>% select_if(is.character))
+```
+
+```{r}
+categ <- target_by(data, Condition1)
+categ
+```
+
+
+```{r}
+# If the variable of interest is a numerical variable
+cat_num <- relate(categ, SalePrice)
+cat_num
+```
+
+
+```{r}
+summary(cat_num)
+```
+
+
+```{r}
+plot(cat_num)
+```
+
+Cases where predictors are categorical variable
+```{r}
+# If the variable of interest is a categorical variable
+cat_cat <- relate(categ, HouseStyle)
+cat_cat
+```
+
+```{r}
+summary(cat_cat)
+```
+
+
+```{r}
+plot(cat_cat)
+```
+
+# EDA when target variable is numerical variable
+```{r}
+head(data %>% select_if(is.numeric))
+```
+
+
+```{r}
+# If the variable of interest is a numerical variable
+num <- target_by(data, LotArea)
+```
+
+
+```{r}
+# If the variable of interest is a numerical variable
+num_num <- relate(num, SalePrice)
+num_num
+```
+
+```{r}
+summary(num_num)
+```
+plot() visualizes the relationship between the target and predictor variables. The relationship between Sales and Price is visualized with a scatter plot. The figure on the left shows the scatter plot of Sales and Price and the confidence interval of the regression line and regression line. The figure on the right shows the relationship between the original data and the predicted values of the linear model as a scatter plot. If there is a linear relationship between the two variables, the scatter plot of the observations converges on the red diagonal line.
+
+```{r}
+plot(num_num)
+```
+
+
+```{r}
+plot(num_num, hex_thres = 350)
+```
+
+#Cases where predictors are categorical variable
+
+The following example shows the relationship between ShelveLoc and the target variable Sales. The predictor ShelveLoc is a categorical variable and shows the result of one-way ANOVA of target ~ predictor relationship. The results are expressed in terms of ANOVA. The summary() function shows the regression coefficients for each level of the predictor. In other words, it shows detailed information about simple regression analysis of target ~ predictor relationship.
+```{r}
+# If the variable of interest is a categorical variable
+num_cat <- relate(num, Condition2)
+num_cat
+```
+
+# Creating an EDA report using eda_report() ERROR
+```{r}
+#install.packages("moments")
+library(moments)
+data_no_null %>%
+  eda_report(target = SalePrice,output_format = "html")
+```
+#Chapter 4 Bivariate Graphs
+
+# Grouped kernel density plots
+```{r}
+# plot the distribution of salaries 
+# by rank using kernel density plots
+ggplot(data, 
+       aes(x = SalePrice, 
+           fill = Street)) +
+  geom_density(alpha = 0.4)
+```
+4.3.3 Box plots
+```{r}
+# plot the distribution of salaries by rank using boxplots
+ggplot(data, 
+       aes(x = HouseStyle, 
+           y = SalePrice)) +
+  geom_boxplot()
+```
+4.3.4 Violin plots
+```{r}
+# plot the distribution using violin and boxplots
+ggplot(data, 
+       aes(x = HouseStyle, 
+           y = SalePrice)) +
+  geom_violin(fill = "cornflowerblue") +
+  geom_boxplot(width = .2, 
+               fill = "orange",
+               outlier.color = "orange",
+               outlier.size = 2)  
+```
+
+4.3.5 Ridgeline plots
+```{r}
+library(ggridges)
+
+ggplot(data, 
+       aes(x = SalePrice, 
+           y = HouseStyle, 
+           fill = HouseStyle)) +
+  geom_density_ridges() + 
+  theme_ridges() +
+  #labs("Highway mileage by auto class") +
+  theme(legend.position = "none")
+```
+
+4.3.7.1 Combining jitter and boxplots
+```{r}
+# plot the distribution of salaries 
+# by rank using jittering
+library(scales)
+ggplot(data, 
+       aes(x = factor(HouseStyle), 
+           y = SalePrice, 
+           color = HouseStyle)) +
+  geom_boxplot(size=1,
+               outlier.shape = 1,
+               outlier.color = "black",
+               outlier.size  = 3) +
+  geom_jitter(alpha = 0.5, 
+              width=.2) + 
+  scale_y_continuous() +
+  #labs(title = "Academic Salary by Rank", 
+  #     subtitle = "9-month salary for 2008-2009",
+  #     x = "",
+  #     y = "") +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  coord_flip()
+```
+# Chapter 5 Multivariate Graphs
+
+5.1 Grouping
+```{r}
+# plot experience vs. salary (color represents rank)
+ggplot(data, aes(x = LotArea, 
+                     y = SalePrice, 
+                     color=MSSubClass)) +
+  geom_point()
+```
+
+
+```{r}
+# plot experience vs. salary (color represents rank)
+ggplot(data, aes(x = LotArea, 
+                     y = SalePrice, 
+                     color=LotShape,
+                     size=YrSold)) +
+  geom_point()
+```
+5.2 Faceting
+
+```{r}
+# plot salary histograms by rank
+ggplot(data, aes(x = SalePrice)) +
+  geom_histogram(fill = "cornflowerblue",
+                 color = "white") +
+  facet_wrap(~LotShape, ncol = 1) 
+```
+
+
+```{r}
+ggplot(data, aes(x = SalePrice)) +
+  geom_histogram(fill = "cornflowerblue",
+                 color = "white") +
+  facet_grid(HouseStyle ~ YrSold) 
+```
+
+# Machine learning
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
