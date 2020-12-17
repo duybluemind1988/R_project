@@ -1253,8 +1253,426 @@ class(as.factor(test.h2o$Attrition))
 ```{r}
 confusionMatrix(as.factor(predict_value$predict),as.factor(test.h2o$Attrition))
 ```
+# Automate ML with H20
+```{r}
+#library(tidyverse)# include dplyr, tidr, ggplot2, tibble, readr, purr
+library(dplyr) # mutate, select, filter, summarize, arrange, group by 
+library(tidyr) # gather, spread, separate, extract, unite, %>%
+library(ggplot2)
+library(tibble) # provide tibble class (better than traditional data frame)
+library(readr) # read_csv, tsv, delim, table, log....
+library(purrr) # map, map_dbl, split,
+library(data.table)
+library(h2o)
+h2o.init()
+```
 
-# 5 ML Follow statistic machine learning BOOK
+```{r}
+path="WA_Fn-UseC_-HR-Employee-Attrition.csv"
+data <- fread(path)
+dim(data)
+# all character columns to factor:
+data <- mutate_if(data, is.character, as.factor)
+# Putting the original dataframe into an h2o format
+h2o_df <- as.h2o(data)
+
+# Splitting into training, validation and testing sets
+split_df <- h2o.splitFrame(h2o_df, c(0.7, 0.15), seed=12)
+# Obtaining our three types of sets into three separate values
+h2o_train <- h2o.assign(split_df[[1]], "train")
+h2o_validation <- h2o.assign(split_df[[2]], "validation")
+h2o_test <- h2o.assign(split_df[[2]], "test")
+```
+
+```{r}
+dim(data)
+dim(h2o_train)
+dim(h2o_validation)
+dim(h2o_test)
+```
+
+
+```{r}
+h2o.describe(h2o_train)
+```
+```{r}
+h2o_train
+```
+
+```{r}
+# Establish X and Y (Features and Labels)
+y <- "Attrition"
+x <- setdiff(names(h2o_train), y)
+```
+
+
+```{r}
+auto_ml <- h2o.automl(
+    y = y,
+    x = x,
+    training_frame = h2o_train,
+    #leaderboard_frame = h2o_validation,
+    project_name = "Attrition",
+    max_models = 10,
+    seed = 12
+)
+```
+
+
+```{r}
+# Check for the top models
+top_models <- auto_ml@leaderboard
+print(top_models)
+```
+
+
+```{r}
+# Get the best model
+# Our aim is to determine the feature importance
+model_id <- as.data.frame(top_models$model_id)[,1]
+best_family <- h2o.getModel(grep("StackedEnsemble_BestOfFamily", model_id, value=TRUE)[1])
+obtain_model <- h2o.getModel(best_family@model$metalearner$name)
+model_id
+best_family
+obtain_model
+```
+
+```{r}
+# How important is each model to the StackEnsemble
+h2o.varimp(obtain_model)
+```
+
+
+```{r}
+options(repr.plot.width=8, repr.plot.height=4) 
+h2o.varimp_plot(obtain_model)
+```
+
+
+```{r}
+xgb <- h2o.getModel(grep("XGBoost", model_id, value = TRUE)[1])
+
+# Examine the variable importance of the top XGBoost model
+# XGBoost can show the feature importance as oppose to the stack ensemble
+h2o.varimp(xgb)
+```
+
+
+```{r}
+# We can also plot the base learner contributions to the ensemble.
+h2o.varimp_plot(xgb)
+```
+# 5. IBM's attrition. Tackling class imbalance with GBM
+https://www.kaggle.com/aljaz91/ibm-s-attrition-tackling-class-imbalance-with-gbm
+
+Modeling (Random Forest & simple GBM)
+```{r}
+# Read data
+path="WA_Fn-UseC_-HR-Employee-Attrition.csv"
+data <- fread(path)
+dim(data)
+
+# Remove unnessary columns:
+data <-data %>%dplyr::select(-Over18,-EmployeeNumber, -EmployeeCount)
+# all character columns to factor:
+data <- mutate_if(data, is.character, as.factor)
+#data$Attrition<-ifelse(data$Attrition=="Yes", 1, 0)
+# Create training (80%) and test (20%) sets for the 
+set.seed(430)
+split = createDataPartition(data$Attrition, p =0.8, list = FALSE)
+train = data[split, ]
+test = data[-split, ]
+dim(train)
+dim(test)
+```
+
+# Random forest
+```{r}
+library(randomForest)
+library(caret)
+library(pROC)
+fit.forest <- randomForest(Attrition ~., data = train)
+rfpreds <- predict(fit.forest, test, type = "class")
+
+rocrf <- roc(as.numeric(test$Attrition), as.numeric(rfpreds))
+rocrf$auc
+confusionMatrix(rfpreds,test$Attrition,positive="Yes")
+```
+# Decision tree
+```{r}
+# Decision tree
+library(rpart)
+library(rpart.plot)
+dtree <- rpart(Attrition ~., data = train)
+preds <- predict(dtree, test, type = "class")
+
+rocv <- roc(as.numeric(test$Attrition), as.numeric(preds))
+rocv$auc
+confusionMatrix(preds,test$Attrition,positive="Yes")
+```
+
+
+```{r}
+# Pruning & plotting the tree
+
+dtreepr <- prune(dtree, cp = 0.01666667)
+predspr <- predict(dtreepr, test, type = "class")
+
+rocvpr <- roc(as.numeric(test$Attrition), as.numeric(predspr))
+rocvpr$auc
+
+rpart.plot(dtreepr, 
+           type = 4, 
+           extra = 104, 
+           tweak = 0.9, 
+           fallen.leaves = F)
+```
+# GBM
+```{r}
+
+# Setting the basic train control used in all GBM models
+
+ctrl <- trainControl(method = "cv",
+                     number = 5,
+                     summaryFunction = twoClassSummary,
+                     classProbs = TRUE)
+
+# Simple GBM
+
+gbmfit <- train(Attrition ~., 
+                data = train, 
+                method = "gbm", 
+                verbose = FALSE, 
+                preProcess = c("zv", "center", "scale"),
+                metric = "ROC", 
+                trControl = ctrl)
+
+gbmpreds <- predict(gbmfit, test)
+
+rocgbm <- roc(as.numeric(test$Attrition), as.numeric(gbmpreds))
+rocgbm$auc
+confusionMatrix(gbmpreds,test$Attrition,positive="Yes")
+```
+# Modeling (GBM with weighting, SMOTE and up & down-sampling)
+```{r}
+ctrl <- trainControl(method = "cv",
+                     number = 5,
+                     summaryFunction = twoClassSummary,
+                     classProbs = TRUE)
+# Use the same seed to ensure same cross-validation splits
+ctrl$seeds <- gbmfit$control$seeds
+ctrl$seeds
+```
+Maybe we should tackle the class imbalance? Note that usually this would be considered if the ratio between classes is 1:10 or higher; in our case it's 1:5, but still it may be justified since we have seen with the decision tree that our main problem is predicting those who actually leave (sensitivity).
+
+I will try different techniques: weighting (punishing the errors in the minority class), down-sampling (randomly removing cases from the majority class), up-sampling (randomly replicating instances in the minority class) and SMOTE (downsampling and synthesizing new minority cases).
+
+# Weighting 
+
+```{r}
+# Create model weights (they sum to one)
+table(train$Attrition)
+table(train$Attrition)[1]
+(1/table(train$Attrition)[1]) * 0.5
+(1/table(train$Attrition)[2]) * 0.5
+```
+```{r}
+library(DMwR)
+```
+
+```{r}
+model_weights <- ifelse(train$Attrition == "No",
+                        (1/table(train$Attrition)[1]) * 0.5,
+                        (1/table(train$Attrition)[2]) * 0.5)
+```
+
+```{r}
+weightedfit <- train(Attrition ~ .,
+                      data = train,
+                      method = "gbm",
+                      verbose = FALSE,
+                      weights = model_weights,
+                      metric = "ROC",
+                      trControl = ctrl)
+
+weightedpreds <- predict(weightedfit, test)
+rocweight <- roc(as.numeric(test$Attrition), as.numeric(weightedpreds))
+rocweight$auc
+confusionMatrix(weightedpreds,test$Attrition,positive="Yes")
+
+```
+
+```{r}
+# SMOTE 
+
+ctrl$sampling <- "smote"
+
+smotefit <- train(Attrition ~., 
+                  data = train, 
+                  method = "gbm", 
+                  verbose = FALSE, 
+                  metric = "ROC", 
+                  trControl = ctrl)
+
+smotepreds <- predict(smotefit, test)
+rocsmote <- roc(as.numeric(test$Attrition), as.numeric(smotepreds))
+rocsmote$auc
+confusionMatrix(smotepreds,test$Attrition,positive="Yes")
+```
+# UP-sampling
+```{r}
+ctrl$sampling <- "up"
+
+upfit <- train(Attrition ~., 
+               data = train, 
+               method = "gbm", 
+               verbose = FALSE, 
+               metric = "ROC", 
+               trControl = ctrl)
+
+uppreds <- predict(upfit, test)
+rocup <- roc(as.numeric(test$Attrition), as.numeric(uppreds))
+rocup$auc
+confusionMatrix(uppreds,test$Attrition,positive="Yes")
+```
+
+# DOWN-sampling
+```{r}
+ctrl$sampling <- "down"
+
+downfit <- train(Attrition ~., 
+                 data = train, 
+                 method = "gbm", 
+                 verbose = FALSE, 
+                 metric = "ROC", 
+                 trControl = ctrl)
+
+downpreds <- predict(downfit, test)
+rocdown <- roc(as.numeric(test$Attrition), as.numeric(downpreds))
+rocdown$auc
+confusionMatrix(downpreds,test$Attrition,positive="Yes")
+```
+
+```{r}
+plot(rocv, ylim = c(0,1), print.thres = T, print.thres.cex = 0.8, main = "ROC curves", col = "salmon")
+plot(rocrf, ylim = c(0,1), print.thres = T, print.thres.cex = 0.8, col = "darkolivegreen", add = T)
+plot(rocweight, ylim = c(0,1), print.thres = T, print.thres.cex = 0.8, col = "steelblue", add = T)
+plot(rocgbm, ylim = c(0,1), print.thres = T, print.thres.cex = 0.8, col = "burlywood", add = T)
+```
+Let us plot the variable importance list from our best model.
+
+```{r}
+library(gbm)
+ggplot(varImp(weightedfit)) + 
+geom_bar(stat = 'identity', fill = 'steelblue', color = 'black') + 
+scale_y_continuous(limits = c(0, 105), expand = c(0, 0)) +
+theme_light()
+```
+# Deep learning (problem with Keras )
+
+```{r}
+# Helper packages
+library(data.table)
+library(dplyr)         # for basic data wrangling
+library(caret)
+# Modeling packages
+library(keras)         # for fitting DNNs
+library(tfruns)        # for additional grid search & model training functions
+# Modeling helper package - not necessary for reproducibility
+library(tfestimators)  # provides grid search & model training interface
+```
+
+
+```{r}
+# Read data
+path="WA_Fn-UseC_-HR-Employee-Attrition.csv"
+data <- fread(path)
+dim(data)
+
+# Remove unnessary columns:
+data <-data %>%dplyr::select(-Over18,-EmployeeNumber, -EmployeeCount)
+# all character columns to factor:
+data <- mutate_if(data, is.character, as.factor)
+#data$Attrition<-ifelse(data$Attrition=="Yes", 1, 0)
+
+```
+
+```{r}
+dummy <- dummyVars(~ ., data=data %>% dplyr::select(-Attrition))
+newdata <- data.frame(predict(dummy, newdata = data %>% dplyr::select(-Attrition)) )
+newdata["Attrition"] <-data$Attrition
+newdata
+```
+
+```{r}
+# Create training (80%) and test (20%) sets for the 
+set.seed(430)
+split = createDataPartition(newdata$Attrition, p =0.8, list = FALSE)
+train = newdata[split, ]
+test = newdata[-split, ]
+dim(train)
+dim(test)
+```
+
+```{r}
+library(superml)
+lbl = LabelEncoder$new()
+
+# Size and format of data frame
+X_train <- scale(train %>% select(-Attrition))
+y_train <- lbl$fit_transform(train$Attrition)
+X_test <- scale(test %>% select(-Attrition))
+y_test <- lbl$fit_transform(test$Attrition)
+```
+```{r}
+ncol(X_train)
+```
+```{r}
+install_tensorflow(method = "virtualenv")
+```
+
+```{r}
+# Network design
+ model <- keras_model_sequential()
+ model %>%# Input layer
+ layer_dense(units = 50, activation = "relu", input_shape =  ncol(X_train)) %>% 
+ layer_dropout(rate = 0.4) %>% 
+# Hidden layer
+ layer_dense(units = 20, activation = "relu") %>%
+# Output layer
+ layer_dropout(rate = 0.3) %>%
+ layer_dense(units = 2, activation = "sigmoid")
+```
+
+
+```{r}
+# Network config
+history <- model %>% compile(
+ loss = "binary_crossentropy",
+ optimizer = "adam",
+ metrics = c("accuracy")
+)# Running our data
+model %>% fit(
+ X_train, y_train, 
+ epochs = 100, 
+ batch_size = 50,
+ validation_split = 0.3
+)summary(model)
+```
+
+
+```{r}
+# Calculating accuracy
+predictions <- model %>% predict_classes(X_test)# Confusion Matrix
+df.test$diagnosis_B=as.integer(df.test$diagnosis_B)-1
+table(factor(predictions, levels=min(df.test$diagnosis_B):max(df.test$diagnosis_B)),factor(df.test$diagnosis_B, levels=min(df.test$diagnosis_B):max(df.test$diagnosis_B)))
+```
+
+
+```{r}
+```
+
+# [Other] ML Follow statistic machine learning BOOK
 
 ```{r}
 # Read data
