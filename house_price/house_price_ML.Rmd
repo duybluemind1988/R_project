@@ -125,8 +125,6 @@ caret::nearZeroVar(ames_train, saveMetrics = TRUE) %>%
 
 Similar to the process discussed to normalize target variables, parametric models that have distributional assumptions (e.g., GLMs, and regularized models) can benefit from minimizing the skewness of numeric features. When normalizing many variables, it’s best to use the Box-Cox (when feature values are strictly positive) or Yeo-Johnson (when feature values are not strictly positive) procedures as these methods will identify if a transformation is required and what the optimal transformation will be.
 
-
-
 ```{r}
 # Normalize all numeric columns
 recipe(Sale_Price ~ ., data = ames_train) %>%

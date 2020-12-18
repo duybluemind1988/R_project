@@ -631,20 +631,189 @@ ggplot(data, aes(x = SalePrice)) +
   facet_grid(HouseStyle ~ YrSold) 
 ```
 
-# Machine learning
+#6. Machine learning
 ```{r}
+#library(tidyverse)# include dplyr, tidr, ggplot2, tibble, readr, purr
+library(dplyr) # mutate, select, filter, summarize, arrange, group by 
+library(tidyr) # gather, spread, separate, extract, unite, %>%
+library(ggplot2)
+library(tibble) # provide tibble class (better than traditional data frame)
+library(readr) # read_csv, tsv, delim, table, log....
+library(purrr) # map, map_dbl, split,
+library(data.table)
+library(rsample)   # for data splitting
+library(caret)     # for model packages
+```
+
+# Get and summary data
+```{r}
+path="house_price_train.csv"
+data <- fread(path)
+dim(data)
+head(data)
+```
+
+# Remove column with high null value (>50%)
+```{r}
+null_value <- sapply(data, function(x) sum(is.na(x)))
+class(null_value)
+null_value_df <- as.data.frame(null_value) %>% arrange(desc(null_value)) %>% filter(null_value > 0)
+# Name the unnamed first column
+null_value_df <- cbind(Features= rownames(null_value_df), null_value_df)
+rownames(null_value_df) <- NULL
+# Add percentage column
+total_rows <- dim(data)[1]
+null_value_df <- null_value_df %>% mutate(percentage=null_value/total_rows*100)
+null_value_df
+```
+
+```{r}
+# Check which column have na value > 50 %
+data[, which(colMeans(is.na(data)) > 0.5)]
+```
+
+```{r}
+# Check which column did not have na value > 50 %
+col_low_na_value <- data[, which(colMeans(!is.na(data)) > 0.5)]
+col_low_na_value
+```
+```{r}
+data <- data %>% select(all_of(col_low_na_value))
+dim(data)
+```
+
+# Convert all character columns to factor:
+```{r}
+# all character columns to factor:
+data <- mutate_if(data, is.character, as.factor)
+```
+```{r}
+data
+```
+
+# Create training and test set
+
+```{r}
+# Create training (80%) and test (20%) sets for the 
+set.seed(430)
+split = createDataPartition(data$SalePrice, p =0.8, list = FALSE)
+train = data[split, ]
+test = data[-split, ]
+dim(train)
+dim(test)
+```
+There are three main steps in creating and applying feature engineering with recipes:
+VERY IMPORTANT
+- recipe: where you define your feature engineering steps to create your blueprint.
+- prepare: estimate feature engineering parameters based on training data.
+- bake: apply the blueprint to new data.
+
+Receipe:
+- Remove near-zero variance features that are categorical (aka nominal).
+- Ordinal encode our quality-based features (which are inherently ordinal).
+- Center and scale (i.e., standardize) all numeric features.
+- Perform dimension reduction by applying PCA to all numeric features.
+```{r}
+library(tidyverse)
+library(recipes)
+```
+
+```{r}
+recipe(SalePrice ~ ., data = train) %>%
+  step_nzv(all_nominal()) 
+```
+```{r}
+log(1000)
+log(100)
+```
+
+While your project’s needs may vary, here is a suggested order of potential steps that should work for most problems:
+
+- Filter out zero or near-zero variance features.
+- Perform imputation if required.
+- Normalize to resolve numeric feature skewness.
+- Standardize (center and scale) numeric features.
+- Perform dimension reduction (e.g., PCA) on numeric features.
+- One-hot or dummy encode categorical features.
+
+Functions that specify the role of the variables:
+
+- all_predictors() applies the step to the predictor variables only
+
+- all_outcomes() applies the step to the outcome variable(s) only
+
+Functions that specify the type of the variables:
+
+- all_nominal() applies the step to all variables that are nominal (categorical)
+
+- all_numeric() applies the step to all variables that are numeric
+
+Predictor variables: are also known as independent variables, x-variables, and input variables. A predictor variable explains changes in the response. Typically, you want to determine how changes in one or more predictors are associated with changes in the response.
+
+Outcome variables are usually the dependent variables which are observed and measured by changing independent variables. These variables determine the effect of the cause (independent) variables when changed for different values. The dependent variables are the outcomes of the experiments determining what was caused or what changed as a result of the study.
+```{r}
+blueprint <- recipe(SalePrice ~ ., data = train) %>%
+  step_nzv(all_nominal())  %>% #Remove near-zero variance features 
+  step_knnimpute(all_predictors(), neighbors = 6) %>%  # Impute, very slow in large data, need step outside
+  step_YeoJohnson(all_numeric()) %>% # Remove skewness
+  step_integer(matches("Qual|Cond|QC|Qu")) %>% # Ordinal encoder
+  step_center(all_numeric(), -all_outcomes()) %>% # center 
+  step_scale(all_numeric(), -all_outcomes()) %>% # scale
+  step_dummy(all_nominal(), one_hot = TRUE) %>% 
+  step_pca(all_numeric(), -all_outcomes()) #Perform dimension reduction
+blueprint
+```
+Prepare:
+
+Next, we need to train this blueprint on some training data. Remember, there are many feature engineering steps that we do not want to train on the test data (e.g., standardize and PCA) as this would create data leakage. So in this step we estimate these parameters based on the training data of interest.
+```{r}
+prepare <- prep(blueprint, training = train)
+prepare
+```
+Bake:
+
+Lastly, we can apply our blueprint to new data (e.g., the training data or future test data) with bake()
+
+```{r}
+baked_train <- bake(prepare, new_data = train)
+baked_test <- bake(prepare, new_data = test)
+baked_train
+```
+Consequently, the goal is to develop our blueprint, then within each resample iteration we want to apply prep() and bake() to our resample training and validation data. Luckily, the caret package simplifies this process. We only need to specify the blueprint and caret will automatically prepare and bake within each resample. We illustrate with the ames housing example.
+
+
+```{r}
+# Specify resampling plan 
+cv <- trainControl(
+  method = "repeatedcv", 
+  number = 5, #10
+  repeats = 1 #5
+)
+
+# Construct grid of hyperparameter values
+hyper_grid <- expand.grid(k = seq(2, 8, by = 1))
+# Each parameter turning will have 5 cv for evaluation (repates 1 in each cv) 
+# Tune a knn model using grid search
+knn_fit2 <- train(
+  blueprint, 
+  data = train, 
+  method = "knn", 
+  trControl = cv, 
+  #tuneGrid = hyper_grid,
+  metric = "RMSE"
+)
 ```
 
 
 ```{r}
+# print model results
+knn_fit2
 ```
 
 
 ```{r}
-```
-
-
-```{r}
+# plot cross validation results
+ggplot(knn_fit2)
 ```
 
 
