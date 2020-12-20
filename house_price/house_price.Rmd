@@ -381,19 +381,19 @@ fviz_pca_biplot(res.pca, repel = TRUE,
 
 ```{r}
 # Eigenvalues
-eig.val <- get_eigenvalue(res.pca)
-eig.val
+#eig.val <- get_eigenvalue(res.pca)
+#eig.val
   
 # Results for Variables
-res.var <- get_pca_var(res.pca)
-res.var$coord          # Coordinates
-res.var$contrib        # Contributions to the PCs
-res.var$cos2           # Quality of representation 
+#res.var <- get_pca_var(res.pca)
+#res.var$coord          # Coordinates
+#res.var$contrib        # Contributions to the PCs
+#res.var$cos2           # Quality of representation 
 # Results for individuals
-res.ind <- get_pca_ind(res.pca)
-res.ind$coord          # Coordinates
-res.ind$contrib        # Contributions to the PCs
-res.ind$cos2           # Quality of representation
+#res.ind <- get_pca_ind(res.pca)
+#res.ind$coord          # Coordinates
+#res.ind$contrib        # Contributions to the PCs
+#res.ind$cos2           # Quality of representation
 ```
 
 # Exploratory Data Analysis
@@ -713,6 +713,8 @@ Receipe:
 - Ordinal encode our quality-based features (which are inherently ordinal).
 - Center and scale (i.e., standardize) all numeric features.
 - Perform dimension reduction by applying PCA to all numeric features.
+
+# Recipes
 ```{r}
 library(tidyverse)
 library(recipes)
@@ -755,7 +757,7 @@ Outcome variables are usually the dependent variables which are observed and mea
 blueprint <- recipe(SalePrice ~ ., data = train) %>%
   step_nzv(all_nominal())  %>% #Remove near-zero variance features 
   step_knnimpute(all_predictors(), neighbors = 6) %>%  # Impute, very slow in large data, need step outside
-  step_YeoJohnson(all_numeric()) %>% # Remove skewness
+  step_YeoJohnson(all_numeric(),-all_outcomes()) %>% # Remove skewness
   step_integer(matches("Qual|Cond|QC|Qu")) %>% # Ordinal encoder
   step_center(all_numeric(), -all_outcomes()) %>% # center 
   step_scale(all_numeric(), -all_outcomes()) %>% # scale
@@ -779,21 +781,54 @@ baked_train <- bake(prepare, new_data = train)
 baked_test <- bake(prepare, new_data = test)
 baked_train
 ```
-Consequently, the goal is to develop our blueprint, then within each resample iteration we want to apply prep() and bake() to our resample training and validation data. Luckily, the caret package simplifies this process. We only need to specify the blueprint and caret will automatically prepare and bake within each resample. We illustrate with the ames housing example.
-
 
 ```{r}
-# Specify resampling plan 
 cv <- trainControl(
   method = "repeatedcv", 
   number = 5, #10
   repeats = 1 #5
 )
 
-# Construct grid of hyperparameter values
+knn_fit3 <- train(
+  SalePrice~.,
+  data = baked_train, 
+  method = "knn", 
+  trControl = cv, 
+  #tuneGrid = hyper_grid,
+  metric = "RMSE"
+)
+knn_fit3
+```
+```{r}
+# plot cross validation results
+ggplot(knn_fit3)
+```
+
+```{r}
+pred <- predict(knn_fit3, baked_test)
+RMSE(baked_test$SalePrice,pred) 
+# RMSE in document is 19905
+```
+
+# Use recipe in train
+Consequently, the goal is to develop our blueprint, then within each resample iteration we want to apply prep() and bake() to our resample training and validation data. Luckily, the caret package simplifies this process. We only need to specify the blueprint and caret will automatically prepare and bake within each resample. We illustrate with the ames housing example.
+
+
+ Note: very slow due to preprocee data by blueprint each cv
+ Specify resampling plan 
+cv <- trainControl(
+  method = "repeatedcv", 
+  number = 5, #10
+  repeats = 1 #5
+)
+
+Construct grid of hyperparameter values
+
 hyper_grid <- expand.grid(k = seq(2, 8, by = 1))
-# Each parameter turning will have 5 cv for evaluation (repates 1 in each cv) 
-# Tune a knn model using grid search
+
+Each parameter turning will have 5 cv for evaluation (repates 1 in each cv) 
+Tune a knn model using grid search
+
 knn_fit2 <- train(
   blueprint, 
   data = train, 
@@ -802,29 +837,376 @@ knn_fit2 <- train(
   #tuneGrid = hyper_grid,
   metric = "RMSE"
 )
-```
-
 
 ```{r}
 # print model results
-knn_fit2
+#knn_fit2
 ```
 
 
 ```{r}
 # plot cross validation results
-ggplot(knn_fit2)
+#ggplot(knn_fit2)
 ```
 
 
 ```{r}
+#pred <- predict(knn_fit2, test)
+#RMSE(test$SalePrice,pred) 
+```
+# Check all method
+# Do Parallel
+```{r}
+library(doParallel)
+cl <-makePSOCKcluster(5)
+registerDoParallel(cl)
+```
+```{r}
+library(caret) # logistic regression, lm, knn, 
+library(glmnet)   # for implementing regularized regression
+library(earth)     # for fitting MARS models
+library(rpart) # decision tree
+library(ipred)       # for fitting bagged decision trees
+library(ranger)   # a c++ implementation of random forest 
 ```
 
 
 ```{r}
+cv <- trainControl(
+  method = "cv", 
+  number = 4, #10
+)
+# Create blank modelList
+modelList <- vector(mode = "list", length = 0)
+timeList <- vector(mode = "list", length = 0)
+
+list_model <- c("knn","glmnet","svmRadial","cubist","lm","pcr","pls","bagEarth","ranger","svmLinear") 
+# knn,glmnet,svmRadial,lm,pcr,pls: 1 s
+# cubist: 3 s
+# xgbTree,xgblinear : very slow  # 2,7 min
+# ranger: c++ implementation of random forest  # 10 s
+# glmnet: lasso and ridge
+# bagEarth: Bagged  Multivariate adaptive regression splines # 7s
+# pcr: Principal component regression
+# pls: Partial least squares
+# xgbLinear: eXtreme Gradient Boosting
+for (model_name in list_model){
+  print(model_name)
+  set.seed(7)
+  start_time <- lubridate::second(Sys.time())
+  
+  Model <- train(SalePrice~., data=baked_train, method=model_name, metric="RMSE", trControl=cv)
+  
+  end_time <- lubridate::second(Sys.time())
+  time <- (end_time - start_time)
+  print(time)
+  
+  modelList[[model_name]] <- Model
+  timeList[[model_name]] <- time
+}
+
+```
+
+```{r}
+#bwplot(resamples(modelList),metric="RMSE")
+bwplot(resamples(modelList))
+bwplot(resamples(modelList),metric="Rsquared")
+```
+```{r}
+time_s <- t(data.frame(timeList)) # transpose
+time_df<-data.frame(time_s)
+# name id column in R
+time_df <- cbind(model_name= rownames(time_df), time= time_df)
+rownames(time_df) <- NULL
+ggplot(time_df,aes(model_name,time_s))+geom_point()+ geom_line(aes(group = 1))
+```
+
+```{r}
+summary(resamples(modelList))
+```
+
+```{r}
+modelList[["knn"]]$results
+```
+Prediction:
+```{r}
+for (model_name in names(modelList) ){
+  print(model_name)
+  pred <- predict(modelList[[model_name]], baked_test)
+  print(RMSE(baked_test$SalePrice,pred) )
+}
+```
+No different between select target vs not select target in predict
+for (model_name in names(modelList) ){
+  print(model_name)
+  pred <- predict(modelList[[model_name]], baked_test %>% select(-SalePrice))
+  print(RMSE(baked_test$SalePrice,pred) )
+}
+# Feature important
+
+Best model: ranger (C++ rf), cubist, bagEarth
+```{r}
+modelList["knn"]$knn
+modelList["knn"]$knn$bestTune
+modelList["ranger"]$ranger
+modelList["ranger"]$ranger$bestTune
+modelList["pls"]$pls
+modelList["pls"]$pls$bestTune
+```
+```{r}
+names(modelList)
+```
+
+```{r}
+vip::vip(modelList["pls"]$pls, num_features = 20, method = "model")
+vip::vip(modelList["glmnet"]$glmnet, num_features = 20, method = "model")
+vip::vip(modelList["bagEarth"]$bagEarth, num_features = 20, method = "model")
+vip::vip(modelList["cubist"]$cubist, num_features = 20, method = "model")
+```
+```{r}
+library(pdp)
+pdp::partial(modelList["cubist"]$cubist, "PC2", grid.resolution = 20, plot = TRUE)
+pdp::partial(modelList["cubist"]$cubist, "PC1", grid.resolution = 20, plot = TRUE)
+```
+Important feature ranger
+```{r}
+cv <- trainControl(
+  method = "cv", 
+  number = 4, #10
+)
+
+fit <- train(
+    SalePrice~.,
+    data = baked_train,
+    method = "ranger",
+    trControl = trainControl(method="cv", number = 4, allowParallel = TRUE, verbose = TRUE),
+    importance = 'impurity'
+)
+```
+
+```{r}
+fit
+```
+```{r}
+varImp(fit)
+```
+
+
+# H2O model
+Prepare data for H2O model
+```{r}
+path="house_price_train.csv"
+data <- fread(path)
+dim(data)
+#head(data)
+# Remove column with high null value (>50%)
+null_value <- sapply(data, function(x) sum(is.na(x)))
+class(null_value)
+null_value_df <- as.data.frame(null_value) %>% arrange(desc(null_value)) %>% filter(null_value > 0)
+# Name the unnamed first column
+null_value_df <- cbind(Features= rownames(null_value_df), null_value_df)
+rownames(null_value_df) <- NULL
+# Add percentage column
+total_rows <- dim(data)[1]
+null_value_df <- null_value_df %>% mutate(percentage=null_value/total_rows*100)
+null_value_df
+# Check which column did not have na value > 50 %
+col_low_na_value <- data[, which(colMeans(!is.na(data)) > 0.5)]
+col_low_na_value
+data <- data %>% select(all_of(col_low_na_value))
+dim(data)
+# all character columns to factor:
+data <- mutate_if(data, is.character, as.factor)
+# Create training (80%) and test (20%) sets for the 
+set.seed(430)
+split = createDataPartition(data$SalePrice, p =0.8, list = FALSE)
+train = data[split, ]
+test = data[-split, ]
+dim(train)
+dim(test)
+```
+```{r}
+library(recipes)
+blueprint <- recipe(SalePrice ~ ., data = train) %>%
+  step_nzv(all_nominal())  %>% #Remove near-zero variance features 
+  step_knnimpute(all_predictors(), neighbors = 6) %>%  # Impute, very slow in large data, need step outside
+  step_YeoJohnson(all_numeric(),-all_outcomes()) %>% # Remove skewness
+  step_integer(matches("Qual|Cond|QC|Qu")) %>% # Ordinal encoder
+  step_center(all_numeric(), -all_outcomes()) %>% # center 
+  step_scale(all_numeric(), -all_outcomes()) %>% # scale
+  step_dummy(all_nominal(), one_hot = TRUE) %>% 
+  step_pca(all_numeric(), -all_outcomes()) #Perform dimension reduction
+prepare <- prep(blueprint, training = train)
+baked_train <- bake(prepare, new_data = train)
+baked_test <- bake(prepare, new_data = test)
+```
+
+```{r}
+library(h2o)
+h2o.no_progress()
+h2o.init(max_mem_size = "5g")
+```
+
+```{r}
+# convert training data to h2o object
+train_h2o <- as.h2o(baked_train)
+test_h2o <- as.h2o(baked_test)
+# set the response column to Sale_Price
+response <- "SalePrice"
+n_features <- length(setdiff(names(baked_train), "SalePrice"))
+# set the predictor names
+predictors <- setdiff(colnames(baked_train), response)
+```
+
+Random Forest
+
+```{r}
+start_time <- lubridate::second(Sys.time())
+h2o_rf1 <- h2o.randomForest(
+    x = predictors, 
+    y = response,
+    training_frame = train_h2o, 
+    ntrees = n_features * 10, # very slow if high dim, not pca
+    #ntrees=300,
+    seed = 123
+)
+end_time <- lubridate::second(Sys.time())
+h2o_rf1
+pred <-h2o.predict(h2o_rf1, newdata = test_h2o)
+print(RMSE(test_h2o$SalePrice,pred) )
+time <- (end_time - start_time)
+print(time)
+# from 10 s to 1.6 s with RF
+```
+
+```{r}
+p1 <- vip::vip(h2o_rf1, num_features = 25, bar = TRUE)
+p1
+```
+
+```{r}
+# No different between slect or not select target in prediction
+max_col_num <- dim(test_h2o)[2]
+pred <-h2o.predict(h2o_rf1, newdata = test_h2o[,2:max_col_num])
+print(RMSE(test_h2o$SalePrice,pred) )
+```
+
+Gradient Boosting Machine (GBM)
+
+```{r}
+start_time <- lubridate::second(Sys.time())
+h2o_gbm <- h2o.gbm(
+    x = predictors, 
+    y = response,
+    training_frame = train_h2o, 
+    ntrees = n_features * 10, # very slow if high dim, not pca
+    learn_rate=0.2,
+    seed = 123
+)
+end_time <- lubridate::second(Sys.time())
+h2o_gbm
+pred <-h2o.predict(h2o_gbm, newdata = test_h2o)
+print(RMSE(test_h2o$SalePrice,pred) )
+time <- (end_time - start_time)
+print(time)
+```
+```{r}
+# To obtain the Mean-squared Error by tree from the model object:
+h2o_gbm@model$scoring_history
+```
+
+Generalized Linear Models (GLM)
+
+```{r}
+start_time <- lubridate::second(Sys.time())
+h2o_glm <- h2o.glm(
+    x = predictors, 
+    y = response,
+    training_frame = train_h2o, 
+    #lambda_search = TRUE,
+    seed = 123
+)
+end_time <- lubridate::second(Sys.time())
+h2o_glm
+pred <-h2o.predict(h2o_glm, newdata = test_h2o)
+print(RMSE(test_h2o$SalePrice,pred) )
+time <- (end_time - start_time)
+print(time)
+```
+Deep learning
+
+```{r}
+start_time <- lubridate::second(Sys.time())
+h2o_dl <- h2o.deeplearning(
+    x = predictors, 
+    y = response,
+    training_frame = train_h2o, 
+    hidden = 25,
+    seed = 123
+)
+end_time <- lubridate::second(Sys.time())
+h2o_dl
+pred <-h2o.predict(h2o_dl, newdata = test_h2o)
+print(RMSE(test_h2o$SalePrice,pred) )
+time <- (end_time - start_time)
+print(time)
 ```
 
 
 ```{r}
+h2o.performance(h2o_dl,test_h2o)
 ```
+
+XGBoost
+
+```{r}
+start_time <- lubridate::second(Sys.time())
+h2o_model <- h2o.xgboost(
+    x = predictors, 
+    y = response,
+    training_frame = train_h2o, 
+    seed = 123
+)
+end_time <- lubridate::second(Sys.time())
+h2o_model
+pred <-h2o.predict(h2o_model, newdata = test_h2o)
+print(RMSE(test_h2o$SalePrice,pred) )
+time <- (end_time - start_time)
+print(time)
+# From 2.7 minutes to 1.69 s for xgboost
+```
+
+```{r}
+# Eval performance:
+perf <- h2o.performance(h2o_model)
+perf
+# Generate predictions on a test set (if necessary):
+pred <- h2o.predict(h2o_model, newdata = test_h2o)
+
+# Extract feature interactions:
+#feature_interactions = h2o.feature_interaction(h2o_model)
+#feature_interactions
+```
+
+# Auto ML H2O
+```{r}
+# Use AutoML to find a list of candidate models (i.e., leaderboard)
+auto_ml <- h2o.automl(
+  x = predictors, y = response, training_frame = train_h2o, nfolds = 4, 
+  max_runtime_secs = 60 * 10, max_models = 50,
+  keep_cross_validation_predictions = TRUE, sort_metric = "RMSE", seed = 123,
+  stopping_rounds = 50, stopping_metric = "RMSE", #stopping_tolerance = 0
+)
+```
+
+
+```{r}
+# Assess the leader board; the following truncates the results to show the top 
+# and bottom 15 models. You can get the top model with auto_ml@leader
+auto_ml@leaderboard %>% 
+  as.data.frame() %>%
+  dplyr::select(model_id, rmse) %>%
+  dplyr::slice(1:25)
+```
+
 

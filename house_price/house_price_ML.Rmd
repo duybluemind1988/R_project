@@ -660,6 +660,7 @@ a<-as.data.frame(coef(summary(cv_model3)))
 a
 
 ```
+
 ```{r}
 # model without Garage_Area
 set.seed(123)
