@@ -1631,7 +1631,7 @@ So it seemed as if the Total Basement Surface in square feet (TotalBsmtSF) is fu
 
 Basement Quality is a confusing variable name, as it turns out that it specifically rates the Height of the basement.
 
-#Feature engineering
+# 7 Feature engineering
 
 ##Total number of Bathrooms
 

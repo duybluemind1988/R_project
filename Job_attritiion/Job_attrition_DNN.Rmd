@@ -226,7 +226,7 @@ data %>%
            fill = fill_col)) +
   geom_bar(stat = "identity",
            position = "fill") +
-  scale_y_continuous(breaks = seq(0, 1, .2),label = percent) +
+  scale_y_continuous(breaks = seq(0, 1, .2),label =scales::percent) +
   geom_text(aes(label = lbl), 
             size = 3, 
             position = position_stack(vjust = 0.5)) +
@@ -341,45 +341,27 @@ ggplot(data, aes(x = Attrition,
                outlier.size = 2) 
 
 ```
+
 ```{r}
-ggplot(data, aes(x = Attrition, 
-                     y = MonthlyIncome)) +
+facet_plot <- function(data,categorical_col,quantitative_col,facet_col){
+  # plot the distribution using violin and boxplots
+  ggplot(data, aes_(x = categorical_col, 
+                     y = quantitative_col)) +
   geom_violin(fill = "cornflowerblue") +
   geom_boxplot(width = .2, 
                fill = "orange",
                outlier.color = "orange",
                outlier.size = 2) +
-  facet_wrap(~Department) 
+  facet_wrap(facet_col) +
+  labs(title=facet_col)
+}
 ```
+
 ```{r}
-ggplot(data, aes(x = Attrition, 
-                     y = MonthlyIncome)) +
-  geom_violin(fill = "cornflowerblue") +
-  geom_boxplot(width = .2, 
-               fill = "orange",
-               outlier.color = "orange",
-               outlier.size = 2) +
-  facet_wrap(~JobRole) 
-```
-```{r}
-ggplot(data, aes(x = Attrition, 
-                     y = MonthlyIncome)) +
-  geom_violin(fill = "cornflowerblue") +
-  geom_boxplot(width = .2, 
-               fill = "orange",
-               outlier.color = "orange",
-               outlier.size = 2) +
-  facet_wrap(~JobSatisfaction) 
-```
-```{r}
-ggplot(data, aes(x = Attrition, 
-                     y = MonthlyIncome)) +
-  geom_violin(fill = "cornflowerblue") +
-  geom_boxplot(width = .2, 
-               fill = "orange",
-               outlier.color = "orange",
-               outlier.size = 2) +
-  facet_wrap(~PerformanceRating) 
+facet_plot(data,~Attrition,~MonthlyIncome,~Department)
+facet_plot(data,~Attrition,~MonthlyIncome,~JobRole)
+facet_plot(data,~Attrition,~MonthlyIncome,~JobSatisfaction)
+facet_plot(data,~Attrition,~MonthlyIncome,~PerformanceRating)
 ```
 
 ```{r}
@@ -396,8 +378,7 @@ Categorical_vs_quantitative_plot <- function(data,categorical_col,quantitative_c
 ```
 
 ```{r}
-data %>% 
-  select_if(is.numeric)
+head(data)
 ```
 
 
