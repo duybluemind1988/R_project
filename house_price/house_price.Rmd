@@ -1188,12 +1188,229 @@ pred <- h2o.predict(h2o_model, newdata = test_h2o)
 #feature_interactions
 ```
 
+#  Stacked Models H2O (GLM, RF, GBM, XGB)
+
+```{r}
+#library(tidyverse)# include dplyr, tidr, ggplot2, tibble, readr, purr
+library(dplyr) # mutate, select, filter, summarize, arrange, group by 
+library(tidyr) # gather, spread, separate, extract, unite, %>%
+library(ggplot2)
+library(tibble) # provide tibble class (better than traditional data frame)
+library(readr) # read_csv, tsv, delim, table, log....
+library(purrr) # map, map_dbl, split,
+library(data.table)
+library(rsample)   # for data splitting
+library(caret)     # for model packages
+library(recipes)
+library(h2o)
+h2o.no_progress()
+h2o.init(max_mem_size = "2g")
+```
+
+```{r}
+path="house_price_train.csv"
+data <- fread(path)
+dim(data)
+#head(data)
+# Remove column with high null value (>50%)
+null_value <- sapply(data, function(x) sum(is.na(x)))
+class(null_value)
+null_value_df <- as.data.frame(null_value) %>% arrange(desc(null_value)) %>% filter(null_value > 0)
+# Name the unnamed first column
+null_value_df <- cbind(Features= rownames(null_value_df), null_value_df)
+rownames(null_value_df) <- NULL
+# Add percentage column
+total_rows <- dim(data)[1]
+null_value_df <- null_value_df %>% mutate(percentage=null_value/total_rows*100)
+null_value_df
+# Check which column did not have na value > 50 %
+col_low_na_value <- data[, which(colMeans(!is.na(data)) > 0.5)]
+col_low_na_value
+data <- data %>% select(all_of(col_low_na_value))
+dim(data)
+# all character columns to factor:
+data <- mutate_if(data, is.character, as.factor)
+# Create training (80%) and test (20%) sets for the 
+set.seed(430)
+split = createDataPartition(data$SalePrice, p =0.8, list = FALSE)
+train = data[split, ]
+test = data[-split, ]
+dim(train)
+dim(test)
+
+```
+
+
+```{r}
+blueprint <- recipe(SalePrice ~ ., data = train) %>%
+  step_nzv(all_nominal())  %>% #Remove near-zero variance features 
+  step_knnimpute(all_predictors(), neighbors = 6) %>%  # Impute, very slow in large data in train, need step outside
+  step_YeoJohnson(all_numeric(),-all_outcomes()) %>% # Remove skewness
+  step_integer(matches("Qual|Cond|QC|Qu")) %>% # Ordinal encoder
+  step_center(all_numeric(), -all_outcomes()) %>% # center 
+  step_scale(all_numeric(), -all_outcomes()) #%>% # scale
+  #step_dummy(all_nominal(), one_hot = TRUE) %>% 
+  #step_pca(all_numeric(), -all_outcomes()) #Perform dimension reduction
+```
+
+
+```{r}
+# Create training & test sets for h2o
+train_h2o <- prep(blueprint, training = train, retain = TRUE) %>%
+  juice() %>%
+  as.h2o()
+test_h2o <- prep(blueprint, training = train) %>%
+  bake(new_data = test) %>%
+  as.h2o()
+
+# Get response and feature names
+Y <- "SalePrice"
+X <- setdiff(names(train_h2o), Y)
+```
+
+```{r}
+train_h2o
+```
+
+```{r}
+# Train & cross-validate a GLM model
+best_glm <- h2o.glm(
+  x = X, y = Y, training_frame = train_h2o, alpha = 0.1,
+  remove_collinear_columns = TRUE, nfolds = 10, fold_assignment = "Modulo",
+  keep_cross_validation_predictions = TRUE, seed = 123
+)
+
+# Train & cross-validate a RF model
+best_rf <- h2o.randomForest(
+  x = X, y = Y, training_frame = train_h2o, ntrees = 300, #mtries = 20,
+  max_depth = 30, min_rows = 1, sample_rate = 0.8, nfolds = 10,
+  fold_assignment = "Modulo", keep_cross_validation_predictions = TRUE,
+  seed = 123, stopping_rounds = 50, stopping_metric = "RMSE",
+  stopping_tolerance = 0
+)
+
+# Train & cross-validate a GBM model
+best_gbm <- h2o.gbm(
+  x = X, y = Y, training_frame = train_h2o, ntrees = 300, learn_rate = 0.01,
+  max_depth = 7, min_rows = 5, sample_rate = 0.8, nfolds = 10,
+  fold_assignment = "Modulo", keep_cross_validation_predictions = TRUE,
+  seed = 123, stopping_rounds = 50, stopping_metric = "RMSE",
+  stopping_tolerance = 0
+)
+
+# Train & cross-validate an XGBoost model
+best_xgb <- h2o.xgboost(
+  x = X, y = Y, training_frame = train_h2o, ntrees = 300, learn_rate = 0.05,
+  max_depth = 3, min_rows = 3, sample_rate = 0.8, #categorical_encoding = "Enum",
+  nfolds = 10, fold_assignment = "Modulo", 
+  keep_cross_validation_predictions = TRUE, seed = 123, stopping_rounds = 50,
+  stopping_metric = "RMSE", stopping_tolerance = 0
+)
+```
+
+```{r}
+best_glm
+best_rf
+best_gbm
+best_xgb
+```
+Model with data one hot encoder and PCA
+
+H2ORegressionMetrics: glm
+** Reported on cross-validation data. **
+** 10-fold cross-validation on training data (Metrics computed for combined holdout predictions) **
+
+MSE:  1549831955
+RMSE:  39367.91
+MAE:  25006.05
+RMSLE:  NaN
+Mean Residual Deviance :  1549831955
+R^2 :  0.7574324
+Null Deviance :7.483396e+12
+Null D.o.F. :1168
+Residual Deviance :1.811754e+12
+Residual D.o.F. :1163
+AIC :28069.17
+
+H2ORegressionMetrics: drf
+** Reported on cross-validation data. **
+** 10-fold cross-validation on training data (Metrics computed for combined holdout predictions) **
+
+MSE:  1137658043
+RMSE:  33729.19
+MAE:  20646.21
+RMSLE:  0.1679699
+Mean Residual Deviance :  1137658043
+
+H2ORegressionMetrics: gbm
+** Reported on cross-validation data. **
+** 10-fold cross-validation on training data (Metrics computed for combined holdout predictions) **
+
+MSE:  1147789389
+RMSE:  33879.04
+MAE:  21544.07
+RMSLE:  0.1697947
+Mean Residual Deviance :  1147789389
+
+H2ORegressionMetrics: xgboost
+** Reported on cross-validation data. **
+** 10-fold cross-validation on training data (Metrics computed for combined holdout predictions) **
+
+MSE:  1196728797
+RMSE:  34593.77
+MAE:  21019.3
+RMSLE:  0.1681697
+Mean Residual Deviance :  1196728797
+```{r}
+# Train a stacked tree ensemble
+ensemble_tree <- h2o.stackedEnsemble(
+  x = X, y = Y, training_frame = train_h2o, model_id = "my_tree_ensemble",
+  base_models = list(best_glm, best_rf, best_gbm, best_xgb),
+  metalearner_algorithm = "drf"
+)
+```
+
+
+```{r}
+# Get results from base learners
+get_rmse <- function(model) {
+  results <- h2o.performance(model, newdata = test_h2o)
+  results@metrics$RMSE
+}
+list(best_glm, best_rf, best_gbm, best_xgb) %>%
+  purrr::map_dbl(get_rmse)
+## [1] 30024.67 23075.24 20859.92 21391.20
+
+# Stacked results
+h2o.performance(ensemble_tree, newdata = test_h2o)@metrics$RMSE
+# data with one hot and pca: 28175.82
+# data with no one hot and pca: 20236.79 # VERY BEST
+## Result from ML book [1] 20664.56
+```
+```{r}
+h2o.performance(best_glm, newdata = test_h2o)@metrics$RMSE # Worse RMSE
+h2o.performance(best_rf, newdata = test_h2o)@metrics$RMSE
+h2o.performance(best_gbm, newdata = test_h2o)@metrics$RMSE # BEST RMSE, near the same as esemble_tree
+h2o.performance(best_xgb, newdata = test_h2o)@metrics$RMSE
+
+```
+
+
+```{r}
+data.frame(
+  GLM_pred = as.vector(h2o.getFrame(best_glm@model$cross_validation_holdout_predictions_frame_id$name)),
+  RF_pred = as.vector(h2o.getFrame(best_rf@model$cross_validation_holdout_predictions_frame_id$name)),
+  GBM_pred = as.vector(h2o.getFrame(best_gbm@model$cross_validation_holdout_predictions_frame_id$name)),
+  XGB_pred = as.vector(h2o.getFrame(best_xgb@model$cross_validation_holdout_predictions_frame_id$name))
+) %>% cor()
+```
+
 # Auto ML H2O
 ```{r}
 # Use AutoML to find a list of candidate models (i.e., leaderboard)
 auto_ml <- h2o.automl(
-  x = predictors, y = response, training_frame = train_h2o, nfolds = 4, 
-  max_runtime_secs = 60 * 10, max_models = 50,
+  x = X, y = Y, training_frame = train_h2o, nfolds = 4, 
+  max_runtime_secs = 60 * 20, max_models = 50,
   keep_cross_validation_predictions = TRUE, sort_metric = "RMSE", seed = 123,
   stopping_rounds = 50, stopping_metric = "RMSE", #stopping_tolerance = 0
 )
@@ -1209,4 +1426,32 @@ auto_ml@leaderboard %>%
   dplyr::slice(1:25)
 ```
 
+```{r}
+h2o.ls()
+h2o.removeAll()
+h2o.ls()
+```
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
 

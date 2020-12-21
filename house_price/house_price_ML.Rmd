@@ -2126,6 +2126,10 @@ test_h2o <- prep(blueprint, training = ames_train) %>%
 Y <- "Sale_Price"
 X <- setdiff(names(ames_train), Y)
 ```
+```{r}
+ames
+train_h2o
+```
 
 #**15.3 Stacking existing models**
 
