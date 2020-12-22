@@ -1436,15 +1436,162 @@ h2o.removeAll()
 h2o.ls()
 ```
 
+# Compare ML method handle missing data with R
 ```{r}
+library(tidyverse)
+library(caret)
+library(data.table)
+library(recipes)
+```
+
+```{r}
+path_train="house_price_train.csv"
+path_test="house_price_test.csv"
+train_data <- fread(path_train)
+test_data <- fread(path_test)
+dim(train_data)
+dim(test_data)
+```
+```{r}
+library(VIM)
+VIM::aggr(train_data)
+```
+```{r}
+train_dataNoNA <- na.exclude(train_data)
+VIM::aggr(train_dataNoNA)
+```
+
+# 1. Use recipes
+
+
+```{r}
+train_data <- mutate_if(train_data, is.character, as.factor)
+test_data <- mutate_if(test_data, is.character, as.factor)
+```
+```{r}
+head(train_data)
+```
+
+```{r}
+library(Hmisc)
+impute(train_data$Alley, "other")
+impute(train_data, "other")
+```
+
+```{r}
+blueprint <- recipe(SalePrice ~ ., data = train_data) %>%
+  step_nzv(all_nominal())  %>% #Remove near-zero variance features 
+  #step_knnimpute(all_predictors(), neighbors = 6) %>%  # Impute
+  step_YeoJohnson(all_numeric(),-all_outcomes()) %>% # Remove skewness
+  #step_integer(matches("Qual|Cond|QC|Qu")) %>% # Ordinal encoder
+  step_center(all_numeric(), -all_outcomes()) %>% # center 
+  step_scale(all_numeric(), -all_outcomes()) # scale
+prepare <- prep(blueprint, training = train_data)
+prepare
+```
+```{r}
+baked_train <- bake(prepare, new_data = train_data)
+baked_test <- bake(prepare, new_data = test_data)
+#head(baked_train)
+```
+
+```{r}
+head(baked_train)
+```
+
+```{r}
+cv_glmnet <- train(
+  SalePrice ~.,
+  data=baked_train,
+  method = "ranger",
+  trControl = trainControl(method = "cv", number = 4),
+)
+```
+
+# 2. Use caret preprocess
+```{r}
+library(mice)
+complete(mice(data = train_data, m = 1, method = "mean"))
+```
+
+```{r}
+cv_glmnet <- train(
+  SalePrice ~.,
+  data=train_data,
+  method = "ranger",
+  preProc = c("nzv","YeoJohnson","center", "scale"),
+  trControl = trainControl(method = "cv", number = 4),
+)
+```
+
+# Method from kaggle (OK)
+https://www.kaggle.com/theslwayne/housing-data
+
+NOTE:
+
+uu diem cua phuong phap nay: khong can loai bo missing value, tuy nhien phai label encoding toan bo factor, dieu nay co the gay hieu nham trong thuat toan. Co the Impute cac missing value thanh other label, sau do one hot encoding va reduce pca
+```{r}
+# Indecies for splitting the data for testing and training
+inTrain <- createDataPartition(train_data$SalePrice, p = 0.8, list = F, times = 1)
+dim(inTrain)
+```
+```{r}
+head(train_data)
 ```
 
 
 ```{r}
+# Converting dataset into a matrix
+training_data_matrix <- train_data %>%
+    select(-SalePrice) %>% # Removing target values from the matrix
+    mutate_if(is.character, as.factor) %>% # Converting String variables into factors
+    mutate_if(is.factor, as.numeric) %>% # Label encoding
+    #select_if(is.numeric) %>%
+    as.matrix()
+
+```
+
+```{r}
+dim(train_data)
+dim(training_data_matrix)
+head(training_data_matrix)
 ```
 
 
 ```{r}
+# Train a XGBoost model
+library(xgboost)
+model_xgb1 <- xgboost(data = training_data_matrix[inTrain, ],
+                      label = train_data$SalePrice[inTrain], 
+                      nrounds = 50, eval_metric = "rmse",verbose=0)
+```
+
+
+```{r}
+# Predicting using the test data
+testPreds <- predict(model_xgb1, training_data_matrix[-inTrain, ])
+
+# Print the mean error
+RMSE(train_data$SalePrice[-inTrain],testPreds)
+```
+
+Making Predictions
+```{r}
+# Preprocessing and making a matrix from the dataset
+test_data_matrix <- test_data %>%
+    mutate_if(is.character, as.factor) %>%
+    mutate_if(is.factor, as.numeric) %>%
+    #select_if(is.numeric) %>%
+    as.matrix()
+```
+
+```{r}
+# Predicting Prices
+subPreds <- predict(model_xgb1, test_data_matrix)
+# Format CSV as specified in the competition discription
+predFile <- tibble(Id = test_data$Id, SalePrice = subPreds)
+# Saving file
+write_csv(predFile, "submission.csv")
 ```
 
 

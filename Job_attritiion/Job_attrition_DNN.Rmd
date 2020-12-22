@@ -1846,8 +1846,8 @@ registerDoParallel(cl)
 ```{r}
 cv <- trainControl(
   method = "cv", 
-  number = 4, #10
-)
+  number = 4)
+
 metric <- "Accuracy"
 # Create blank modelList
 modelList <- vector(mode = "list", length = 0)
@@ -2040,20 +2040,202 @@ print(time)
 h2o.performance(h2o_dl,test_h2o)
 ```
 
+# LIME: Machine Learning Model Interpretability with LIME
+https://www.business-science.io/business/2018/06/25/lime-local-feature-interpretation.html
 
 ```{r}
+# required packages
+# install vip from github repo: devtools::install_github("koalaverse/vip")
+library(lime)       # ML local interpretation
+library(vip)        # ML global interpretation
+library(pdp)        # ML global interpretation
+library(ggplot2)    # visualization pkg leveraged by above packages
+library(caret)      # ML model building
+library(h2o)        # ML model building
+
+# other useful packages
+library(tidyverse)  # Use tibble, dplyr
+library(rsample)    # Get HR Data via rsample::attrition
+library(gridExtra)  # Plot multiple lime plots on one graph
+
+# initialize h2o
+h2o.init()
 ```
 
 
 ```{r}
+h2o.no_progress()
+```
+
+```{r}
+library(modeldata) # data for some ML model
+data("attrition")
 ```
 
 
 ```{r}
+# create data sets
+df <- attrition %>% 
+  mutate_if(is.ordered, factor, ordered = FALSE) %>%
+  mutate(Attrition = factor(Attrition, levels = c("Yes", "No")))
+df
+```
+For this exemplar I retain most of the observations in the training data sets and retain 5 observations in the local_obs set. These 5 observations are going to be treated as new observations that we wish to understand why the particular predicted response was made.
+
+```{r}
+index <- 1:5
+train_obs <- df[-index, ]
+local_obs <- df[index, ]
+
+# create h2o objects for modeling
+y <- "Attrition"
+x <- setdiff(names(train_obs), y)
+train_obs.h2o <- as.h2o(train_obs)
+local_obs.h2o <- as.h2o(local_obs)
 ```
 
 
 ```{r}
+train_obs.h2o
+local_obs.h2o
+```
+We will explore how to visualize a few of the more popular machine learning algorithms and packages in R. For brevity I train default models and do not emphasize hyperparameter tuning. The following produces:
+
+Random forest model using ranger via the caret package
+Random forest model using h2o
+Elastic net model using h2o
+GBM model using h2o
+Random forest model using ranger directly
+
+```{r}
+# Create Random Forest model with ranger via caret
+fit.caret <- train(
+  Attrition ~ ., 
+  data       = train_obs, 
+  method     = 'ranger',
+  trControl  = trainControl(method = "cv", number = 5, classProbs = TRUE),
+  tuneLength = 1,
+  importance = 'impurity'
+  )
+
+# create h2o models
+h2o_rf  <- h2o.randomForest(x, y, training_frame = train_obs.h2o)
+h2o_glm <- h2o.glm(x, y, training_frame = train_obs.h2o, family = "binomial")
+h2o_gbm <- h2o.gbm(x, y, training_frame = train_obs.h2o)
+
+# ranger model --> model type not built in to LIME
+fit.ranger <- ranger::ranger(
+  Attrition ~ ., 
+  data        = train_obs, 
+  importance  = 'impurity',
+  probability = TRUE
+)
+```
+
+# Global Interpretation
+```{r}
+vip(fit.ranger) + ggtitle("ranger: RF")
+```
+```{r}
+# built-in PDP support in H2O
+h2o.partialPlot(h2o_rf, data = train_obs.h2o, cols = "MonthlyIncome")
+```
+
+
+```{r}
+fit.ranger %>%
+  pdp::partial(pred.var = "MonthlyIncome", grid.resolution = 25, ice = TRUE) %>%
+  autoplot(rug = TRUE, train = train_obs, alpha = 0.1, center = TRUE)
+```
+# Local Interpretation
+
+```{r}
+explainer_caret <- lime::lime(train_obs, fit.caret, n_bins = 5)
+
+class(explainer_caret)
+```
+
+
+```{r}
+summary(explainer_caret)
+```
+
+
+```{r}
+explanation_caret <- lime::explain(
+  x               = local_obs, 
+  explainer       = explainer_caret, 
+  n_permutations  = 5000,
+  dist_fun        = "gower",
+  kernel_width    = .75,
+  n_features      = 5, 
+  feature_select  = "highest_weights",
+  labels          = "Yes"
+  )
+```
+
+
+```{r}
+tibble::glimpse(explanation_caret)
+```
+```{r}
+plot_features(explanation_caret)
+```
+
+
+```{r}
+plot_explanations(explanation_caret)
+```
+
+Tuning LIME
+```{r}
+# tune LIME algorithm
+explanation_caret <- lime::explain(
+  x               = local_obs, 
+  explainer       = explainer_caret, 
+  n_permutations  = 5000,
+  dist_fun        = "manhattan",
+  kernel_width    = 3,
+  n_features      = 5, 
+  feature_select  = "lasso_path",
+  labels          = "Yes"
+  )
+
+plot_features(explanation_caret)
+```
+
+Supported vs Non-support models
+
+Currently, lime supports supervised models produced in caret, mlr, xgboost, h2o, keras, and MASS::lda. Consequently, any supervised models created with these packages will function just fine with lime.
+```{r}
+explainer_h2o_rf  <- lime(train_obs, h2o_rf, n_bins = 5)
+explainer_h2o_glm <- lime(train_obs, h2o_glm, n_bins = 5)
+explainer_h2o_gbm <- lime(train_obs, h2o_gbm, n_bins = 5)
+
+explanation_rf  <- lime::explain(local_obs, 
+                                 explainer_h2o_rf, 
+                                 n_features      = 5, 
+                                 labels          = "Yes", 
+                                 kernel_width    = .1, 
+                                 feature_select  = "highest_weights")
+explanation_glm <- lime::explain(local_obs, 
+                                 explainer_h2o_glm, 
+                                 n_features      = 5, 
+                                 labels          = "Yes", 
+                                 kernel_width    = .1, 
+                                 feature_select  = "highest_weights")
+explanation_gbm <- lime::explain(local_obs, 
+                                 explainer_h2o_gbm, 
+                                 n_features      = 5, 
+                                 labels          = "Yes", 
+                                 kernel_width    = .1, 
+                                 feature_select  = "highest_weights")
+
+p1 <- plot_features(explanation_rf,  ncol = 1) + ggtitle("rf")
+p2 <- plot_features(explanation_glm, ncol = 1) + ggtitle("glm")
+p3 <- plot_features(explanation_gbm, ncol = 1) + ggtitle("gbm")
+
+gridExtra::grid.arrange(p1, p2, p3, nrow = 1)
 ```
 
 
