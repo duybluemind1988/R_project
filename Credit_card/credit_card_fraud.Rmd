@@ -408,7 +408,8 @@ library(data.table)
 ```
 
 ```{r}
-path="/media/ad/01D6B57CFBE4DB20/1.Linux/Data/creditcard.csv"
+# path="/media/ad/01D6B57CFBE4DB20/1.Linux/Data/creditcard.csv"
+path="C:/Users/DNN/Data_science/Git/creditcard.csv"
 creditcard <- fread(path)
 ```
 
@@ -691,27 +692,94 @@ pred %>%
 Now, this looks much better! We did miss 17% of the fraud cases but we also did not mis-classify too many of the non-fraud cases.
 
 In real-life, we would now spend some more time trying to improve the model by e.g. performing grid search for hyperparameter tuning, going back to the original features (which we did not have here) and trying different engineered features and/or trying different algorithms. But here, I will leave it at that.
+
+# Measuring model performance on highly unbalanced data
+
+Because of the severe bias towards non-fraud cases, we can not use performance measures like accuracy or area under the curve (AUC), as they would give overly optimistic results based on the high percentage of correct classifications of the majority class.
+
+An alternative to AUC is to use the precision-recall curve or the sensitivity (recall)-specificity curve. To calculate and plot these metrics, we can use the ROCR package. There are different ways to calculate the area under a curve (see the PRROC package for details) but I am going to use a simple function that calculates the area between every consecutive points-pair of x (i.e. x1 - x0, x2 - x1, etc.) under the corresponding values of y.
 ```{r}
+library(ROCR)
+
+# http://stackoverflow.com/questions/24563061/computing-integral-of-a-line-plot-in-r
+line_integral <- function(x, y) {
+  dx <- diff(x)
+  end <- length(y)
+  my <- (y[1:(end - 1)] + y[2:end]) / 2
+  sum(dx * my)
+} 
+
+prediction_obj <- prediction(pred$p1, pred$actual)
 ```
 
 
 ```{r}
+par(mfrow = c(1, 2))
+par(mar = c(5.1,4.1,4.1,2.1))
+
+# precision-recall curve
+perf1 <- performance(prediction_obj, measure = "prec", x.measure = "rec") 
+
+x <- perf1@x.values[[1]]
+y <- perf1@y.values[[1]]
+y[1] <- 0
+
+plot(perf1, main = paste("Area Under the\nPrecision-Recall Curve:\n", round(abs(line_integral(x,y)), digits = 3)))
+
+# sensitivity-specificity curve
+perf2 <- performance(prediction_obj, measure = "sens", x.measure = "spec") 
+
+x <- perf2@x.values[[1]]
+y <- perf2@y.values[[1]]
+y[1] <- 0
+
+plot(perf2, main = paste("Area Under the\nSensitivity-Specificity Curve:\n", round(abs(line_integral(x,y)), digits = 3)))
 ```
 
 
 ```{r}
+thresholds <- seq(from = 0, to = 1, by = 0.1)
+pred_thresholds <- data.frame(actual = pred$actual)
+
+for (threshold in thresholds) {
+  
+  prediction <- ifelse(pred$p1 > threshold, 1, 0)
+  prediction_true <- ifelse(pred_thresholds$actual == prediction, TRUE, FALSE)
+  pred_thresholds <- cbind(pred_thresholds, prediction_true)
+
+}
+
+colnames(pred_thresholds)[-1] <- thresholds
 ```
 
 
 ```{r}
+pred_thresholds %>%
+  gather(x, y, 2:ncol(pred_thresholds)) %>%
+  group_by(actual, x, y) %>%
+  summarise(n = n()) %>%
+  ggplot(aes(x = as.numeric(x), y = n, color = actual)) +
+    geom_vline(xintercept = 0.6, alpha = 0.5) +
+    geom_line() +
+    geom_point(alpha = 0.5) +
+    theme_bw() +
+    facet_wrap(actual ~ y, scales = "free", ncol = 2) +
+    labs(x = "prediction threshold",
+         y = "number of instances")
 ```
 
 
 ```{r}
+pred %>%
+  mutate(predict = ifelse(pred$p1 > 0.6, 1, 0)) %>%
+  group_by(actual, predict) %>%
+  summarise(n = n()) %>%
+  mutate(freq = n / sum(n)) 
 ```
 
 
 ```{r}
+sessionInfo()
 ```
 
 
