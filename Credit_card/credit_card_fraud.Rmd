@@ -408,8 +408,8 @@ library(data.table)
 ```
 
 ```{r}
-# path="/media/ad/01D6B57CFBE4DB20/1.Linux/Data/creditcard.csv"
-path="C:/Users/DNN/Data_science/Git/creditcard.csv"
+path="/media/ad/01D6B57CFBE4DB20/1.Linux/Data/creditcard.csv"
+#path="C:/Users/DNN/Data_science/Git/creditcard.csv"
 creditcard <- fread(path)
 ```
 
@@ -537,17 +537,13 @@ train_features <- h2o.deepfeatures(model_nn, train_unsupervised, layer = 3) %>%
   as.data.frame() %>%
   mutate(Class = as.factor(as.vector(train_unsupervised[, 31]))) %>%
   as.h2o()
-```
-
-
-```{r}
 train_features
 dim(train_features)
 ```
 
-
 ```{r}
 features_dim <- setdiff(colnames(train_features), response)
+features_dim
 ```
 
 
@@ -574,12 +570,15 @@ h2o.saveModel(model_nn_dim, path="model_nn_dim", force = TRUE)
 model_nn_dim <- h2o.loadModel("model_nn_dim/DeepLearning_model_R_1608771539567_1")
 model_nn_dim
 ```
-
+For measuring model performance on test data, we need to convert the test data to the same reduced dimensions as the trainings data:
 
 ```{r}
 dim(test)
 test_dim <- h2o.deepfeatures(model_nn, test, layer = 3)
 dim(test_dim)
+```
+```{r}
+h2o.predict(model_nn_dim, test_dim)
 ```
 
 
