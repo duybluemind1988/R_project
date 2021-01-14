@@ -1,0 +1,67 @@
+---
+title: "Untitled"
+output: html_document
+---
+
+# Get Data
+```{r}
+library(tidyverse)
+```
+
+```{r}
+library(readr)
+AirPassengers  <- read_csv("~/R_studio/R_project/AirPassenger_forecasting/AirPassengers.csv")
+colnames(AirPassengers ) <- c("Date","Passengers")
+AirPassengers 
+```
+
+
+```{r}
+library(anytime) 
+AirPassengers$Date <-anydate(AirPassengers$Date)
+AirPassengers
+```
+
+```{r}
+# Plot the raw data using the base plot function
+AirPassengers %>%
+    ggplot(aes(Date, Passengers)) +
+    geom_line(alpha = 0.5, color = "#2c3e50") +
+    geom_smooth(method = "loess", span = 0.5)
+```
+# EDA
+
+```{r}
+summary(AirPassengers)
+```
+
+# Feature engineering
+```{r}
+library(timetk)
+```
+
+```{r}
+AirPassengers_tk <- AirPassengers %>%
+    timetk::tk_augment_timeseries_signature() %>%
+    select(Date, Passengers, year, half, quarter, month.lbl)
+AirPassengers_tk
+```
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+```{r}
+```
+

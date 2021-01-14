@@ -1,0 +1,278 @@
+---
+title: "Untitled"
+output: html_document
+---
+```{r}
+library(tidyverse)
+library(data.table)
+```
+
+```{r}
+getwd()
+```
+
+```{r}
+filepath <- 'Walmart_sale_forecasting/'
+stores = fread(paste0(filepath, 'stores.csv'))
+stores
+```
+This file contains anonymized information about the 45 stores, indicating the type and size of store.
+
+```{r}
+train_data <- fread(paste0(filepath, 'train.csv'))
+train_data
+```
+- Store - the store number
+- Dept - the department number
+- Date - the week
+- Weekly_Sales -  sales for the given department in the given store
+- IsHoliday - whether the week is a special holiday week
+
+```{r}
+features <- fread(paste0(filepath, 'features.csv'))
+features
+```
+- Store - the store number
+- Date - the week
+- Temperature - average temperature in the region
+- Fuel_Price - cost of fuel in the region
+- MarkDown1-5 - anonymized data related to promotional markdowns that Walmart is running. MarkDown data is only available after Nov 2011, and is not available for all stores all the time. Any missing value is marked with an NA.
+- CPI - the consumer price index
+- Unemployment - the unemployment rate
+- IsHoliday - whether the week is a special holiday week
+
+# Merge data
+
+```{r}
+# Merge train/test dataset with stores & features
+full = merge(train_data, stores, by = "Store")
+```
+
+
+```{r}
+full = merge(full, features, by = c("Store", "Date", "IsHoliday"))
+```
+
+
+```{r}
+tail(full)
+```
+
+```{r}
+full$Store <- as.factor(full$Store)
+full$IsHoliday <- as.factor(full$IsHoliday)
+full$Dept <- as.factor(full$Dept)
+full$Type <- as.factor(full$Type)
+tail(full)
+```
+
+```{r}
+dim(full)
+```
+# EDA
+```{r}
+summary(train_data)
+```
+
+
+```{r}
+summary(full)
+```
+```{r}
+table(full$Store)
+```
+
+```{r}
+full %>% 
+  filter(Store==1) %>% 
+  ggplot(aes(x=Store,fill=Dept))+
+  geom_bar(position="dodge")
+```
+
+
+```{r}
+full %>% 
+  ggplot(aes(Store,Weekly_Sales))+
+  geom_bar(stat="identity")
+```
+```{r}
+full %>% 
+  ggplot(aes(Store,Weekly_Sales))+
+  geom_boxplot()
+```
+
+```{r}
+full %>% 
+  ggplot(aes(Dept,Weekly_Sales))+
+  geom_bar(stat="identity")
+```
+
+```{r}
+full %>% 
+  ggplot(aes(Dept,Weekly_Sales))+
+  geom_boxplot()
+```
+
+
+```{r}
+```
+
+# Select one Store and one dept for prediction
+
+```{r}
+data_filter <- full[Store ==1]
+dim(full)
+dim(data_filter)
+```
+```{r}
+data_filter %>% 
+  ggplot(aes(Dept,Weekly_Sales)) +
+  geom_bar(stat="identity")
+```
+```{r}
+data_filter %>% 
+  ggplot(aes(Dept,Weekly_Sales))+
+  geom_boxplot()
+```
+```{r}
+data_filter %>% 
+  ggplot(aes(Dept))+
+  geom_bar()
+```
+
+
+```{r}
+data_filter_2 <- data_filter[Dept ==1]
+dim(data_filter)
+dim(data_filter_2)
+```
+
+# Split data training and test set
+```{r}
+summary(data_filter_2)
+```
+```{r}
+data_filter_2 <- data_filter_2 %>% select(-Store, -Dept)
+```
+
+
+```{r}
+train_test_split_date <- "2012-05-01"
+
+train <- data_filter_2 %>% filter(Date < ymd(train_test_split_date))
+
+test <- data_filter_2 %>% filter(Date >= ymd(train_test_split_date))
+dim(train)
+dim(test)
+```
+
+
+```{r}
+total_rows <- nrow(data_filter_2)
+k <- 0.8
+train <- data_filter_2 %>% slice(1:round(k*total_rows))
+test <- data_filter_2 %>% slice(round(k*total_rows+1):total_rows)
+dim(train)
+dim(test)
+```
+# Modeling
+## GLMNET 
+```{r}
+train
+```
+```{r}
+train %>% 
+  ggplot(aes(Date,Weekly_Sales))+
+  geom_line()
+```
+
+```{r}
+library(glmnet)
+library(parsnip)
+glmnet_fit <- parsnip::linear_reg(mode = "regression", penalty = 0.01, mixture = 0.5) %>%
+    set_engine("glmnet") %>%
+    fit.model_spec(Weekly_Sales ~ ., data = train)
+```
+
+```{r}
+
+glmnet_fit %>%
+  predict(new_data = test)%>% # predict test value (regression model, not time series)
+  bind_cols(test %>% select(Weekly_Sales))
+```
+
+```{r}
+fcast_glmnet_tbl <- glmnet_fit %>%
+    predict(new_data = test) %>% # predict test value (regression model, not time series)
+    bind_cols(test) %>%
+    bind_rows(train) %>%
+    arrange(Date) %>%
+    select(Date, Weekly_Sales, .pred) %>%
+    gather(key = "key", value = "Weekly_Sales", -Date) %>%
+    filter(!is.na(Weekly_Sales)) %>%
+    mutate(key = case_when(
+        key == "Weekly_Sales" ~ "actual",
+        TRUE ~ "forecast"
+    ))
+fcast_glmnet_tbl
+```
+
+
+```{r}
+library(plotly)
+g <- fcast_glmnet_tbl %>%
+    ggplot(aes(Date, Weekly_Sales, color = key)) +
+    # geom_ribbon(aes(ymin = lo.95, ymax = hi.95),
+    #             color = "white", fill = "dodgerblue") +
+    geom_point(data = test %>% mutate(key = "actual")) +
+    geom_point(alpha = 0.5) +
+   # theme_tq() +
+    #scale_color_tq()+
+    labs(title = "GLMNET: Penalty = 0.01, Mixture = 0.5")
+
+ggplotly(g) %>%
+    layout(xaxis = list(rangeslider = list(type = "date")))
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+
