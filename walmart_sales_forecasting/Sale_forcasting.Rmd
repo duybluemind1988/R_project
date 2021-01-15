@@ -83,10 +83,10 @@ table(full$Store)
 ```
 
 ```{r}
-full %>% 
-  filter(Store==1) %>% 
-  ggplot(aes(x=Store,fill=Dept))+
-  geom_bar(position="dodge")
+#full %>% 
+#  filter(Store==1) %>% 
+#  ggplot(aes(x=Store,fill=Dept))+
+#  geom_bar(position="dodge")
 ```
 
 
@@ -155,8 +155,9 @@ summary(data_filter_2)
 data_filter_2 <- data_filter_2 %>% select(-Store, -Dept)
 ```
 
-
+Method 1
 ```{r}
+library(lubridate)
 train_test_split_date <- "2012-05-01"
 
 train <- data_filter_2 %>% filter(Date < ymd(train_test_split_date))
@@ -166,7 +167,7 @@ dim(train)
 dim(test)
 ```
 
-
+Method 2
 ```{r}
 total_rows <- nrow(data_filter_2)
 k <- 0.8
@@ -176,86 +177,32 @@ dim(train)
 dim(test)
 ```
 # Modeling
-## GLMNET 
-```{r}
-train
-```
+## Regression model
+
 ```{r}
 train %>% 
   ggplot(aes(Date,Weekly_Sales))+
   geom_line()
 ```
-
 ```{r}
-library(glmnet)
-library(parsnip)
-glmnet_fit <- parsnip::linear_reg(mode = "regression", penalty = 0.01, mixture = 0.5) %>%
-    set_engine("glmnet") %>%
-    fit.model_spec(Weekly_Sales ~ ., data = train)
+#install.packages("forecast")
+library(forecast)
 ```
 
 ```{r}
-
-glmnet_fit %>%
-  predict(new_data = test)%>% # predict test value (regression model, not time series)
-  bind_cols(test %>% select(Weekly_Sales))
+head(train)
 ```
 
 ```{r}
-fcast_glmnet_tbl <- glmnet_fit %>%
-    predict(new_data = test) %>% # predict test value (regression model, not time series)
-    bind_cols(test) %>%
-    bind_rows(train) %>%
-    arrange(Date) %>%
-    select(Date, Weekly_Sales, .pred) %>%
-    gather(key = "key", value = "Weekly_Sales", -Date) %>%
-    filter(!is.na(Weekly_Sales)) %>%
-    mutate(key = case_when(
-        key == "Weekly_Sales" ~ "actual",
-        TRUE ~ "forecast"
-    ))
-fcast_glmnet_tbl
+model <- lm(Weekly_Sales ~., data=train)
+model
 ```
 
 
 ```{r}
-library(plotly)
-g <- fcast_glmnet_tbl %>%
-    ggplot(aes(Date, Weekly_Sales, color = key)) +
-    # geom_ribbon(aes(ymin = lo.95, ymax = hi.95),
-    #             color = "white", fill = "dodgerblue") +
-    geom_point(data = test %>% mutate(key = "actual")) +
-    geom_point(alpha = 0.5) +
-   # theme_tq() +
-    #scale_color_tq()+
-    labs(title = "GLMNET: Penalty = 0.01, Mixture = 0.5")
-
-ggplotly(g) %>%
-    layout(xaxis = list(rangeslider = list(type = "date")))
-```
-
-
-```{r}
-```
-
-
-```{r}
-```
-
-
-```{r}
-```
-
-
-```{r}
-```
-
-
-```{r}
-```
-
-
-```{r}
+train %>%
+  as.data.frame() %>%
+  GGally::ggpairs()
 ```
 
 
