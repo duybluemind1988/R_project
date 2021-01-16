@@ -1,0 +1,69 @@
+---
+title: "Untitled"
+output: html_document
+---
+```{r}
+library(tidyverse)
+library(TSstudio)
+```
+
+```{r}
+data(USUnRate)
+head(USUnRate)
+```
+```{r}
+ts_info(USUnRate)
+```
+
+
+```{r}
+unemployment <- window(USUnRate, start = c(1990,1))
+
+ts_plot(unemployment,
+        title = "US Monthly Unemployment Rate",
+        Ytitle = "Unemployment Rate (%)",
+        Xtitle = "Year",
+        Xgrid = TRUE,
+        Ygrid = TRUE)
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+

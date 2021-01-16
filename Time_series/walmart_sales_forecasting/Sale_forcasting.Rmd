@@ -91,26 +91,18 @@ table(full$Store)
 
 
 ```{r}
-full %>% 
-  ggplot(aes(Store,Weekly_Sales))+
-  geom_bar(stat="identity")
+#full %>% ggplot(aes(Store,Weekly_Sales))+geom_bar(stat="identity")
 ```
 ```{r}
-full %>% 
-  ggplot(aes(Store,Weekly_Sales))+
-  geom_boxplot()
+# full %>% ggplot(aes(Store,Weekly_Sales))+geom_boxplot()
 ```
 
 ```{r}
-full %>% 
-  ggplot(aes(Dept,Weekly_Sales))+
-  geom_bar(stat="identity")
+# full %>% ggplot(aes(Dept,Weekly_Sales))+geom_bar(stat="identity")
 ```
 
 ```{r}
-full %>% 
-  ggplot(aes(Dept,Weekly_Sales))+
-  geom_boxplot()
+#full %>% ggplot(aes(Dept,Weekly_Sales))+geom_boxplot()
 ```
 
 
@@ -194,19 +186,11 @@ head(train)
 ```
 
 ```{r}
-model <- lm(Weekly_Sales ~., data=train)
-model
-```
-
-
-```{r}
-train %>%
-  as.data.frame() %>%
-  GGally::ggpairs()
-```
-
-
-```{r}
+library(dygraphs)  
+dygraph(train %>% select(Date,Weekly_Sales), 
+       # main = "US Monthly Total Vehicle Sales",ylab = "Thousands of Vehicle"
+        ) %>% 
+  dyRangeSelector()
 ```
 
 

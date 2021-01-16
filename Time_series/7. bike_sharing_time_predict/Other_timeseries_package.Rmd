@@ -1,0 +1,190 @@
+---
+title: "Untitled"
+output: html_document
+---
+Plotting time series data
+```{r}
+library(TSstudio)
+data(USgas)
+# Ploting time series object
+ts_plot(USgas, 
+        title = "US Monthly Natural Gas Consumption",
+        Ytitle = "Billion Cubic Feet")
+```
+Seasonality analysis
+
+```{r}
+# Seasonal plot
+ts_seasonal(USgas, type = "all")
+```
+
+
+```{r}
+# Heatmap plot
+
+ts_heatmap(USgas)
+```
+
+Correlation analysis
+```{r}
+# ACF and PACF plots
+ts_cor(USgas, lag.max = 60)
+```
+
+
+```{r}
+# Lags plot
+ts_lags(USgas, lags = 1:12)
+```
+
+
+```{r}
+# Seasonal lags plot
+ts_lags(USgas, lags = c(12, 24, 36, 48))
+```
+Training forecasting models
+
+```{r}
+# Forecasting applications
+# Setting training and testing partitions
+USgas_s <- ts_split(ts.obj = USgas, sample.out = 12)
+train <- USgas_s$train
+test <- USgas_s$test
+length(train)
+length(test)
+
+```
+
+
+```{r}
+# Forecasting with auto.arima
+library(forecast)
+md <- auto.arima(train)
+fc <- forecast(md, h = 12)
+
+# Plotting actual vs. fitted and forecasted
+test_forecast(actual = USgas, forecast.obj = fc, test = test)
+```
+
+
+```{r}
+# Plotting the forecast 
+plot_forecast(fc)
+```
+
+
+```{r}
+# Run horse race between multiple models
+methods <- list(ets1 = list(method = "ets",
+                            method_arg = list(opt.crit = "lik"),
+                            notes = "ETS model with opt.crit = lik"),
+                ets2 = list(method = "ets",
+                            method_arg = list(opt.crit = "amse"),
+                            notes = "ETS model with opt.crit = amse"),
+                arima1 = list(method = "arima",
+                              method_arg = list(order = c(2,1,0)),
+                              notes = "ARIMA(2,1,0)"),
+                arima2 = list(method = "arima",
+                              method_arg = list(order = c(2,1,2),
+                                                seasonal = list(order = c(1,1,1))),
+                              notes = "SARIMA(2,1,2)(1,1,1)"),
+                hw = list(method = "HoltWinters",
+                          method_arg = NULL,
+                          notes = "HoltWinters Model"),
+                tslm = list(method = "tslm",
+                            method_arg = list(formula = input ~ trend + season),
+                            notes = "tslm model with trend and seasonal components"))
+```
+
+
+```{r}
+# Training the models with backtesting
+md <- train_model(input = USgas,
+                  methods = methods,
+                  train_method = list(partitions = 6, 
+                                      sample.out = 12, 
+                                      space = 3),
+                  horizon = 12,
+                  error = "MAPE")
+```
+
+
+```{r}
+# Plot the performance of the different models on the testing partitions
+plot_model(md)
+```
+
+```{r}
+# Holt-Winters tunning parameters with grid search
+hw_grid <- ts_grid(USgas, 
+                   model = "HoltWinters",
+                   periods = 6,
+                   window_space = 6,
+                   window_test = 12,
+                   hyper_params = list(alpha = seq(0,1,0.1),
+                                       beta = seq(0,1,0.1),
+                                       gamma = seq(0,1,0.1)))
+                                       
+plot_grid(hw_grid, type = "3D")
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+

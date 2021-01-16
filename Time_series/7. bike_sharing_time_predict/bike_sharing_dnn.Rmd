@@ -1,0 +1,191 @@
+---
+title: "Untitled"
+output: html_document
+---
+# DNN apply forecast model
+```{r}
+library(tidyverse)
+library(plotly)
+library(tidyquant)
+library(TSstudio)
+```
+
+```{r}
+data <- read_csv("00_data/sharing_d_tbl.csv") 
+head(data)
+```
+```{r}
+count_ts = ts(data[, c('cnt')])
+count_ts
+```
+
+```{r}
+g <- data %>%
+    ggplot(aes(date, cnt)) +
+    geom_line(alpha = 0.5, color = "#2c3e50") +
+    geom_smooth(method = "loess", span = 0.5) +
+    theme_tq() 
+g
+#ggplotly(g) %>%
+    #layout(xaxis = list(rangeslider = list(type = "date")))
+```
+
+```{r}
+# The lags function return the series with its l lags
+lags <- function(ts.obj, l){
+  ts_merged <- NULL
+  # Creating n lags
+  for(i in 1:l){
+    ts_merged <- ts.union(ts_merged, stats::lag(ts.obj, k = -i))
+  }
+  # Merge the lags with the original series
+  ts_merged <- ts.union(ts.obj, ts_merged)
+  # Set the columns names
+  colnames(ts_merged) <- c("y", paste0("y_", 1:i))
+  # Removing missing values as results of creating the lags
+  ts_merged <- window(ts_merged,
+                      start = start(ts.obj) + l,
+                      end = end(ts.obj))
+  return(ts_merged)
+}
+```
+
+```{r}
+ts_mean <- function(mts.obj){
+ts_avg <- ts_sum(mts.obj) / dim(mts.obj)[2] # Simple average calculation
+return(ts_avg)
+}
+```
+
+```{r}
+sma <- function(ts.obj, order){
+  l <- order -1
+  l <- lags(ts.obj = ts.obj, l = l)
+  m <- ts_mean(l)
+  u <- ts.union(ts.obj, m)
+  colnames(u) <- c("original", "transformed")
+  return(u)
+}
+```
+
+
+# Transform to ts object
+```{r}
+head(data)
+tail(data)
+dim(data)
+```
+```{r}
+# Convert Date column to type "Date"
+data$date = as.Date(data$date, format = "%Y-%m-%d")
+data
+```
+
+```{r}
+library(lubridate)
+# Convert "first day" to day of the year 
+dayOfYear = as.numeric(format(data[1,1], "%j"))
+dayOfYear
+```
+```{r}
+data_ts <- ts(data = data$cnt,
+              
+              start = c(2011, 1), frequency = 365
+            )
+length(data_ts)
+data_ts
+```
+
+```{r}
+head(lags(count_ts, l = 3))
+```
+```{r}
+count_ts
+```
+
+```{r}
+data$clean_cnt = tsclean(count_ts)
+data
+
+```
+
+
+```{r}
+sma_4 <- sma(count_ts, order = 4)
+#ts_plot(sma_4, type = "multiple")
+ts_plot(sma_4)
+```
+
+
+```{r}
+sma_12 <- sma(data_ts, order = 12)
+ts_plot(sma_12)
+```
+
+
+```{r}
+two_sided_ma <- ts_ma(ts.obj = data_ts,
+                      n = c(2,5),# Setting an order 5 and 11 moving average
+                      n_left = 6, n_right = 5, # Setting an order 12 moving average
+                      plot = TRUE,
+                      multiple = TRUE,
+                      margin = 0.04)
+```
+
+```{r}
+# Creating one-sided and two-sided moving average with an order of 12
+one_sided_12 <- ts_ma(data_ts, n = NULL, n_left = 11, plot = FALSE)
+two_sided_12 <- ts_ma(data_ts, n = NULL, n_left = 6, n_right = 5,plot =
+                        FALSE)
+one_sided <- one_sided_12$unbalanced_ma_12
+two_sided <- two_sided_12$unbalanced_ma_12
+
+ma <- cbind(data_ts, one_sided, two_sided)
+p <- ts_plot(ma,
+             Xgrid = TRUE,
+             Ygrid = TRUE,
+             type = "single",
+             title = "One-Sided vs. Two-Sided Moving Average - Order 12")
+```
+
+
+```{r}
+library(plotly)
+p <- p %>% layout(legend = list(x = 0.05, y = 0.95),
+                  yaxis = list(title = "Thousands of Units"),
+                  xaxis = list(title = "Year"))
+p
+```
+
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
