@@ -2,187 +2,350 @@
 title: "Untitled"
 output: html_document
 ---
-# DNN apply forecast model
-```{r}
-library(tidyverse)
-library(plotly)
-library(tidyquant)
-library(TSstudio)
-```
+# Method 1
+https://www.kaggle.com/gustavomodelli/bike-model-xgboost-h2o
 
 ```{r}
-data <- read_csv("00_data/sharing_d_tbl.csv") 
-head(data)
-```
-```{r}
-count_ts = ts(data[, c('cnt')])
-count_ts
-```
-
-```{r}
-g <- data %>%
-    ggplot(aes(date, cnt)) +
-    geom_line(alpha = 0.5, color = "#2c3e50") +
-    geom_smooth(method = "loess", span = 0.5) +
-    theme_tq() 
-g
-#ggplotly(g) %>%
-    #layout(xaxis = list(rangeslider = list(type = "date")))
-```
-
-```{r}
-# The lags function return the series with its l lags
-lags <- function(ts.obj, l){
-  ts_merged <- NULL
-  # Creating n lags
-  for(i in 1:l){
-    ts_merged <- ts.union(ts_merged, stats::lag(ts.obj, k = -i))
-  }
-  # Merge the lags with the original series
-  ts_merged <- ts.union(ts.obj, ts_merged)
-  # Set the columns names
-  colnames(ts_merged) <- c("y", paste0("y_", 1:i))
-  # Removing missing values as results of creating the lags
-  ts_merged <- window(ts_merged,
-                      start = start(ts.obj) + l,
-                      end = end(ts.obj))
-  return(ts_merged)
-}
-```
-
-```{r}
-ts_mean <- function(mts.obj){
-ts_avg <- ts_sum(mts.obj) / dim(mts.obj)[2] # Simple average calculation
-return(ts_avg)
-}
-```
-
-```{r}
-sma <- function(ts.obj, order){
-  l <- order -1
-  l <- lags(ts.obj = ts.obj, l = l)
-  m <- ts_mean(l)
-  u <- ts.union(ts.obj, m)
-  colnames(u) <- c("original", "transformed")
-  return(u)
-}
-```
-
-
-# Transform to ts object
-```{r}
-head(data)
-tail(data)
-dim(data)
-```
-```{r}
-# Convert Date column to type "Date"
-data$date = as.Date(data$date, format = "%Y-%m-%d")
-data
-```
-
-```{r}
+library(tidyverse) # metapackage with lots of helpful functions
 library(lubridate)
-# Convert "first day" to day of the year 
-dayOfYear = as.numeric(format(data[1,1], "%j"))
-dayOfYear
-```
-```{r}
-data_ts <- ts(data = data$cnt,
-              
-              start = c(2011, 1), frequency = 365
-            )
-length(data_ts)
-data_ts
-```
-
-```{r}
-head(lags(count_ts, l = 3))
-```
-```{r}
-count_ts
-```
-
-```{r}
-data$clean_cnt = tsclean(count_ts)
-data
-
+library(caret)
+library(recipes)
+library(h2o)
 ```
 
 
 ```{r}
-sma_4 <- sma(count_ts, order = 4)
-#ts_plot(sma_4, type = "multiple")
-ts_plot(sma_4)
+bike =read.csv("bike_train.csv")
+bike
 ```
 
 
 ```{r}
-sma_12 <- sma(data_ts, order = 12)
-ts_plot(sma_12)
+str(bike)
 ```
 
 
 ```{r}
-two_sided_ma <- ts_ma(ts.obj = data_ts,
-                      n = c(2,5),# Setting an order 5 and 11 moving average
-                      n_left = 6, n_right = 5, # Setting an order 12 moving average
-                      plot = TRUE,
-                      multiple = TRUE,
-                      margin = 0.04)
-```
-
-```{r}
-# Creating one-sided and two-sided moving average with an order of 12
-one_sided_12 <- ts_ma(data_ts, n = NULL, n_left = 11, plot = FALSE)
-two_sided_12 <- ts_ma(data_ts, n = NULL, n_left = 6, n_right = 5,plot =
-                        FALSE)
-one_sided <- one_sided_12$unbalanced_ma_12
-two_sided <- two_sided_12$unbalanced_ma_12
-
-ma <- cbind(data_ts, one_sided, two_sided)
-p <- ts_plot(ma,
-             Xgrid = TRUE,
-             Ygrid = TRUE,
-             type = "single",
-             title = "One-Sided vs. Two-Sided Moving Average - Order 12")
+## Check missing data
+bike  %>% map(~ sum(is.na(.)))
 ```
 
 
 ```{r}
-library(plotly)
-p <- p %>% layout(legend = list(x = 0.05, y = 0.95),
-                  yaxis = list(title = "Thousands of Units"),
-                  xaxis = list(title = "Year"))
-p
+## Feature engenearing
+bike$datetime <- as_datetime(bike$datetime)
+bike$day_week <- wday(bike$datetime, label = TRUE)
+bike$month <- lubridate::month(bike$datetime, label = TRUE)
+bike$hour <- lubridate::hour(bike$datetime)
+bike
+```
+- instant: record index
+- dteday : date
+- season : season (1:winter, 2:spring, 3:summer, 4:fall)
+- yr : year (0: 2011, 1:2012)
+- mnth : month ( 1 to 12)
+- hr : hour (0 to 23)
+- holiday : weather day is holiday or not (extracted from [Web Link])
+- weekday : day of the week
+- workingday : if day is neither weekend nor holiday is 1, otherwise is 0.
++ weathersit :
+- 1: Clear, Few clouds, Partly cloudy, Partly cloudy
+- 2: Mist + Cloudy, Mist + Broken clouds, Mist + Few clouds, Mist
+- 3: Light Snow, Light Rain + Thunderstorm + Scattered clouds, Light Rain + Scattered clouds
+- 4: Heavy Rain + Ice Pallets + Thunderstorm + Mist, Snow + Fog
+- temp : Normalized temperature in Celsius. The values are derived via (t-t_min)/(t_max-t_min), t_min=-8, t_max=+39 (only in hourly scale)
+- atemp: Normalized feeling temperature in Celsius. The values are derived via (t-t_min)/(t_max-t_min), t_min=-16, t_max=+50 (only in hourly scale)
+- hum: Normalized humidity. The values are divided to 100 (max)
+- windspeed: Normalized wind speed. The values are divided to 67 (max)
+- casual: count of casual users
+- registered: count of registered users
+- cnt: count of total rental bikes including both casual and registered
+```{r}
+## Converting Factors
+bike <- bike %>% 
+  mutate(
+    holiday = factor(holiday, labels = c('no','yes')),
+    workingday = factor(workingday, labels = c('no', 'yes')),
+    season = factor(season, labels = c('spring','summer','fall','winter')),
+    day_hour = ifelse(hour > 6 & hour < 10, 'between_6_and_10',
+                      ifelse(hour > 10 & hour < 17, 'between_10_and_17',
+                             ifelse(hour > 17 & hour < 20,
+                                    'between_17_and_20', 'between_20_and_6'))),
+    day_hour = factor(day_hour, levels = c('between_6_and_10','between_10_and_17','between_17_and_20','between_20_and_6')),
+    weather = factor(weather, labels = c('Clear','Cloudy', 'Light_Rain','Heavy_Hain'))
+  )
+
+bike
+```
+
+Distribuiton of Target
+```{r}
+bike.sel <- bike  %>% filter(!is.na(count))
+
+ggplot(bike.sel, aes(count))+
+  geom_histogram(fill = 'blue')
+```
+ Bike Rent by Hour
+```{r}
+
+ggplot(bike.sel, aes(day_hour, count, fill = day_hour))+
+  geom_boxplot()+
+  coord_flip()+
+  labs(title = 'Bike Rent by day Hour', x = '', y = '')+
+  theme(legend.position = 'none')+
+  theme_classic()
+```
+Bike rent by hour and seasson
+```{r}
+
+ggplot(bike.sel, aes(as.factor(hour), count, fill = season))+
+  geom_boxplot()+
+  facet_wrap(~ season)+
+  theme_classic()
+```
+
+Bike rental by month
+```{r}
+
+ggplot(bike.sel, aes(month, count, fill = season))+
+  geom_boxplot()+
+  theme_classic()
+```
+
+Bike rental by Day week
+```{r}
+ggplot(bike.sel, aes(day_week, count, fill = day_week))+
+  geom_boxplot()+
+  theme(legend.position = 'none')+
+  theme_classic()+
+  coord_flip()
+```
+Bike rental by Weather
+
+```{r}
+ggplot(bike.sel, aes(weather, count, fill = weather))+
+geom_boxplot()
+```
+```{r}
+bike
 ```
 
 
+```{r}
+## -- Recipe --------------------------- ##
+rec <- recipe(count ~ ., data = bike) %>% 
+  step_YeoJohnson(all_numeric(), -all_outcomes(), -hour) %>% 
+  step_center(all_numeric(), - all_outcomes(), -hour) %>% 
+  step_scale(all_numeric(), -all_outcomes(), -hour) %>% 
+  step_ns(hour, deg_free = 6) %>% 
+  step_dummy(all_nominal()) %>% 
+  step_mutate(count = log ( count + 1))
+preparo <- prep(rec, bike)
+bike.new.full <- bake(preparo, bike)
+bike.new.full
+```
+Explain: 
+- step_YeoJohnson(all_numeric(), -all_outcomes(), -hour): The Yeo-Johnson transformation is very similar to the Box-Cox but does not require the input variables to be strictly positive. Các giá trị cách xa nhau vd từ 0-32 sẽ gần lại từ 0-6 chẳng hạn (registered)
+
+- step_ns(hour, deg_free = 6): can create new features from a single variable that enable fitting routines to model this variable in a nonlinear manner. Trong ví dụ này tạo ra 6 column hour (có thể explain cho 24 hours). Không tạo ra 24 feature mới mà chỉ tạo ra 6 thôi
+- step_dummy(all_nominal()): one hot encoder toàn bộ factor
+- step_mutate(count = log ( count + 1)) : convert count to log
+
+Model with H2o
+```{r}
+##h2o init
+
+h2o.init()
+sum(is.na(bike.new.full))
+```
+Must convert datetime Posxixt to date_time before using as.H2O
+```{r}
+bike.new.full$datetime <-as.Date(bike.new.full$datetime)
+#bike.new.full
+```
 
 ```{r}
+## Load data to h2o
+bike.h2o <- as.h2o(bike.new.full)
+
+## Split data
+
+split <- h2o.splitFrame(bike.h2o, ratios = 0.75)
+bike.train <- split[[1]]
+bike.test <- split[[2]]
+
+
+## Variables
+
+x <- setdiff(names(bike.h2o), 'count')
+y <- 'count'
+```
+```{r}
+bike.rf <- h2o.randomForest(x = x, y = y, training_frame = bike.train,
+                            #nfolds = 5
+                            )
+h2o.performance(bike.rf, newdata = bike.test)
+```
+
+```{r}
+bike.gbm <- h2o.gbm(x = x, y = y, training_frame = bike.train,
+ #                           nfolds = 5
+)
+h2o.performance(bike.gbm, newdata = bike.test)
+```
+
+```{r}
+h2o.varimp_plot(bike.rf)
+h2o.varimp_plot(bike.gbm)
+```
+# Method 2
+https://www.kaggle.com/roshanchoudhary/bike-sharing-in-r-programming
+
+```{r}
+library(tidyverse) # metapackage with lots of helpful functions
+library(lubridate)
 ```
 
 
 ```{r}
+bike_share_train <- read.csv("bike_train.csv", header=T)
+bike_share_test <- read.csv("bike_test.csv", header=T)
 ```
 
 
 ```{r}
+str(bike_share_train)
+head(bike_share_train)
 ```
 
 
 ```{r}
+# Ignore the casual, registered fields as this sum is equal to count field
+bike_share_train <- bike_share_train[,-c(10,11)]
 ```
 
 
 ```{r}
+# Converting integer to factor on training set
+bike_share_train$season <- as.factor(bike_share_train$season)
+bike_share_train$holiday <- as.factor(bike_share_train$holiday)
+bike_share_train$workingday <- as.factor(bike_share_train$workingday)
+bike_share_train$weather <- as.factor(bike_share_train$weather)
+```
+
+
+```{r}
+# Converting int to factor on test set
+bike_share_test$season <- as.factor(bike_share_test$season)
+bike_share_test$holiday <- as.factor(bike_share_test$holiday)
+bike_share_test$workingday <- as.factor(bike_share_test$workingday)
+bike_share_test$weather <- as.factor(bike_share_test$weather)
+```
+```{r}
+bike_share_train
 ```
 
 ```{r}
+#Deriving day, hour from datetime field Train & Test
+library(lubridate)
+bike_share_train$datetime <- ymd_hms(bike_share_train$datetime)
+bike_share_train$hour <- lubridate::hour(bike_share_train$datetime)
+bike_share_train$day <- lubridate::wday(bike_share_train$datetime)
+bike_share_train$month <- lubridate::month(bike_share_train$datetime, label=T)
+bike_share_train[,11:13]<-lapply(bike_share_train[,11:13], factor) #converting derived variables into factors (hour, day , month)
+head(bike_share_train)
 ```
 
 
 ```{r}
+bike_share_test$datetime <- ymd_hms(bike_share_test$datetime)
+bike_share_test$hour <- lubridate::hour(bike_share_test$date)
+bike_share_test$day <- lubridate::wday(bike_share_test$date)
+bike_share_test$month <- lubridate::month(bike_share_test$date, label=T)
+bike_share_test[,10:12]<-lapply(bike_share_test[,10:12], factor) #converting derived variables into factors
+```
+
+
+```{r}
+# Removing datetime field 
+#bike_share_train$datetime <- NULL
+```
+
+
+```{r}
+#Exploratory Data Analysis
+library(sqldf)
+library(ggplot2)
+```
+
+
+```{r}
+# Get the average count of bikes rent by season, hour
+season_summary_by_hour <- sqldf('select season, hour, avg(count) as count from bike_share_train group by season, hour')
+season_summary_by_hour
+```
+
+
+```{r}
+# From this plot it shows, 
+# There are more rental in morning(from 7-9th hour) and evening(16-19th hour)
+# People rent bikes more in Fall, and much less in Spring
+p1<-ggplot(bike_share_train, aes(x=hour, y=count, color=season))+
+  geom_point(data = season_summary_by_hour, aes(group = season))+
+  geom_line(data = season_summary_by_hour, aes(group = season))+
+  ggtitle("Bikes Rent By Season")+ theme_minimal()+
+  scale_colour_hue('Season',breaks = levels(bike_share_train$season), 
+                   labels=c('spring', 'summer', 'fall', 'winter'))
+p1
+```
+
+
+```{r}
+# Get the average count of bikes rent by weather, hour
+weather_summary_by_hour <- sqldf('select weather, hour, avg(count) as count from bike_share_train group by weather, hour')
+weather_summary_by_hour
+
+```
+
+
+```{r}
+# From this plot it shows, 
+# People rent bikes more when weather is good
+# We see bike rent only at 18th hour when weather is very bad
+p2<-ggplot(bike_share_train, aes(x=hour, y=count, color=weather))+
+  geom_point(data = weather_summary_by_hour, aes(group = weather))+
+  geom_line(data = weather_summary_by_hour, aes(group = weather))+
+  ggtitle("Bikes Rent By Weather")+ scale_colour_hue('Weather',breaks = levels(bike_share_train$weather), 
+                                                     labels=c('Good', 'Normal', 'Bad', 'Very Bad'))
+p2
+
+```
+
+
+```{r}
+# Get the average count of bikes rent by day, hour
+day_summary_by_hour <- sqldf('select day, hour, avg(count) as count from bike_share_train group by day, hour')
+
+# From this plot it shows, 
+# There are more bikes rent on weekdays during morining and evening
+# There are more bikes rent on weekends during daytime
+p3<-ggplot(bike_share_train, aes(x=hour, y=count, color=day))+
+  geom_point(data = day_summary_by_hour, aes(group = day))+
+  geom_line(data = day_summary_by_hour, aes(group = day))+
+  ggtitle("Bikes Rent By Weekday")+ scale_colour_hue('Weekday',breaks = levels(bike_share_train$day),
+                                                     labels=c('Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'))
+p3
+```
+
+
+```{r}
+# Splitting the Train dataset
+#install.packages("caTools")
+library(caTools)
+set.seed(123)
+split <- sample.split(bike_share_train$count, SplitRatio = 0.75)
+training_set <- subset(bike_share_train, split == TRUE)
+validation_set <- subset(bike_share_train, split == FALSE)
 ```
 
 
