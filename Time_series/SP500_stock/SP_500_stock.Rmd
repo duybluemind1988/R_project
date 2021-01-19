@@ -1,0 +1,187 @@
+---
+title: "Untitled"
+output: html_document
+---
+```{r}
+library(tidyverse)
+```
+
+```{r}
+# Check all file in this zip folder
+unzip("all_stocks_5yr.csv.zip", list=TRUE)
+```
+
+```{r}
+s_data <- read.csv(unz("all_stocks_5yr.csv.zip", "all_stocks_5yr.csv"))
+head(s_data)
+tail(s_data)
+```
+```{r}
+length(unique(s_data$Name))
+```
+# 0.4 Data overview
+
+```{r}
+summary(s_data)
+```
+
+
+```{r}
+sum(is.na(s_data))
+```
+
+# 0.5 Data cleaning
+
+```{r}
+s_data[is.na(s_data)]
+s_data[is.na(s_data)] <- 0
+s_data
+```
+
+
+```{r}
+s_data$date <- as.Date(s_data$date, format = "%Y-%m-%d")
+```
+
+# 0.7 Time Series Analysis
+```{r}
+i_stock <- filter(s_data, Name == "PSA")
+str(i_stock)
+```
+# 0.8 Create time series
+We will use tsclean and ts function of R to create a time series.
+
+tsclean() is a convenient method for outlier removal and inputing missing values
+
+ts() is used to create time-series objects
+
+```{r}
+summary(i_stock)
+```
+# 0.8 Create time series
+```{r}
+## Create a daily Date object
+inds <- seq(as.Date("2012-08-13"), as.Date("2017-08-11"), by = "day")
+head(inds)
+as.numeric(format(inds[1], "%j"))
+```
+
+```{r}
+col_idx <- "high"
+i_ts <- as.numeric(i_stock[,col_idx]) %>%
+    tsclean(replace.missing = TRUE, lambda = NULL) %>%
+    ts(start = c(2012, as.numeric(format(inds[1], "%j"))),
+             frequency = 365.5)
+```
+
+
+```{r}
+head(i_ts)
+tail(i_ts)
+```
+
+# 0.9 Plotting Time Series - High
+
+```{r}
+plot.ts(i_ts, xlab = "Time", ylab = "High value", main = "Time Series", col = "red")
+```
+# 0.10 Stationarity
+
+What is stationary time series?
+
+A stationary process has a mean and variance that do not change overtime and the process does not have trend.
+
+The above time series does not look stationary.
+
+To confirm that we will use “Dickey-Fuller test” to determine stationarity.
+
+Dickey-Fuller test for variable
+```{r}
+#library(tseries)
+tseries::adf.test(i_ts, alternative = "stationary", k = 0)
+```
+
+# 0.11 Decomposing Time Series
+Decomposing a time series involves separating the time series into trend and irregular components.
+```{r}
+i_tscomponents <- decompose(i_ts)
+plot(i_tscomponents, col = "red")
+```
+# 0.12 Differencing a Time Series
+Differencing is a common solution used to stationarize the variable. We will perform differencing using R function diff.
+```{r}
+i_tsdiff1 <- diff(i_ts, differences=1)
+plot.ts(i_tsdiff1, col = "red")
+```
+The time series (above) appears to be stationary.
+
+# 0.13 Selecting a Candidate ARIMA Model
+
+The next step is to select appropriate ARIMA model, which means finding the most appropriate values of p and q for an ARIMA(p,d,q) model. You usually need to examine the correlogram and partial correlogram of the stationary time series for this. To plot a correlogram and partial correlogram, we can use the acf() and pacf() functions in R, respectively.
+
+```{r}
+acf(i_tsdiff1, lag.max=60)             # plot a correlogram
+```
+
+
+```{r}
+acf(i_tsdiff1, lag.max=60, plot=FALSE) # get the autocorrelation values
+```
+
+
+```{r}
+pacf(i_tsdiff1, lag.max=60)             # plot a partial correlogram
+```
+
+
+```{r}
+pacf(i_tsdiff1, lag.max=60, plot=FALSE) # get the partial autocorrelation values
+```
+
+#0.14 Fitting an ARIMA Model
+R provides a function auto.arima, which returns best ARIMA model according to either AIC, AICc or BIC value. The function conducts a search over possible model within the order constraints provided.
+
+
+```{r}
+i_tsarima <- auto.arima(i_ts, max.p = 3, max.q = 3, max.d = 3)
+i_tsarima
+```
+
+# 0.15 Forecasting using an ARIMA Model
+```{r}
+i_tsforecasts <- forecast(i_tsarima, h = 60)
+plot(i_tsforecasts, col = "red")
+```
+
+
+```{r}
+plot.ts(i_tsforecasts$residuals)            # make time plot of forecast errors
+```
+
+
+```{r}
+ggplot(data.frame(residuals = i_tsforecasts$residuals), aes(residuals)) + geom_histogram(bins = 50, aes(y = ..density..), col = "red", fill = "red", alpha = 0.3) + geom_density()# make a histogram
+```
+The forecast errors seem to be normally distributed with mean zero and constant variance, the ARIMA model does seem to provide an adequate predictive model
+
+Here we looked at how to best fit ARIMA model to univariate time series. Next thing that I’ll work on is Multivariate Time Series Forecasting using neural net.
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+

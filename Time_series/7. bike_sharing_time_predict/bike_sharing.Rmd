@@ -247,9 +247,7 @@ test_tbl %>%
 
 # 7.1 ARIMA ----
 ```{r}
-#train_tbl %>%
-#    tk_ts(select = cnt, frequency = 364) 
-# frequency: the number of observations per unit of time.
+
 ```
 
 

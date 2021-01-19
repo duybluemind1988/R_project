@@ -897,11 +897,11 @@ list_model <- c("knn","glmnet","svmRadial","cubist","lm","pcr","pls","bagEarth",
 for (model_name in list_model){
   print(model_name)
   set.seed(7)
-  start_time <- lubridate::second(Sys.time())
+  start_time <- lubridate::minute(Sys.time())
   
   Model <- train(SalePrice~., data=baked_train, method=model_name, metric="RMSE", trControl=cv)
   
-  end_time <- lubridate::second(Sys.time())
+  end_time <- lubridate::minute(Sys.time())
   time <- (end_time - start_time)
   print(time)
   

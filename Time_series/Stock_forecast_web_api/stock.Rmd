@@ -1,0 +1,73 @@
+---
+title: "Untitled"
+output: html_document
+---
+```{r}
+library(quantmod) # getSymbols
+library(tidyverse)
+library(plotly)
+```
+
+```{r}
+stock_name <- "AAPL"
+quantmod::getSymbols(stock_name, src = "yahoo", from = as.Date("2017-11-01"), to = Sys.Date())
+data <- AAPL
+data <- as_tibble(data)
+data$date <- as.Date(as.character(index(AAPL)))
+colnames(data) <- c("Open","High","Low","Close","Volumne","Adjusted","Date")
+tail(data)
+```
+
+```{r}
+library(TSstudio)
+```
+
+
+```{r}
+ts_plot(data %>% select(Date,Adjusted),
+        title = "Stock price",
+        Ytitle = "USD",
+        slider = TRUE)
+```
+
+```{r}
+library(dygraphs)  
+don <- xts(x = data$Adjusted, order.by = data$Date)
+dygraph(don)
+```
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+

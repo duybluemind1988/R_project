@@ -1,0 +1,417 @@
+---
+title: "DJIA_30_stock"
+output: html_document
+---
+```{r}
+library(tidyverse)
+library(data.table)
+library(forecast)
+```
+
+
+```{r}
+s_data <- read.csv(file ="data/all_stocks_2006-01-01_to_2018-01-01.csv")
+s_data
+```
+
+
+```{r}
+unique(s_data$Name)
+length(unique(s_data$Name))
+```
+
+# 4 Data overview
+```{r}
+summary(s_data)
+```
+
+
+```{r}
+str(s_data)
+```
+
+# 5 Data cleaning
+
+```{r}
+sum(is.na(s_data))
+```
+
+
+```{r}
+library(lubridate)
+s_data[is.na(s_data)] <- 0
+s_data$Date <- ymd(s_data$Date)
+str(s_data)
+```
+
+# Lets look at some univariate distributions - AllStocks Data
+```{r}
+#install.packages("pdp")
+library(pdp)
+```
+
+```{r}
+options(repr.plot.width=12, repr.plot.height=12) 
+
+p1 = ggplot(s_data, aes(Open)) + geom_histogram(bins = 50, aes(y = ..density..), col = "red", fill = "red", alpha = 0.3) + geom_density()# + xlim(c(0, 1000))
+
+p2 = ggplot(s_data, aes(High)) + geom_histogram(bins = 50, aes(y = ..density..), col = "red", fill = "red", alpha = 0.3) + geom_density()# + xlim(c(0, 1000))
+
+p3 = ggplot(s_data, aes(Low)) + geom_histogram(bins = 50, aes(y = ..density..), col = "red", fill = "red", alpha = 0.3) + geom_density()# + xlim(c(0, 1000))
+
+p4 = ggplot(s_data, aes(Close)) + geom_histogram(bins = 50, aes(y = ..density..), col = "red", fill = "red", alpha = 0.3) + geom_density()# + xlim(c(0, 1000))
+
+pdp::grid.arrange(p1,p2,p3,p4, nrow=2,ncol=2)
+```
+```{r}
+#tmp <- filter(s_data, High > 100)
+tmp <- s_data
+sample_num = 5
+```
+
+
+```{r}
+#sample_ticker <- as.character(sample(tmp$Name, sample_num))
+sample_ticker <"GOOGL"
+candidate_ticker <- c("IBM", "BA", "AAPL", "GS", "GOOGL")
+candidate_num <- length(candidate_ticker)
+candidate_num # 5
+stock_list <- vector(mode="list", length=candidate_num)
+names(stock_list) <- candidate_ticker
+stock_list
+```
+
+
+```{r}
+i = 1
+for (ticker in candidate_ticker){
+  stock_list[[i]] <- filter(s_data, Name == ticker)
+  # print(stock_list[[i]])
+  i <- i+1
+  # print(ticker)
+}
+```
+
+
+```{r}
+stock_list
+```
+# 8 Create and plot Time Series - High
+
+```{r}
+xts_list <- vector(mode="list", length=candidate_num)
+ts_list <- vector(mode="list", length=candidate_num)
+```
+
+
+```{r}
+names(xts_list) = candidate_ticker
+names(ts_list) = candidate_ticker
+xts_list
+```
+
+
+```{r}
+library(xts)
+for (ticker in candidate_ticker){
+  stock = stock_list[[ticker]]
+  xts = xts(stock$Close, order.by=stock$Date)
+  attr(xts, 'frequency') <- length(xts)/12 # 251.5833 , time interval 12 years (all data)
+  ts = as.ts(xts, start = c(2006))
+  xts_list[[ticker]] <- xts
+  ts_list[[ticker]] <- ts
+}
+
+```
+```{r}
+head(xts)
+tail(xts)
+```
+```{r}
+head(ts)
+tail(ts)
+```
+
+```{r}
+length(xts)
+length(xts)/12
+# frequency: 251 value each year, through 12 years
+```
+
+
+```{r}
+xts_table= do.call(cbind, xts_list)
+head(xts_table)
+```
+
+
+```{r}
+#install.packages("dygraphs")
+library(dygraphs)
+dygraph(xts_table, xlab = "Time", ylab = "High value", main = "Time Series") %>%
+  # dySeries(labels.default()) %>%
+  # dyOptions(colors = c("red")) %>%
+  dyRangeSelector()
+```
+
+# 9 Stationarity
+```{r}
+xts = xts_list[['GOOGL']]
+ts = ts_list[['GOOGL']]
+```
+
+```{r}
+head(xts)
+```
+
+
+```{r}
+head(ts)
+```
+
+
+```{r}
+library(tseries)
+tseries::adf.test(xts, alternative = "stationary", k = 0)
+```
+# 10 Decomposing Time Series
+
+```{r}
+tscomponents_add <- decompose(ts, type = "additive")
+tscomponents_mul <- decompose(ts, type = "multiplicative")
+plot(tscomponents_add, col = "red")
+```
+
+
+```{r}
+plot(tscomponents_mul, col = "blue")
+```
+# 11 Differencing a Time Series
+
+Differencing is a common solution used to stationarize the variable. We will perform differencing using R function diff.
+
+Consider fractional difference?
+```{r}
+xtsdiff1 <- diff(xts, differences=1)
+tsdiff1 <- diff(ts, differences=1)
+plot.xts(xtsdiff1, col = "blue")
+```
+
+
+```{r}
+adf.test(tsdiff1, alternative = "stationary", k = 0)
+```
+Reject hypothesis --> stationary
+It means that different make stationary
+
+```{r}
+findfrequency(xts)          # find dominant frequency of original time series
+```
+
+
+```{r}
+findfrequency(xtsdiff1)     # find dominant frequency of differenced time series
+```
+The time series (above) appears to be stationary.
+
+# 12 Selecting a Candidate ARIMA Model
+The next step is to select appropriate ARIMA model, which means finding the most appropriate values of p and q for an ARIMA(p,d,q) model. You usually need to examine the correlogram and partial correlogram of the stationary time series for this. To plot a correlogram and partial correlogram, we can use the acf() and pacf() functions in R, respectively.
+
+
+```{r}
+Acf(xtsdiff1, lag.max=60)             # plot a correlogram
+```
+
+
+```{r}
+Acf(xtsdiff1, lag.max=60, plot=FALSE) # get the autocorrelation values
+```
+
+
+```{r}
+Pacf(xtsdiff1, lag.max=60)             # plot a partial correlogram
+```
+
+
+```{r}
+Pacf(xtsdiff1, lag.max=60, plot=FALSE) # get the partial autocorrelation values
+```
+Now, we could compare the sample ACF and PACF to those of various theoretical ARMA models. Use properties of ACF & PACF as a guide to estimate plausible models and select appropriate p, q and d. Alternative to this is discussed next.
+
+# 13 Fitting an ARIMA Model
+
+R provides a function auto.arima, which returns best ARIMA model according to either AIC, AICc or BIC value. The function conducts a search over possible model within the order constraints provided.
+
+We train 6 models with different training data. For example, the model ‘tsarima240’ is trained with the whole time series exluding the last 240 daily data.
+
+
+```{r}
+length(xts)
+length(head(xts, -240))
+```
+
+
+```{r}
+tsarima240 <- auto.arima(head(xts, -240), max.p = 3, max.q = 3, max.d = 3) # excluding last 240 time series as test data
+print(tsarima240)
+```
+
+
+```{r}
+autoplot(tsarima240)
+```
+
+
+```{r}
+tsarima120 <- auto.arima(head(xts, -120), max.p = 3, max.q = 3, max.d = 3) #120
+print(tsarima120)
+```
+
+
+```{r}
+autoplot(tsarima120)
+```
+
+
+```{r}
+tsarima60 <- auto.arima(head(xts, -60), max.p = 3, max.q = 3, max.d = 3) #60
+print(tsarima60)
+tsarima30 <- auto.arima(head(xts, -30), max.p = 3, max.q = 3, max.d = 3) #30
+print(tsarima30)
+tsarima7 <- auto.arima(head(xts, -7), max.p = 3, max.q = 3, max.d = 3)   #7
+print(tsarima7)
+```
+
+# 14 Forecasting using an ARIMA Model
+
+```{r}
+tsforecasts240 <- forecast(tsarima240, h = 240) # forecast the next 240 time series
+tsforecasts120 <- forecast(tsarima120, h = 120) # forecast the next 120 time series
+tsforecasts60 <- forecast(tsarima60, h = 60) # forecast the next 60 time series
+tsforecasts30 <- forecast(tsarima30, h = 30) # forecast the next 30 time series
+tsforecasts7 <- forecast(tsarima7, h = 7) # forecast the next 7 time series
+```
+
+
+```{r}
+autoplot(tsforecasts240)
+```
+
+```{r}
+length(head(tail(xts, 240), 240))
+accuracy(tsforecasts240, head(tail(xts, 240), 240))
+```
+
+
+```{r}
+length(head(tail(xts, 240), 120))
+accuracy(tsforecasts240, head(tail(xts, 240), 120))
+accuracy(tsforecasts240, head(tail(xts, 240), 60))
+accuracy(tsforecasts240, head(tail(xts, 240), 30))
+accuracy(tsforecasts240, head(tail(xts, 240), 7))
+```
+
+
+```{r}
+ggplot(data.frame(residuals = tsforecasts240$residuals), aes(residuals)) + geom_histogram(bins = 50, aes(y = ..density..), col = "red", fill = "red", alpha = 0.3) + geom_density()# make a histogram
+```
+
+
+```{r}
+checkresiduals(tsforecasts240)
+```
+# 15 Test arima_modeling function on the rest companies
+```{r}
+arima_modeling <- function(xts, ts, ticker){
+  ## Stationarity
+  print(ticker)
+  adf.test(xts, alternative = "stationary", k = 0)
+
+  ## Decomposing Time Series
+  tscomponents <- decompose(ts)
+  plot(tscomponents, col = "red")
+
+  ## Differencing a Time Series
+  xtsdiff1 <- diff(xts, differences=1)
+  tsdiff1 <- diff(ts, differences=1)
+  plot.xts(xtsdiff1, col = "blue")
+  findfrequency(xts)          # find dominant frequency of original time series
+  findfrequency(xtsdiff1)     # find dominant frequency of differenced time series
+
+  ## Selecting a Candidate ARIMA Model
+  print(ticker)
+  print("Selecting a candidate ARIMA Model")
+  Acf(xtsdiff1, lag.max=60)             # plot a correlogram
+  Acf(xtsdiff1, lag.max=60, plot=FALSE) # get the autocorrelation values
+
+  Pacf(xtsdiff1, lag.max=60)             # plot a partial correlogram
+  Pacf(xtsdiff1, lag.max=60, plot=FALSE) # get the partial autocorrelation values
+  
+  ## Fitting an ARIMA Model
+  tsarima <- auto.arima(head(xts, -30), max.p = 3, max.q = 3, max.d = 3)
+  
+  # excluding last 120 time series as test data
+  print(tsarima)
+  autoplot(tsarima)
+  print(ticker)
+
+  ## Forecasting using an ARIMA Model
+  print(ticker)
+  tsforecasts <- forecast(tsarima, h = 30) # forecast the next 120 time series
+  acc <- accuracy(tsforecasts, head(tail(xts, 30), 7))
+  print(acc)
+  autoplot(tsforecasts)
+  
+  print(ticker)
+  
+  ggplot(data.frame(residuals = tsforecasts$residuals), aes(residuals)) + geom_histogram(bins = 50, aes(y = ..density..), col = "red", fill = "red", alpha = 0.3) + geom_density()# make a histogram
+  checkresiduals(tsforecasts)
+}
+
+for (ticker in candidate_ticker){
+  if (ticker != 'GOOGL'){
+    arima_modeling(xts_list[[ticker]], ts_list[[ticker]], as.character(ticker))
+    }
+}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
