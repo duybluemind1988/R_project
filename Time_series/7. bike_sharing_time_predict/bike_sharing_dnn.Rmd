@@ -647,6 +647,10 @@ library(h2o)
 bike =read.csv("bike_train.csv")
 bike
 ```
+```{r}
+bike <- bike %>% select(-c("casual","registered"))
+bike
+```
 
 
 ```{r}
@@ -676,8 +680,7 @@ bike <- bike %>%
 
 Dividing the data into training and test set
 ```{r}
-#ARIMA programming starts
-## 75% of the sample size
+## 80% of the sample size
 nrow(bike)
 k=0.8
 smp_size <- round( 0.8 * nrow(bike))
@@ -719,9 +722,9 @@ start_time <- lubridate::minute(Sys.time())
 model <- train(count~., data=baked_train, method="gbm", metric="RMSE",verbose=FALSE)
 end_time <- lubridate::minute(Sys.time())
 time <- (end_time - start_time)
-print(time)
+print(time) # 2 min
 pred <- predict(model, baked_test)
-print(RMSE(baked_test$count,pred))
+print(RMSE(baked_test$count,pred)) # 97
 ```
 ```{r}
 #install.packages("vip")
@@ -743,67 +746,122 @@ print(RMSE(baked_test$count,pred))
 
 
 ```{r}
-start_time <- lubridate::minute(Sys.time())
-model <- train(count~., data=baked_train, method="cubist", metric="RMSE",verbose=FALSE)
-end_time <- lubridate::minute(Sys.time())
-time <- (end_time - start_time)
-print(time)
-pred <- predict(model, baked_test)
-print(RMSE(baked_test$count,pred))
+# VERY long
+#start_time <- lubridate::minute(Sys.time())
+#model <- train(count~., data=baked_train, method="cubist", metric="RMSE",verbose=FALSE)
+#end_time <- lubridate::minute(Sys.time())
+#time <- (end_time - start_time)
+#print(time)
+#pred <- predict(model, baked_test)
+#print(RMSE(baked_test$count,pred))
 ```
 
 ```{r}
 start_time <- lubridate::minute(Sys.time())
-model <- train(count~., data=baked_train, method="glmnet", metric="RMSE",verbose=FALSE)
+model <- train(count~., data=baked_train, method="glmnet", 
+               metric="RMSE",verbose=FALSE)
 end_time <- lubridate::minute(Sys.time())
 time <- (end_time - start_time)
-print(time)
+print(time) # <1 min
 pred <- predict(model, baked_test)
-print(RMSE(baked_test$count,pred))
+print(RMSE(baked_test$count,pred)) # 161
 ```
+```{r}
+start_time <- lubridate::minute(Sys.time())
+model <- train(count~., data=baked_train, method="ridge", metric="RMSE",verbose=FALSE)
+end_time <- lubridate::minute(Sys.time())
+time <- (end_time - start_time)
+print(time) # < 1 min
+pred <- predict(model, baked_test)
+print(RMSE(baked_test$count,pred)) # 161
+```
+
+
+```{r}
+library(parsnip)
+glmnet_fit <- parsnip::linear_reg(mode = "regression", penalty = 0.01, mixture = 0.5) %>%
+    set_engine("glmnet") %>%
+    fit.model_spec(count ~ ., data = baked_train) # < 10 s
+pred <- glmnet_fit %>% predict(new_data = baked_test) 
+print(RMSE(baked_test$count,pred[[".pred"]])) # 161
+```
+
+```{r}
+model <- parsnip::boost_tree(mode = "regression") %>%
+    set_engine("xgboost") %>%
+    fit.model_spec(count ~ ., data = baked_train) # < 10 s
+pred <- model %>% predict(new_data = baked_test) 
+print(RMSE(baked_test$count,pred[[".pred"]])) # 67
+
+```
+```{r}
+vip::vip(model, num_features = 20, method = "model")
+```
+
+```{r}
+model <- parsnip::rand_forest(mode = "regression") %>%
+    set_engine("ranger") %>%
+    fit.model_spec(count ~ ., data = baked_train) # < 10 s
+pred <- model %>% predict(new_data = baked_test) 
+print(RMSE(baked_test$count,pred[[".pred"]])) #107
+```
+
+
+```{r}
+model <- parsnip::mars(mode = "regression") %>%
+    set_engine("earth") %>%
+    fit.model_spec(count ~ ., data = baked_train) # < 10 s
+pred <- model %>% predict(new_data = baked_test) 
+print(RMSE(baked_test$count,pred[[".pred"]])) # 133
+```
+```{r}
+model <- parsnip::linear_reg(mode = "regression",penalty = 0.01, mixture = 0.5) %>%
+    set_engine("glmnet") %>%
+    fit.model_spec(count ~ ., data = baked_train) # < 10 s
+pred <- model %>% predict(new_data = baked_test) 
+print(RMSE(baked_test$count,pred[[".pred"]])) # 161
+```
+```{r}
+#install.packages("liquidSVM")
+model <- parsnip::svm_rbf(mode = "regression") %>%
+    set_engine("liquidSVM") %>%
+    fit.model_spec(count ~ ., data = baked_train) # < 20 s
+pred <- model %>% predict(new_data = baked_test) 
+print(RMSE(baked_test$count,pred[[".pred"]])) # 230
+```
+
+
 
 ```{r}
 library(h2o)
 h2o.init()
 ```
+Data for H2O:
+- No date time POSIXct
+- No order column --> must be converted to factor
 ```{r}
-baked_train$datetime <-as.Date(baked_train$datetime)
-baked_train$datetime <-as.Date(baked_train$datetime)
+baked_train
+```
+
+```{r}
+# Convert order to factor
+baked_train$day_week <- factor(baked_train$day_week,ordered=FALSE)
+baked_train$month <- factor(baked_train$month,ordered=FALSE)
+baked_test$day_week <- factor(baked_test$day_week,ordered=FALSE)
+baked_test$month <- factor(baked_test$month,ordered=FALSE)
 baked_train
 ```
 
 
 ```{r}
 # convert training data to h2o object
-train_h2o <- as.h2o(baked_train)
-test_h2o <- as.h2o(baked_test)
+train_h2o <- as.h2o(baked_train %>% select(-datetime))
+test_h2o <- as.h2o(baked_test %>% select(-datetime))
 # set the response column to Sale_Price
 response <- "count"
-n_features <- length(setdiff(names(baked_train), "count"))
+n_features <- length(setdiff(names(baked_train %>% select(-datetime)), "count"))
 # set the predictor names
-predictors <- setdiff(colnames(baked_train), response)
-```
-
-XGBoost H2O
-```{r}
-start_time <- lubridate::minute(Sys.time())
-h2o_model <- h2o.xgboost(
-    x = predictors, 
-    y = response,
-    training_frame = train_h2o, 
-    seed = 123
-)
-end_time <- lubridate::minute(Sys.time())
-time <- (end_time - start_time)
-print(time)
-#h2o_model
-pred <-h2o.predict(h2o_model, newdata = test_h2o)
-print(RMSE(test_h2o$count,pred) )
-```
-
-
-```{r}
-vip::vip(h2o_model, num_features = 25, bar = TRUE)
+predictors <- setdiff(colnames(baked_train %>% select(-datetime)), response)
 ```
 
 GBM H2O
@@ -817,13 +875,53 @@ h2o_model <- h2o.gbm(
 )
 end_time <- lubridate::minute(Sys.time())
 time <- (end_time - start_time)
-print(time)
+print(time) # <10s
 #h2o_model
 pred <-h2o.predict(h2o_model, newdata = test_h2o)
-print(RMSE(test_h2o$count,pred) )
+print(RMSE(test_h2o$count,pred) ) # 132
+```
+```{r}
+h2o_model
 ```
 
 
+```{r}
+vip::vip(h2o_model, num_features = 25, bar = TRUE)
+```
+
+GLM H2O
+```{r}
+start_time <- lubridate::minute(Sys.time())
+h2o_model <- h2o.glm(
+    x = predictors, 
+    y = response,
+    training_frame = train_h2o, 
+    seed = 123
+)
+end_time <- lubridate::minute(Sys.time())
+time <- (end_time - start_time)
+print(time) # <10s
+#h2o_model
+pred <-h2o.predict(h2o_model, newdata = test_h2o)
+print(RMSE(test_h2o$count,pred) ) # 187
+```
+
+
+```{r}
+start_time <- lubridate::minute(Sys.time())
+h2o_model <- h2o.randomForest(
+    x = predictors, 
+    y = response,
+    training_frame = train_h2o, 
+    seed = 123
+)
+end_time <- lubridate::minute(Sys.time())
+time <- (end_time - start_time)
+print(time) # <10s
+#h2o_model
+pred <-h2o.predict(h2o_model, newdata = test_h2o)
+print(RMSE(test_h2o$count,pred) ) # 135
+```
 ```{r}
 vip::vip(h2o_model, num_features = 25, bar = TRUE)
 ```
@@ -840,10 +938,162 @@ h2o_dl <- h2o.deeplearning(
 )
 end_time <- lubridate::minute(Sys.time())
 time <- (end_time - start_time)
-print(time)
+print(time) # <0
 pred <-h2o.predict(h2o_dl, newdata = test_h2o)
-print(RMSE(test_h2o$count,pred) )
+print(RMSE(test_h2o$count,pred) ) # 183
 
+```
+
+
+```{r}
+start_time <- lubridate::minute(Sys.time())
+h2o_dl <- h2o.deeplearning(
+    x = predictors, 
+    y = response,
+    training_frame = train_h2o, 
+    hidden = c(25,10),
+    rate=0.01, 
+    l1=1e-5,                        ## add some L1/L2 regularization
+    l2=1e-5,
+    seed = 123
+)
+end_time <- lubridate::minute(Sys.time())
+time <- (end_time - start_time)
+print(time) # <0
+pred <-h2o.predict(h2o_dl, newdata = test_h2o)
+print(RMSE(test_h2o$count,pred) ) # 186
+```
+
+## Time series
+
+```{r}
+library(tidyverse) # metapackage with lots of helpful functions
+library(lubridate)
+library(caret)
+library(recipes)
+```
+
+
+```{r}
+bike =read.csv("bike_train.csv")
+## Feature engenearing
+bike$datetime <- as_datetime(bike$datetime)
+bike$day_week <- wday(bike$datetime, label = TRUE)
+bike$month <- lubridate::month(bike$datetime, label = TRUE)
+bike$hour <- lubridate::hour(bike$datetime)
+## Converting Factors
+bike <- bike %>% 
+  mutate(
+    holiday = factor(holiday, labels = c('no','yes')),
+    workingday = factor(workingday, labels = c('no', 'yes')),
+    season = factor(season, labels = c('spring','summer','fall','winter')),
+    day_hour = ifelse(hour > 6 & hour < 10, 'between_6_and_10',
+                      ifelse(hour > 10 & hour < 17, 'between_10_and_17',
+                             ifelse(hour > 17 & hour < 20,
+                                    'between_17_and_20', 'between_20_and_6'))),
+    day_hour = factor(day_hour, levels = c('between_6_and_10','between_10_and_17','between_17_and_20','between_20_and_6')),
+    weather = factor(weather, labels = c('Clear','Cloudy', 'Light_Rain','Heavy_Hain'))
+  )
+## 80% of the sample size
+nrow(bike)
+k=0.8
+smp_size <- round( 0.8 * nrow(bike))
+print(smp_size)
+train <- bike[1:smp_size, ]
+test <- bike[(smp_size+1):nrow(bike), ]
+dim(train)
+dim(test)
+
+## -- Recipe --------------------------- ##
+blueprint  <- recipe(count ~ ., data = bike) %>% 
+  step_YeoJohnson(all_numeric(), -all_outcomes(), -hour) %>%  # Remove skewness
+  step_center(all_numeric(), - all_outcomes(), -hour) %>% 
+  step_scale(all_numeric(), -all_outcomes(), -hour) #%>% 
+  #step_ns(hour, deg_free = 6) %>% 
+  #step_dummy(all_nominal()) #%>% 
+  #step_mutate(count = log ( count + 1))
+prepare <- prep(blueprint, training = train)
+baked_train <- bake(prepare, new_data = train)
+baked_test <- bake(prepare, new_data = test)
+head(baked_train)
+```
+```{r}
+library(xts)
+train_xts = xts(baked_train$count, order.by=baked_train$datetime)
+test_xts =  xts(baked_test$count, order.by=baked_test$datetime)
+attr(xts, 'frequency') <- length(xts)/2 # Set the frequency of the xts yearly (in 2 years)
+head(train_xts)
+tail(train_xts)
+```
+
+
+```{r}
+tseries::adf.test(train_xts, alternative = "stationary", k = 0)
+```
+
+
+```{r}
+## Decomposing Time Series
+ts = as.ts(xts, start = c(2011))
+tscomponents <- decompose(ts)
+plot(tscomponents, col = "red")
+```
+
+
+```{r}
+## Differencing a Time Series
+xtsdiff1 <- diff(xts, differences=1)
+plot.xts(xtsdiff1, col = "blue")
+```
+```{r}
+library(forecast)
+```
+
+
+```{r}
+## Selecting a Candidate ARIMA Model
+
+print("Selecting a candidate ARIMA Model")
+Acf(xtsdiff1, lag.max=60)             # plot a correlogram
+Acf(xtsdiff1, lag.max=60, plot=FALSE) # get the autocorrelation values
+
+Pacf(xtsdiff1, lag.max=60)             # plot a partial correlogram
+Pacf(xtsdiff1, lag.max=60, plot=FALSE) # get the partial autocorrelation values
+```
+
+
+```{r}
+## Fitting an ARIMA Model
+tsarima <- auto.arima(train_xts, max.p = 3, max.q = 3, max.d = 3)
+print(tsarima)
+```
+
+
+```{r}
+autoplot(tsarima)
+```
+```{r}
+dim(baked_test)
+```
+
+
+```{r}
+tsforecasts <- forecast(tsarima, h = 2177)
+tsforecasts
+```
+
+```{r}
+#baked_test$count
+print(RMSE(baked_test$count,tsforecasts$mean)) # 317
+```
+
+```{r}
+autoplot(tsforecasts)
+```
+
+
+```{r}
+plot.ts(tsforecasts$residuals)  
 ```
 
 
@@ -857,6 +1107,31 @@ print(RMSE(test_h2o$count,pred) )
 
 ```{r}
 ```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
 
 
 ```{r}
