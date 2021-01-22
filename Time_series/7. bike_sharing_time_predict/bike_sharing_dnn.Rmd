@@ -778,12 +778,16 @@ print(RMSE(baked_test$count,pred)) # 161
 
 
 ```{r}
+#install.packages("parsnip")
 library(parsnip)
 glmnet_fit <- parsnip::linear_reg(mode = "regression", penalty = 0.01, mixture = 0.5) %>%
     set_engine("glmnet") %>%
     fit.model_spec(count ~ ., data = baked_train) # < 10 s
 pred <- glmnet_fit %>% predict(new_data = baked_test) 
 print(RMSE(baked_test$count,pred[[".pred"]])) # 161
+```
+```{r}
+install.packages("xgboost")
 ```
 
 ```{r}
@@ -795,10 +799,12 @@ print(RMSE(baked_test$count,pred[[".pred"]])) # 67
 
 ```
 ```{r}
+#install.packages("vip")
 vip::vip(model, num_features = 20, method = "model")
 ```
 
 ```{r}
+#install.packages("ranger")
 model <- parsnip::rand_forest(mode = "regression") %>%
     set_engine("ranger") %>%
     fit.model_spec(count ~ ., data = baked_train) # < 10 s
@@ -1095,11 +1101,6 @@ autoplot(tsforecasts)
 ```{r}
 plot.ts(tsforecasts$residuals)  
 ```
-
-
-```{r}
-```
-
 
 ```{r}
 ```
