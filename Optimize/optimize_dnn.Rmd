@@ -1,0 +1,822 @@
+---
+title: "Untitled"
+output: html_document
+---
+Business science
+Chap 15: Optimize
+
+```{r}
+# Solver Backend
+#install.packages("ompr.roi")
+library(ROI)
+library(ROI.plugin.glpk)
+
+# Tidy Linear Programming
+library(ompr)
+library(ompr.roi)
+
+# Core
+library(tidyverse)
+
+# Timing
+library(tictoc)
+```
+
+#Problem 1:
+
+Maximize 7x1 + 3x2 + 1 x3
+Subject to 
+
+6x1 + 4x2 + 5x3 <= 60
+8x1 + x2  + 2x3 <= 80
+9x1 + 1x2 + 7x3 <= 70
+
+x1, x3 belong to (Z>= 0)
+x2 > 0
+
+L_objective: Linear Objective Function
+L_constraint: Linear Constraints
+```{r}
+A <- rbind( c(6,4,5), c(8,0,2), c(9,1,7))
+milp <- ROI::OP (objective = L_objective(c(7,1,3),c("x","y","z")),
+            constraints = L_constraint(L=rbind( c(6,4,5), c(8,0,2), c(9,1,7)),
+                                       dir = c("<=","<=","<="),
+                                       rhs = c(60,80,70)),
+            types = c("I","C","I"),
+            maximum = TRUE)
+milp
+
+```
+
+
+```{r}
+sol <- ROI_solve(milp)
+solution(sol)
+```
+
+
+```{r}
+sol
+```
+
+# Problem 2
+```{r}
+## Simple linear program.
+## maximize:   2 x_1 + 4 x_2 + 3 x_3
+## subject to: 3 x_1 + 4 x_2 + 2 x_3 <= 60
+##             2 x_1 +   x_2 +   x_3 <= 40
+##               x_1 + 3 x_2 + 2 x_3 <= 80
+##               x_1, x_2, x_3 are non-negative real numbers
+```
+
+
+```{r}
+LP <- OP(objective = L_objective(c(2,4,3),c("x_1","x_2","x_3")),
+          L_constraint(L = matrix(c(3, 2, 1, 4, 1, 3, 2, 2, 2), nrow = 3),
+                       dir = c("<=", "<=", "<="),
+                       rhs = c(60, 40, 80)),
+          max = TRUE )
+LP
+```
+
+
+```{r}
+sol <- ROI_solve(LP)
+solution(sol)
+sol
+```
+# BUSINESS SCIENCE - LEARNING LAB 15 ----
+# CASE 1 - What Minimum Exam Grade Do I Need To Get To Pass The Course?
+
+```{r}
+# Solver Backend
+library(ROI)
+library(ROI.plugin.glpk)
+
+# Tidy Linear Programming
+library(ompr)
+library(ompr.roi)
+
+# Core
+library(tidyverse)
+
+# Timing
+library(tictoc)
+```
+
+
+```{r}
+# 2.0 DATA ----
+
+exam_grades_tbl <- tibble(
+    exam   = c("Quiz #1", "Midterm", "Quiz #2", "Final"),
+    grade  = c(50, 65, 70, NA),
+    weight = c(0.15, 0.25, 0.15, 0.45)
+)
+
+exam_grades_tbl
+```
+Exam	        Grade	Weight	Product	min	max
+Quiz #1	        50	0.15	  7.5		
+Midterm	        65	0.25	  16.25		
+Quiz #2	        70	0.15	  10.5		
+Final		            0.45		         0	100
+Course Grade	 34.25			           70	70
+
+Question: find optimize final grade to have course grade 70
+
+```{r}
+# 3.0 CONSTRAINTS -----
+
+final_grade_min  <- 0
+final_grade_max  <- 100 
+course_grade_max <- 70
+```
+
+
+```{r}
+# 4.0 OMPR OPTIMIZATION MODEL ----
+
+sum_prod_exams_1_3 <- sum(exam_grades_tbl$grade[1:3] * exam_grades_tbl$weight[1:3]) 
+sum_prod_exams_1_3
+```
+
+
+```{r}
+tic()
+model <- MIPModel() %>%
+    add_variable(final_grade, type = "continuous", lb = final_grade_min) %>% # set final grade variable and set lower bound 
+    set_objective(final_grade, "min") %>% # objective: minimize final grade
+    add_constraint(final_grade * exam_grades_tbl$weight[4] + sum_prod_exams_1_3 == course_grade_max) %>% # constraint: condition final_grade and other variable
+    solve_model(with_ROI(solver = "glpk")) 
+toc()
+```
+
+
+```{r}
+model
+```
+
+
+```{r}
+get_solution(model, final_grade) %>% enframe()
+```
+# BUSINESS SCIENCE - LEARNING LAB 15 ----
+# CASE 2 - What Product Mix to Manufacture Given 2 Production Lines?
+
+```{r}
+# 1.0 LIBRARIES ----
+
+# Solver Backend
+library(ROI)
+library(ROI.plugin.glpk)
+
+# Tidy Optimization
+library(ompr)
+library(ompr.roi)
+
+# Visualization
+library(plotly)
+
+# Core
+library(tidyverse)
+library(readxl)
+
+# Timing
+library(tictoc)
+```
+
+## 2.0 DATA ----
+```{r}
+#path <- "excel_optimization/Excel Optimization - 2.0 Macbook Product Mix.xlsx"
+path <- "E:/1.Linux/Business science/lab_15_r_optimization_modeling_1/excel_optimization/Excel Optimization - 2.0 Macbook Product Mix.xlsx"
+labor_cost_tbl <- read_excel(path = path, sheet = 2, range = "A3:B5", col_names = c("type", "cost")) 
+labor_cost_tbl
+```
+
+
+```{r}
+process_inputs_tbl <- read_excel(path = path, sheet = 2, range = "A8:I13") 
+process_inputs_tbl
+```
+```{r}
+labor_constraints_tbl <- read_excel(path = path, sheet = 2, range = "A25:D28") %>%
+    select(1, 4)
+labor_constraints_tbl
+```
+
+
+```{r}
+unit_sales_constraints_tbl <- read_excel(path = path, sheet = 2, range = "A23:I23", col_names = c("key", str_c("Model ", 1:8))) %>%
+    gather()
+unit_sales_constraints_tbl
+```
+## 3.0 PREPARE DATA ----
+
+## 3.1 Prepare Process Inputs Data ----
+
+```{r}
+process_inputs_tidy_tbl <- process_inputs_tbl %>%
+    
+    # Tidy Data
+    rename(type = `...1`) %>%
+    gather(key = "key", value = "value", -type) %>%
+    spread(key = type, value = value) %>%
+    rename(model = key) %>%
+    
+    # Add Labor Cost
+    bind_cols(
+        labor_cost_tbl %>% 
+            spread(key = type, value = cost) %>%
+            mutate(count = 8) %>% 
+            uncount(count)
+        ) %>%
+    
+    # Clean Up Column Names
+    rename_all(.funs = ~ str_replace_all(., " ", "_") %>%
+                   str_to_lower() %>%
+                   str_replace_all(",", "")) %>%
+    
+    # Calculate Unit Margin
+    mutate(
+        unit_margin_line_1 = selling_price - (cost_per_labor_hour_testing_line_1 * labor_hours_for_testing_line_1) - (cost_per_labor_hour_assembling * labor_hours_for_assembly) - cost_of_component_parts,
+        unit_margin_line_2 = selling_price - (cost_per_labor_hour_testing_line_2 * labor_hours_for_testing_line_2) - (cost_per_labor_hour_assembling * labor_hours_for_assembly) - cost_of_component_parts
+    )
+    
+process_inputs_tidy_tbl
+```
+## 4.0 OPTIMIZATION MODEL -----
+
+```{r}
+n_models  <- 8
+max_sales <- unit_sales_constraints_tbl$value
+max_labor <- labor_constraints_tbl$`Hours available`
+
+labor_hours_for_assembly       <- process_inputs_tidy_tbl$labor_hours_for_assembly
+labor_hours_for_testing_line_1 <- process_inputs_tidy_tbl$labor_hours_for_testing_line_1
+labor_hours_for_testing_line_2 <- process_inputs_tidy_tbl$labor_hours_for_testing_line_2
+
+unit_margin_line_1 <- process_inputs_tidy_tbl$unit_margin_line_1
+unit_margin_line_2 <- process_inputs_tidy_tbl$unit_margin_line_2
+```
+
+
+```{r}
+tic()
+model_2 <- MIPModel() %>%
+    
+    add_variable(macbooks_tested_line_1[i], i = 1:n_models, type = "integer", lb = 0) %>%
+    add_variable(macbooks_tested_line_2[i], i = 1:n_models, type = "integer", lb = 0) %>%
+    
+    add_constraint(macbooks_tested_line_1[i] + macbooks_tested_line_2[i] <= max_sales[i], i = 1:n_models) %>%
+    
+    add_constraint(sum_expr((macbooks_tested_line_1[i] + macbooks_tested_line_2[i]) * labor_hours_for_assembly[i], i = 1:n_models) <= max_labor[1]) %>%
+    add_constraint(sum_expr((macbooks_tested_line_1[i]) * labor_hours_for_testing_line_1[i], i = 1:n_models) <= max_labor[2]) %>%
+    add_constraint(sum_expr((macbooks_tested_line_2[i]) * labor_hours_for_testing_line_2[i], i = 1:n_models) <= max_labor[3]) %>%
+    
+    set_objective(
+        sum_expr(macbooks_tested_line_1[i] * unit_margin_line_1[i] + macbooks_tested_line_2[i] * unit_margin_line_2[i], i = 1:n_models),
+        sense = "max") %>%
+    
+    solve_model(with_ROI(solver = "glpk"))
+toc() # 0.75 s only
+```
+## 5.0 MODEL SUMMARY ----
+
+```{r}
+model_2
+```
+
+
+```{r}
+model_2$objective_value
+```
+
+
+```{r}
+get_solution(model_2, macbooks_tested_line_1[i]) 
+get_solution(model_2, macbooks_tested_line_2[i]) 
+```
+## 6.0 MODEL SIMULATION ----
+## - What is the effect on Production when Assembly Hours Free Up?
+
+## 6.1 Optimization Function ----
+
+```{r}
+optimize_by_max_labor <- function(max_labor_assembly = 20000, max_labor_testing_line_1 = 5000, max_labor_testing_line_2 = 6000) {
+    
+    model_2 <- MIPModel() %>%
+        
+        add_variable(macbooks_tested_line_1[i], i = 1:n_models, type = "integer", lb = 0) %>%
+        add_variable(macbooks_tested_line_2[i], i = 1:n_models, type = "integer", lb = 0) %>%
+        
+        add_constraint(macbooks_tested_line_1[i] + macbooks_tested_line_2[i] <= max_sales[i], i = 1:n_models) %>%
+        
+        add_constraint(sum_expr((macbooks_tested_line_1[i] + macbooks_tested_line_2[i]) * labor_hours_for_assembly[i], i = 1:n_models) <= max_labor_assembly) %>%
+        add_constraint(sum_expr((macbooks_tested_line_1[i]) * labor_hours_for_testing_line_1[i], i = 1:n_models) <= max_labor_testing_line_1) %>%
+        add_constraint(sum_expr((macbooks_tested_line_2[i]) * labor_hours_for_testing_line_2[i], i = 1:n_models) <= max_labor_testing_line_2) %>%
+        
+        set_objective(
+            sum_expr(macbooks_tested_line_1[i] * unit_margin_line_1[i] + macbooks_tested_line_2[i] * unit_margin_line_2[i], i = 1:n_models),
+            sense = "max") %>%
+        
+        solve_model(with_ROI(solver = "glpk"))
+    
+    return(
+        bind_rows(
+            get_solution(model_2, macbooks_tested_line_1[i]), 
+            get_solution(model_2, macbooks_tested_line_2[i]) 
+        ) %>%
+            add_column(net_profit = model_2$objective_value)
+    )
+}
+
+
+optimize_by_max_labor(max_labor_assembly = 20000, max_labor_testing_line_1 = 5000, max_labor_testing_line_2 = 6000)
+```
+## 6.2 Iteration ----
+
+```{r}
+tic()
+optimization_by_max_labor_results <- list(
+    assembly_total = seq(18000, 24000, length.out = 7),
+    testing_line_1_total = 5000,
+    testing_line_2_total = 6000
+    ) %>%
+    cross_df() %>%
+    mutate(optimization_solution = pmap(.l = list(assembly_total, testing_line_1_total, testing_line_2_total),
+                                        .f = optimize_by_max_labor))
+toc()
+```
+## 6.3 Visualizations -----
+
+## What happens as assembly hours increase?
+
+```{r}
+g <- optimization_by_max_labor_results %>%
+    unnest() %>%
+    ggplot(aes(x = as.factor(i), y = value, group = variable)) +
+    facet_wrap(~ variable, ncol = 1) +
+    geom_jitter(aes(color = assembly_total), width = 0.1) +
+    labs(title = "Assembly Hours Effect", x = "Macbook Pro Model", y = "Quantity Manufactured")
+
+ggplotly(g)
+```
+## APPENDIX - ROI VERSION ----
+
+```{r}
+names <- c(str_c("line_1_model_", 1:8), str_c("line_2_model_", 1:8))
+
+model_2_roi <- OP(
+    types = rep("I", 2*n_models),
+    constraints = rbind(
+        L_constraint(diag(2*n_models), rep(">=", 2*n_models), rep(0, 2*n_models)),
+        
+        L_constraint(cbind(diag(n_models), diag(n_models)), rep("<=", n_models), rhs = max_sales),
+        
+        L_constraint(rep(1, 2*n_models) * labor_hours_for_assembly, "<=", rhs = max_labor[1]),
+        L_constraint(c(rep(1, n_models), rep(0, n_models)) * labor_hours_for_testing_line_1, "<=", max_labor[2]),
+        L_constraint(c(rep(0, n_models), rep(1, n_models)) * labor_hours_for_testing_line_2, "<=", max_labor[3])
+        ),
+    objective = L_objective(
+        c(rep(1, n_models), rep(0, n_models)) * unit_margin_line_1 + 
+            c(rep(0, n_models), rep(1, n_models)) * unit_margin_line_2, names = names
+    ),
+    maximum = TRUE
+)
+```
+
+
+```{r}
+sol <- ROI_solve(model_2_roi, "glpk")
+sol
+```
+
+
+```{r}
+sol$solution
+```
+
+# Example from EDX:
+https://courses.edx.org/asset-v1:MITx+CTL.SC2x_2+2T2016+type@asset+block/Solver_Tutorial_and_Debug_v1.pdf
+
+	      Tahoe	            Pacific	          Savannah	        Aspen			
+Pallets	22.9999999995001	15.0000000047468	38.9999999915665	3.12564653788505E-09	Total Profit		
+Profit	450	                1150            800	              400	                  58799.9999997372		
+	Resources Required per Pallet of Paneling Type  (50 units)						
+	          Tahoe	Pacific	Savannah	Aspen	    Used	          Available	Unit
+Glue	        50	50	    100	      50	    5799.99999952527	5800	    quarts
+Pressing	    5   15	    10	      5	      729.999999999994	730	      hours
+Pine chips    500	400	    300	      200	    29199.9999997438	29200	    pounds
+Oak chips	    500	750	    250	      500	    32500.0000027645	60500	    pounds
+
+```{r}
+library(readxl)
+```
+
+```{r}
+file <- "E:/1.Linux/Business science/lab_15_r_optimization_modeling_1/excel_optimization/Example_dnn.xlsx"
+excel_file <- readxl::read_excel(path = file)
+excel_file
+```
+```{r}
+install.packages("xlsx")
+library("xlsx")
+read.xlsx(file,1)
+```
+
+
+```{r}
+
+labor_cost_tbl <- read_excel(path = path, 
+                             sheet = 4, 
+                             #range = "A2:E11", 
+                             #col_names = c("type", "cost")
+                             ) 
+labor_cost_tbl
+```
+# BUSINESS SCIENCE - LEARNING LAB 16 ----
+# CASE 3 - How To Optimize A Portfolio with Nonlinear Programming ----
+
+
+```{r}
+# 1.0 LIBRARIES ----
+
+# Solver Backend
+library(ROI)
+library(ROI.plugin.alabama)
+
+# Finance
+library(tidyquant)
+
+# Viz
+library(plotly)
+
+# Core
+library(tidyverse)
+
+# Timing
+library(tictoc)
+```
+
+```{r}
+# 2.0 DATA ----
+assets <- c("FB", "AMZN", "AAPL", "GOOG", "NFLX") %>% sort()
+
+stock_prices_tbl <- tq_get(assets, from = "2013-01-01", to = "2019-07-01")
+stock_prices_tbl
+```
+
+
+```{r}
+stock_returns_tbl <- stock_prices_tbl %>%
+    select(symbol, date, adjusted) %>%
+    group_by(symbol) %>%
+    tq_transmute(adjusted, mutate_fun = periodReturn, period = "yearly", col_rename = "returns")
+stock_returns_tbl
+```
+
+
+```{r}
+returns_matrix_tbl <- stock_returns_tbl %>%
+    spread(symbol, returns) %>%
+    select(assets) 
+
+returns_matrix_tbl
+```
+
+
+```{r}
+# 3.0 OPTIMIZATION ----
+
+# 3.1 STATIC VARIABLES ----
+
+cov_mtx <- cov(returns_matrix_tbl)
+cov_mtx
+```
+
+
+```{r}
+stats_tbl <- stock_returns_tbl %>%
+    summarise(
+        mean  = mean(returns),
+        stdev = sd(returns)
+    )
+stats_tbl
+```
+
+
+```{r}
+# 3.2 FUNCTIONS ----
+
+calc_portfolio_variance <- function(weights) {
+    t(weights) %*% (cov_mtx %*% weights) %>% as.vector()
+}
+
+calc_portfolio_variance(c(1, 0, 0, 0, 0))
+```
+
+
+```{r}
+calc_portfolio_return <- function(weights) {
+    stats <- stats_tbl$mean
+    sum(stats * weights)
+}
+
+calc_portfolio_return(c(1, 0, 0, 0, 0))
+```
+
+
+```{r}
+# 3.3 OBJECTIVE ----
+
+n_assets <- length(assets)
+
+model_nlp <- OP(
+    objective   = F_objective(F = calc_portfolio_variance, n = n_assets, names = assets),
+    constraints = rbind(
+        F_constraint(F = calc_portfolio_return, dir = ">=", rhs = 0.40),
+        
+        L_constraint(diag(n_assets), rep(">=", n_assets), rep(0, n_assets)),
+        L_constraint(diag(n_assets), rep("<=", n_assets), rep(1, n_assets)),
+        L_constraint(rep(1, n_assets), "==", 1)
+    ),
+    maximum = FALSE
+)
+```
+
+
+```{r}
+tic()
+sol <- ROI_solve(model_nlp, solver = "alabama", start = rep(1/n_assets, n_assets))
+toc()
+```
+
+
+```{r}
+sol$objval
+
+solution(sol) %>% round(2)
+```
+
+
+```{r}
+
+# 4.0 SIMULATION - Iterative Optimization ----
+
+# 4.1 Create Function ----
+optimize_portfolio <- function(required_return = 0.4) {
+    
+    model_nlp <- OP(
+        objective   = F_objective(F = calc_portfolio_variance, n = n_assets, names = assets),
+        constraints = rbind(
+            F_constraint(F = calc_portfolio_return, dir = ">=", rhs = required_return),
+            L_constraint(diag(n_assets), rep(">=", n_assets), rep(0, n_assets)),
+            L_constraint(diag(n_assets), rep("<=", n_assets), rep(1, n_assets)),
+            L_constraint(rep(1, n_assets), "==", 1)
+        ),
+        maximum = FALSE
+    )
+    
+    sol <- ROI_solve(model_nlp, solver = "alabama", start = rep(1/n_assets, n_assets))
+    
+    return(
+        bind_cols(
+            tibble(return_constraint = required_return),
+            tibble(portfolio_return  = calc_portfolio_return(sol$solution)),
+            tibble(portfolio_stdev   = (sol$objval)^0.5),
+            enframe(sol$solution) %>% spread(key = name, value = value))
+    )
+    
+}
+
+optimize_portfolio(0.4) 
+```
+
+
+```{r}
+# 4.2 Map (Simulation) ----
+tic()
+portfolio_sim_results_tbl <- seq(0.10, 0.50, length.out = 20) %>%
+    map_dfr(optimize_portfolio)
+toc()
+```
+
+
+```{r}
+portfolio_sim_results_tbl 
+```
+
+
+```{r}
+# 4.3 Visualize ----
+
+# 4.3.1 Heat Map ----
+plot_heatmap <- function(data) {
+    
+    data_transformed_tbl <- data %>%
+        mutate(sharpe_ratio = portfolio_return / portfolio_stdev) %>%
+        mutate(portfolio_id = row_number()) %>%
+        gather(key = stock, value = weight,
+               -sharpe_ratio, -portfolio_return, -portfolio_stdev, 
+               -portfolio_id, -return_constraint,
+               factor_key = TRUE) %>%
+        mutate(return_objective = scales::percent(return_constraint)) %>%
+        mutate(label_text = str_glue("Return Objective: {scales::percent(return_constraint)}
+                                     Portfolio Return: {scales::percent(portfolio_return)}
+                                     Portfolio Sharpe: {round(sharpe_ratio, 2)}
+                                     Portfolio StdDev: {round(portfolio_stdev, 2)}"))
+    
+    g <- data_transformed_tbl %>%
+        ggplot(aes(stock, y = return_objective, fill = weight)) +
+        geom_tile() +
+        geom_point(aes(text = label_text), size = 0.1, alpha = 0) +
+        scale_fill_gradient(low = "#FFFFFF", high = "#2c3e50") +
+        geom_text(aes(label = scales::percent(weight)), size = 3) +
+        theme_tq() +
+        labs(title = "Optimized Portfolio Weights", x = "Stock", y = "Return Objective")
+    
+    ggplotly(g, tooltip = "text")
+    
+}
+
+portfolio_sim_results_tbl %>% plot_heatmap()
+
+```
+
+
+```{r}
+# 4.3.2 Efficient Fronteir ----
+plot_efficient_frontier <- function(data) {
+    
+    portfolio_metrics_tbl <- data %>%
+        select(return_constraint, portfolio_return, portfolio_stdev)
+    
+    stock_weights_tbl <- data %>%
+        select(-c(return_constraint, portfolio_return, portfolio_stdev))
+    
+    stock_text <- names(stock_weights_tbl) %>%
+        map(~ str_c(.x, stock_weights_tbl %>% pull(.x) %>% scales::percent(),
+                    sep = ": ")) %>%
+        set_names(names(stock_weights_tbl)) %>%
+        as_tibble() %>%
+        mutate(stock_text = str_c(!!! syms(names(stock_weights_tbl)), sep = "\n")) %>%
+        pull(stock_text)
+        
+    
+    g <- portfolio_metrics_tbl %>%
+        mutate(sharpe_ratio = portfolio_return / portfolio_stdev) %>%
+        mutate(label_text = str_glue("Return Objective: {scales::percent(return_constraint)}
+                                     Portfolio Return: {scales::percent(portfolio_return)}
+                                     Portfolio Sharpe: {round(sharpe_ratio, 2)}
+                                     Portfolio StdDev: {round(portfolio_stdev, 2)}
+                                     ---")) %>%
+        mutate(label_text = str_c(label_text, stock_text, sep = "\n")) %>% 
+        
+        ggplot(aes(x = portfolio_stdev, y = portfolio_return, 
+                   color = sharpe_ratio, size = sharpe_ratio)) +
+        geom_point(aes(text = label_text)) +
+        expand_limits(x = 0, y = 0) +
+        labs(title = "Efficient Frontier", 
+             x = "Portfolio Risk (Standard Deviation)", 
+             y = "Portfolio Return (Mean)") +
+        theme_tq()
+    
+    ggplotly(g, tooltip = "text")
+    
+}
+
+portfolio_sim_results_tbl %>% plot_efficient_frontier()
+
+```
+
+# Simple minimization problem
+
+http://rstudio-pubs-static.s3.amazonaws.com/519631_8049bffb2ea84be291b1a7cea2d86ba5.html
+
+Problem
+M&D Chemicals produces two products that are sold as raw materials to companies manufacturing bath soaps and laundry detergents. Based on an analysis of current inventory levels and potential demand for the coming month, M&D’s management specified that the combined production for products A and B must total at least 350 gallons. Separately, a major customer’s order for 125 gallons of product A must also be satisfied. Product A requires 2 hours of processing time per gallon and product B requires 1 hour of processing time per gallon. For the coming month, 600 hours of processing time are available. M&D’s objective is to satisfy these requirements at a minimum total production cost. Production costs are $2 per gallon for product A and $3 per gallon for product B.
+Suppose additionally there is a constraint that the maximum production for B is 400 gallons.
+
+Solution
+The decision variables and objective function for the problem is as follows:
+xA = number of gallons of product A
+xB = number of gallons of product B
+
+With production costs at $2 per gallon for product A and $3 per gallon for product B, the objective function that corresponds to the minimization of the total production cost can be written as
+
+Min(2xA+3xB)
+
+The different constraints for the problem will be as follows:
+
+1. To satisfy the major customer’s demand for 125 gallons of product A, we know A must be at least 125.
+xA≥125
+2. The combined production for both products must total at least 350 gallons
+xA+xB≥350
+3. The available processing time must not exceed 600 hours
+2xA+xB≤600
+4. The production of B cannot exceed 400 gallons
+xb≤400
+5. As the production of A or B cannot be negative.
+xA≥0,xB≥0
+
+Subject to constraints:
+
+A	B		RHS
+1	0	≥	125
+1	1	≥	350
+2	1	≤	600
+0	1	≤	400
+```{r}
+#install.packages("lpSolve")
+library(lpSolve)
+```
+
+
+```{r}
+# A matrix of LHS of constraints (except the non negative)
+constraints.LHS <- matrix(c(1,0,
+              1,1,
+              2,1,
+              0,1), nrow = 4, byrow = TRUE)
+constraints.LHS
+
+```
+```{r}
+# A list of RHS of constraints (except the non negative)  
+RHS <- c(125, 350, 600,400)
+# A list of the constraints directions (except the non negative)  
+constranints_direction  <- c(">=", ">=", "<=", '<=')
+
+# A list of objective function coefficients
+objective.fxn <- c(2,3)
+# Find the optimal solution
+optimum <-  lp(direction="min",
+               objective.in = objective.fxn,
+               const.mat = constraints.LHS,
+               const.dir = constranints_direction,
+               const.rhs = RHS,
+               all.int = T,
+               compute.sens = TRUE)
+```
+
+
+```{r}
+optimum 
+```
+
+
+```{r}
+optimum$solution
+#optimum$constraints
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
