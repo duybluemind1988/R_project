@@ -1,0 +1,676 @@
+---
+title: "Untitled"
+output: html_document
+---
+```{r}
+# 1.0 LIBRARIES ----
+library(h2o)
+#h2o.init()
+library(tidyverse)
+library(tidyquant)
+library(yardstick) # Use devtools::install_github("tidymodels/yardstick")
+library(vroom)
+library(plotly)
+library(tictoc)
+```
+
+
+```{r}
+credit_card_tbl <- vroom("/mnt/01D6B57CFBE4DB20/1.Linux/Business science/lab_17_anomaly_detection_h2o/lab_17_anomaly_detection_h2o/data/creditcard.csv")
+credit_card_tbl
+```
+
+
+```{r}
+# 1.1 CLASS IMBALANCE ----
+credit_card_tbl %>%
+    count(Class) %>%
+    mutate(prop = n / sum(n))
+```
+
+
+```{r}
+# 1.2 AMOUNT SPENT VS FRAUD ----
+g <- credit_card_tbl %>%
+    select(Amount, Class) %>%
+    ggplot(aes(Amount, fill = as.factor(Class))) +
+    # geom_histogram() +
+    geom_density(alpha = 0.3) +
+    facet_wrap(~ Class, scales = "free_y", ncol = 1) +
+    scale_x_log10(label = scales::dollar_format()) +
+    scale_fill_tq() +
+    theme_tq() +
+    labs(title = "Fraud by Amount Spent", 
+         fill = "Fraud")
+
+ggplotly(g)
+```
+
+
+```{r}
+# 2.0 H2O ISOLATION FOREST ----
+h2o.init()
+```
+
+
+```{r}
+credit_card_h2o <- as.h2o(credit_card_tbl)
+credit_card_h2o
+```
+
+# Unsupervised Isolation forest H2O
+```{r}
+target <- "Class"
+predictors <- setdiff(names(credit_card_h2o), target)
+
+tic()
+isoforest <- h2o.isolationForest(
+    training_frame = credit_card_h2o,
+    x      = predictors,
+    ntrees = 100, 
+    seed   = 1234
+)
+toc() #24.211 s
+```
+
+
+```{r}
+isoforest
+```
+
+```{r}
+# 3.0 PREDICTIONS ----
+predictions <- predict(isoforest, newdata = credit_card_h2o)
+predictions
+```
+
+```{r}
+# 4.0 METRICS ----
+
+# 4.1 Quantile ----
+h2o.hist(predictions[,"predict"])
+h2o.hist(predictions[,"mean_length"])
+```
+
+prob: Specify a list of probabilities with values in the range [0,1]. By default, the following probabilities are returned:
+```{r}
+ h2o.quantile(predictions)
+```
+Ti le fraud: <0.2 %
+Neu chon mean_lengthQuantiles thi phai chon thieu so tuc la duoi 1% --> < 5.64
+Neu chon predictQuantiles thi phai chon thieu so tuc la tren 99% --> > 0.3325
+```{r}
+quantile <- h2o.quantile(predictions, probs = 0.99)
+quantile
+```
+
+
+```{r}
+thresh <- quantile["predictQuantiles"]
+thresh
+```
+
+```{r}
+predictions$outlier <- predictions$predict > thresh %>% as.numeric()
+predictions
+```
+
+
+```{r}
+predictions$class <- credit_card_h2o$Class
+predictions
+```
+
+
+```{r}
+predictions_tbl <- as_tibble(predictions) %>%
+    mutate(class = as.factor(class)) %>%
+    mutate(outlier = as.factor(outlier))
+predictions_tbl
+```
+```{r}
+predictions_tbl %>% 
+  count(outlier) %>% 
+  mutate(prop_outlier = n / sum(n))
+```
+
+
+```{r}
+# 4.2 Confusion Matrix ----
+
+predictions_tbl %>% conf_mat(class, outlier)
+```
+
+
+```{r}
+library(caret)     # for model packages
+caret::confusionMatrix(predictions_tbl$outlier,predictions_tbl$class,positive="1")
+```
+
+```{r}
+# 4.3 ROC Curve ----
+auc <- predictions_tbl %>% 
+    roc_auc(class, predict) %>% 
+    pull(.estimate) %>%
+    round(3)
+auc
+```
+
+
+```{r}
+predictions_tbl %>% 
+    roc_curve(class, predict) %>%
+    ggplot(aes(x = 1 - specificity, y = sensitivity)) +
+    geom_path(color = palette_light()[1], size = 2) +
+    geom_abline(lty = 3, size = 1) +
+    theme_tq() +
+    labs(title = str_glue("ROC AUC: {auc}"), 
+         subtitle = "Using H2O Isolation Forest")
+```
+
+```{r}
+predictions_tbl
+```
+
+```{r}
+# 4.4 Precision vs Recall AUC ----
+predictions_tbl %>% pr_auc(class, predict)
+```
+
+
+```{r}
+# 5.0 CONCLUSIONS ----
+# - Anomalies (Outliers) are more often than not Fraudulent Transactions
+# - Isolation Forest does a good job at detecting anomalous behaviour
+```
+
+
+```{r}
+# 6.0 BONUS - LL PRO MEMBERS ----
+# - Stabilize Predictions with PURRR
+
+# 6.1 Repeatable Prediction Function ----
+iso_forest <- function(seed) {
+    
+    target <- "Class"
+    predictors <- setdiff(names(credit_card_h2o), target)
+    
+    isoforest <- h2o.isolationForest(
+        training_frame = credit_card_h2o,
+        x      = predictors,
+        ntrees = 100, 
+        seed   = seed
+    )
+    
+    predictions <- predict(isoforest, newdata = credit_card_h2o)
+    
+    quantile <- h2o.quantile(predictions, probs = 0.99)
+    
+    thresh <- quantile["predictQuantiles"]
+    
+    # predictions$outlier <- predictions$predict > thresh %>% as.numeric()
+    # predictions$class <- credit_card_h2o$Class
+    
+    predictions_tbl <- as_tibble(predictions) %>%
+        # mutate(class = as.factor(class)) %>%
+        mutate(row = row_number())
+    predictions_tbl
+    
+}
+```
+
+
+```{r}
+iso_forest(123)
+```
+
+
+```{r}
+# 6.2 MAP TO MULTIPLE SEEDS ----
+multiple_predictions_tbl <- tibble(seed = c(158, 8546, 4593)) %>%
+    mutate(predictions = map(seed, iso_forest))
+
+multiple_predictions_tbl
+```
+```{r}
+predict_unest <- multiple_predictions_tbl %>% 
+                  unnest(predictions)
+predict_unest
+```
+```{r}
+table(predict_unest$seed)
+```
+
+Average prediction from 3 seed isolation forest:
+```{r}
+# 6.3 CALCULATE AVERAGE PREDICTIONS ----
+stabilized_predictions_tbl <- multiple_predictions_tbl %>% 
+    unnest(predictions) %>%
+    select(row, seed, predict) %>%
+    
+    # Calculate stabilized predictions
+    group_by(row) %>%
+    summarize(mean_predict = mean(predict)) %>%
+    ungroup() %>%
+    
+    # Combine with original data & important columns
+    bind_cols(
+        credit_card_tbl
+    ) %>% 
+    select(row, mean_predict, Time, V12, V15, Amount, Class) %>%
+    
+    # Detect Outliers
+    mutate(outlier = ifelse(mean_predict > quantile(mean_predict, probs = 0.99), 1, 0)) %>%
+    mutate(Class = as.factor(Class))
+stabilized_predictions_tbl
+```
+```{r}
+stabilized_predictions_tbl$outlier <- as.factor(stabilized_predictions_tbl$outlier)
+str(stabilized_predictions_tbl)
+```
+
+
+```{r}
+# 6.4 MEASURE ----
+stabilized_predictions_tbl %>% pr_auc(Class, mean_predict)
+# Old value: 0.9913976	
+# New value: 0.9914962 (slightly improvement)
+```
+```{r}
+caret::confusionMatrix(stabilized_predictions_tbl$outlier,
+                       stabilized_predictions_tbl$Class,positive="1")
+```
+
+
+```{r}
+# 6.5 VISUALIZE ----
+# - Not Run Due to Time
+
+stabilized_predictions_tbl %>%
+    ggplot(aes(V12, V15, color = as.factor(outlier))) +
+    geom_point(alpha = 0.2) +
+    theme_tq() +
+    scale_color_tq() +
+    labs(title = "Anomaly Detected?", color = "Is Outlier?")
+
+```
+
+
+```{r}
+stabilized_predictions_tbl %>%
+    ggplot(aes(V12, V15, color = as.factor(outlier))) +
+    geom_point(alpha = 0.2) +
+    theme_tq() +
+    scale_color_tq() +
+    labs(title = "Fraud Present?", color = "Is Fraud?")
+```
+
+
+# **DNN compare all method for this dataset**
+```{r}
+# 1.0 LIBRARIES 
+library(h2o)
+#h2o.init()
+library(tidyverse)
+library(tidyquant)
+library(yardstick) # Use devtools::install_github("tidymodels/yardstick")
+library(vroom)
+library(plotly)
+
+
+credit_card_tbl <- vroom("/mnt/01D6B57CFBE4DB20/1.Linux/Business science/lab_17_anomaly_detection_h2o/lab_17_anomaly_detection_h2o/data/creditcard.csv")
+credit_card_tbl
+```
+
+# 1. Supervised model (H2O XGBOOST)
+```{r}
+#credit_card_tbl
+credit_card_tbl$Class <-as.factor(credit_card_tbl$Class)
+# Create training (80%) and test (20%) sets for the 
+set.seed(430)
+split = createDataPartition(credit_card_tbl$Class, p =0.8, list = FALSE)
+train = credit_card_tbl[split, ]
+test = credit_card_tbl[-split, ]
+dim(train)
+dim(test)
+```
+
+```{r}
+# convert training data to h2o object
+train_h2o <- as.h2o(train)
+test_h2o <- as.h2o(test)
+# set the response column to Sale_Price
+response <- "Class"
+n_features <- length(setdiff(names(train), "Class"))
+# set the predictor names
+predictors <- setdiff(colnames(train), response)
+```
+
+
+```{r}
+tic()
+h2o_xgboost <- h2o.xgboost(
+    x = predictors, 
+    y = response,
+    training_frame = train_h2o, 
+    seed = 123
+)
+end_time <- Sys.time()
+h2o_xgboost
+#pred <-h2o.predict(h2o_xgboost, newdata = test_h2o)
+toc() # 45 s
+```
+
+```{r}
+# Check model performance in test set
+h2o.performance(h2o_xgboost, newdata = test_h2o) # mcc 0.84
+```
+
+```{r}
+pred <-h2o.predict(h2o_xgboost, newdata = test_h2o)
+pred$Class <- test_h2o$Class
+pred_tbl <- as_tibble(pred)
+pred_tbl
+```
+
+```{r}
+#XGBOOST
+caret::confusionMatrix(pred_tbl$predict,pred_tbl$Class,positive="1")
+```
+
+# 2. Unsupervised model (H2O Isolation Forest)
+```{r}
+tic()
+isoforest <- h2o.isolationForest(
+    training_frame = train_h2o,
+    x      = predictors,
+    ntrees = 100, 
+    seed   = 1234
+)
+toc() #18 s
+```
+
+
+Evaluate on training set
+Choose threshold:
+```{r}
+# 3.0 PREDICTIONS
+predictions <- predict(isoforest, newdata = train_h2o)
+predictions
+```
+```{r}
+# 4.0 METRICS 
+
+# 4.1 Quantile 
+h2o.hist(predictions[,"predict"])
+h2o.hist(predictions[,"mean_length"])
+```
+
+```{r}
+
+quantile <- h2o.quantile(predictions, probs = 0.99)
+quantile
+thresh <- quantile["predictQuantiles"]
+thresh
+```
+```{r}
+train_h2o$Class
+```
+
+Predict on this threshold
+```{r}
+predictions$outlier <- predictions$predict > thresh %>% as.numeric()
+#predictions
+predictions$class <- train_h2o$Class
+predictions
+```
+
+
+```{r}
+predictions_tbl <- as_tibble(predictions) %>%
+    mutate(class = as.factor(class)) %>%
+    mutate(outlier = as.factor(outlier))
+caret::confusionMatrix(predictions_tbl$outlier,predictions_tbl$class,positive="1")
+```
+Evaluation on test set:
+
+```{r}
+predictions <- predict(isoforest, newdata = test_h2o)
+predictions$outlier <- predictions$predict > thresh %>% as.numeric()
+predictions$class <- test_h2o$Class
+predictions
+```
+
+
+```{r}
+predictions_tbl <- as_tibble(predictions) %>%
+    mutate(class = as.factor(class)) %>%
+    mutate(outlier = as.factor(outlier))
+caret::confusionMatrix(predictions_tbl$outlier,predictions_tbl$class,positive="1")
+```
+
+# 3 Other ML Method from KAGGLE
+https://www.kaggle.com/nschneider/gbm-vs-xgboost-vs-lightgbm
+```{r}
+#install.packages("microbenchmark")
+library(tidyverse)
+library(caret)
+library(vroom)
+library(pROC, quietly=TRUE)
+library(microbenchmark, quietly=TRUE)
+library(tictoc)
+```
+
+```{r}
+#credit_card_tbl
+credit_card_tbl$Class <-as.factor(credit_card_tbl$Class)
+# Create training (80%) and test (20%) sets for the 
+set.seed(430)
+split = createDataPartition(credit_card_tbl$Class, p =0.8, list = FALSE)
+train = credit_card_tbl[split, ]
+test = credit_card_tbl[-split, ]
+dim(train)
+dim(test)
+table(train$Class)
+table(test$Class)
+```
+XGBOOST (not sucessful)
+```{r}
+#install.packages("xgboost")
+library(xgboost, quietly=TRUE)
+xgb.data.train <- xgb.DMatrix(as.matrix(train[, colnames(train) != "Class"]), label = train$Class)
+xgb.data.test <- xgb.DMatrix(as.matrix(test[, colnames(test) != "Class"]), label = test$Class)
+xgb.data.train
+xgb.data.test
+```
+
+
+```{r}
+# Get the time to train the xgboost model
+
+xgb.model <- xgb.train(data = xgb.data.train
+	, params = list(objective = "binary:logistic"
+		, eta = 0.1
+		, max.depth = 3
+		, min_child_weight = 100
+		, subsample = 1
+		, colsample_bytree = 1
+		, nthread = 3
+		, eval_metric = "auc"
+		)
+	, watchlist = list(test = xgb.data.test)
+	, nrounds = 500
+	, early_stopping_rounds = 40
+	, print_every_n = 20
+)
+```
+
+light GBM  (not sucessful)
+```{r}
+#credit_card_tbl
+credit_card_tbl$Class <-as.factor(credit_card_tbl$Class)
+# Create training (80%) and test (20%) sets for the 
+set.seed(430)
+split = createDataPartition(credit_card_tbl$Class, p =0.8, list = FALSE)
+train = credit_card_tbl[split, ]
+test = credit_card_tbl[-split, ]
+dim(train)
+dim(test)
+table(train$Class)
+table(test$Class)
+```
+
+```{r}
+#install.packages("lightgbm")
+library(lightgbm, quietly=TRUE)
+lgb.train = lgb.Dataset(as.matrix(train[, colnames(train) != "Class"]), label = train$Class)
+lgb.test = lgb.Dataset(as.matrix(test[, colnames(test) != "Class"]), label = test$Class)
+```
+
+
+```{r}
+params.lgb = list(
+	objective = "binary"
+	, metric = "auc"
+	, min_data_in_leaf = 1
+	, min_sum_hessian_in_leaf = 100
+	, feature_fraction = 1
+	, bagging_fraction = 1
+	, bagging_freq = 0
+	)
+
+# Get the time to train the lightGBM model
+lgb.model <- lgb.train(
+    data = lgb.train,
+    valids = list(test = lgb.test),
+		params = params.lgb)
+```
+
+# Try caret method 
+https://www.kaggle.com/arathee2/achieving-100-accuracy
+```{r}
+library(tidyverse)
+library(caret)
+library(tictoc)
+```
+
+
+# logistic regression
+```{r}
+#credit_card_tbl
+credit_card_tbl$Class <-as.factor(credit_card_tbl$Class)
+# Create training (80%) and test (20%) sets for the 
+set.seed(430)
+split = createDataPartition(credit_card_tbl$Class, p =0.8, list = FALSE)
+train = credit_card_tbl[split, ]
+test = credit_card_tbl[-split, ]
+dim(train)
+dim(test)
+table(train$Class)
+table(test$Class)
+```
+
+
+```{r}
+glm.model <- glm(Class ~ ., data = train, family = "binomial", control = list(maxit = 50))
+glm.predict <- predict(glm.model,  newdata = test,type = "response")
+table(test$Class, glm.predict > 0.5)
+pred <- glm.predict >0.5
+pred <- 1*pred
+pred <- as.data.frame(pred)
+pred
+```
+
+```{r}
+caret::confusionMatrix(factor(pred$pred),test$Class,positive="1")
+```
+# Decision Tree Model
+
+```{r}
+#install.packages("rpart.plot")
+library(rpart)
+library(rpart.plot)
+tic()
+tree.model <- rpart(Class ~ ., data = train, method = "class", minbucket = 20)
+toc() # 101 s
+prp(tree.model) 
+```
+
+
+```{r}
+tree.predict <- predict(tree.model, test, type = "class")
+confusionMatrix(test$Class, tree.predict,positive="1")
+```
+
+random forest model (VERY LONG, OUT OF RAM , RESTART MANY TIMES)
+```{r}
+#library(randomForest)
+#set.seed(10)
+#tic()
+#rf.model <- randomForest(Class ~ ., data = train,
+#                         ntree = 2000, nodesize = 20)
+#toc()
+#rf.predict <- predict(rf.model, test)
+#confusionMatrix(test$Class, rf.predict)
+```
+
+# XGBOOST WITH parsnip
+```{r}
+# Modeling packages
+#install.packages("parsnip")
+library(parsnip)
+library(xgboost)
+```
+
+```{r}
+tic()
+model_xgboost <- parsnip::boost_tree(
+        mode = "classification", 
+        #mtry = 30, 
+        #trees = 500, 
+        #min_n = 2, 
+        #tree_depth = 6,
+        #learn_rate = 0.35, 
+        #loss_reduction = 0.0001
+        ) %>%
+    set_engine("xgboost") %>%
+    fit(Class ~ ., data = train)
+toc() #33.6 s
+model_xgboost
+```
+
+```{r}
+predict <- predict(model_xgboost, test)
+confusionMatrix(test$Class, predict$.pred_class,positive="1")
+```
+
+# Ranger with parsnip (VERY LONG)
+
+```{r}
+#install.packages("ranger")
+#library(ranger)
+#tic()
+#model_ranger <- parsnip::rand_forest(
+#        mode = "classification", 
+#        ) %>%
+#    set_engine("ranger") %>%
+#    fit(Class ~ ., data = train)
+#toc() #
+#predict <- predict(model_ranger, test)
+#confusionMatrix(test$Class, predict$.pred_class,positive="1")
+```
+# Linear discriminant analysis - LDA
+
+```{r}
+#install.packages("e1071") 
+library(MASS)
+tic()
+model <- lda(Class ~ ., data = train)
+toc() # 4 s
+```
+
+```{r}
+predict <- predict(model, test)
+confusionMatrix(test$Class, predict$class,positive="1")
+```
+
