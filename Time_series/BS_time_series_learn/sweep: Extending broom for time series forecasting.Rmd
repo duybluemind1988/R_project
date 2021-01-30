@@ -1,0 +1,76 @@
+---
+title: "Untitled"
+output: html_document
+---
+FAIL
+
+
+
+https://www.business-science.io/code-tools/2017/07/09/sweep-0-1-0.html
+
+oad the following packages:
+
+forecast: Has excellent modeling functions such as auto.arima(), ets() and bats() and the forecast() function for predicting future observations.
+sweep: Tidies the output of forecast functions using a similar strategy as the broom package.
+timekit (convert to timetk): Coercion function tk_ts() for converting a tibble to ts while maintaining time-based data.
+tidyquant: Used to get FRED data and for its ggplot2 theme.
+geofacet: Really useful facet_geo() function to visualize facets organized by geography.
+```{r}
+install.packages("geofacet",dependencies = TRUE)
+#remotes::install_github("hafen/geofacet")
+```
+
+```{r}
+
+# Load packages
+library(forecast)   # Most popular forecasting pkg
+library(sweep)      # Broom tidiers for forecast pkg
+library(timetk)    # Working with time series in R
+library(tidyquant)  # Get's data from FRED, loads tidyverse behind the scenes
+library(geofacet)   # facet_geo() for visualizing facets organized as states
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+

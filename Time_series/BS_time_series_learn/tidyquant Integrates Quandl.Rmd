@@ -1,0 +1,98 @@
+---
+title: "Untitled"
+output: html_document
+---
+
+FAIL
+
+
+https://www.business-science.io/code-tools/2017/03/19/tidyquant-quandl-integration.html
+
+```{r}
+#install.packages("corrr")
+# Loads tidyquant, tidyverse, lubridate, quantmod, TTR, xts, zoo, PerformanceAnalytics
+library(tidyverse)
+library(tidyquant)
+library(broom) # Use `tidy` and `glance` functions
+library(corrr) # tidy correlations
+```
+
+
+```{r}
+quandl_api_key("yz7qGzikAuQL9wn7rrX-")
+```
+
+
+```{r}
+stock_list_quandl <- tribble(
+    ~code,          ~symbol,
+    "WIKI/AAPL", "AAPL",
+    "WIKI/F",    "F",
+    "WIKI/GE",   "GE",
+    "WIKI/MSFT", "MSFT"
+)
+stock_list_quandl
+```
+
+
+```{r}
+stock_returns_quandl <- stock_list_quandl %>%
+    tq_get(get          = "quandl",
+           from         = "2007-01-01",
+           to           = "2016-12-31",
+           transform    = "rdiff",
+           collapse     = "monthly",
+           column_index = 11) %>%
+    rename(monthly.returns = adj.close)
+stock_returns_quandl
+```
+Collecting Fama French 3-Factor Monthly Data
+
+Next, we need to get the Fama French data. Suppose we don’t know exactly what we are looking for. We’ll use the function, quandl_search(), to query the Quandl API (a wrapper for Quandl.search()). We can search within the R console by setting query to a descriptive value. We’ll set per_page = 5 to get the top 5 results. We’ll set silent = TRUE to turn off the meta data output (in practice it may be beneficial to leave this easy-to-read option on). The results returned contain the “id”, dataset_code, “database_code”, “name”, “description”, etc, which gives us both insight into the data set contents and the information needed to retrieve. I’ve removed “description” to make it easier to view the information.
+
+```{r}
+quandl_search(query = "FAMA FRENCH", per_page = 5, silent = TRUE) %>%
+    select(-description)
+```
+
+
+```{r}
+# Get Fama French 3 Factor Data
+fama_french_3_M <- "KFRENCH/FACTORS_M" %>%
+    tq_get(get      = "quandl",
+           collapse = "monthly")
+fama_french_3_M
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+i```{r}
+```
+

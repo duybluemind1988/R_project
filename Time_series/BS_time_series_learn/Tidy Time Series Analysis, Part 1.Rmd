@@ -1,0 +1,851 @@
+---
+title: "Untitled"
+output: html_document
+---
+# Tidy Time Series Analysis, Part 1
+https://www.business-science.io/timeseries-analysis/2017/07/02/tidy-timeseries-analysis.html
+```{r}
+#install.packages("cranlogs")
+library(tidyquant)  # Loads tidyverse, tidquant, financial pkgs, xts/zoo
+library(cranlogs)   # For inspecting package downloads over time
+```
+
+
+```{r}
+# Various tidyverse packages corresponding to my stickers :)
+pkgs <- c(
+    "tidyr", "lubridate", "dplyr", 
+    "broom", "tidyquant", "ggplot2", "purrr", 
+    "stringr", "knitr"
+    )
+
+# Get the downloads for the individual packages
+tidyverse_downloads <- cran_downloads(
+    packages = pkgs, 
+    from     = "2017-01-01", 
+    to       = "2017-06-30") %>%
+    tibble::as_tibble() %>%
+    group_by(package)
+
+tidyverse_downloads
+```
+
+
+```{r}
+# Visualize the package downloads
+tidyverse_downloads %>%
+    ggplot(aes(x = date, y = count, color = package)) +
+    geom_point() +
+    labs(title = "tidyverse packages: Daily downloads", x = "") +
+    facet_wrap(~ package, ncol = 3, scale = "free_y") +
+    scale_color_tq() +
+    theme_tq() +
+    theme(legend.position="none")
+```
+
+
+```{r}
+# "apply" functions from xts
+tq_transmute_fun_options()$xts %>%
+    stringr::str_subset("^apply")
+```
+A simple case: Inspecting the average daily downloads by week.
+```{r}
+tidyverse_downloads
+```
+
+```{r}
+mean_tidyverse_downloads_w <- tidyverse_downloads %>%
+    tq_transmute(
+        select     = count,
+        mutate_fun = apply.weekly, 
+        FUN        = mean,
+        na.rm      = TRUE,
+        col_rename = "mean_count"
+    )
+mean_tidyverse_downloads_w
+```
+By graphing the mean daily downloads each week instead of each of the daily download counts, we can visualize the trends a bit easier.
+
+```{r}
+mean_tidyverse_downloads_w %>%
+    ggplot(aes(x = date, y = mean_count, color = package)) +
+    geom_point() +
+    geom_smooth(method = "loess") + 
+    labs(title = "tidyverse packages: Average daily downloads by week", x = "", 
+         y = "Mean Daily Downloads by Week") +
+    facet_wrap(~ package, ncol = 3, scale = "free_y") +
+    expand_limits(y = 0) + 
+    scale_color_tq() +
+    theme_tq() +
+    theme(legend.position="none")
+```
+
+
+```{r}
+# Custom function to return mean, sd, quantiles
+custom_stat_fun <- function(x, na.rm = TRUE, ...) {
+    # x     = numeric vector
+    # na.rm = boolean, whether or not to remove NA's
+    # ...   = additional args passed to quantile
+    c(mean    = mean(x, na.rm = na.rm),
+      stdev   = sd(x, na.rm = na.rm),
+      quantile(x, na.rm = na.rm, ...)) 
+}
+```
+
+
+```{r}
+# Testing custom_stat_fun
+options(digits = 4)
+set.seed(3366)
+nums  <- c(10 + 1.5*rnorm(10), NA)
+probs <- c(0, 0.025, 0.25, 0.5, 0.75, 0.975, 1)
+custom_stat_fun(nums, na.rm = TRUE, probs = probs)
+```
+
+Now for the fun part: “tidy” aggregation. Let’s apply the custom_stat_fun() to groups using tq_transmute() and the weekly aggregation function apply.weekly(). The process is almost identical to the process of applying mean() on weekly intervals. The only difference is we also supply the probabilities (probs), which gets sent to the quantile() function internal to our custom stat function. The output returned is a tidy data frame with each statistic that relates to the data spread.
+```{r}
+# Applying the custom function by week
+stats_tidyverse_downloads_w <- tidyverse_downloads %>%
+    tq_transmute(
+        select = count,
+        mutate_fun = apply.weekly, 
+        FUN = custom_stat_fun,
+        na.rm = TRUE,
+        probs = probs
+    )
+stats_tidyverse_downloads_w
+```
+
+
+```{r}
+stats_tidyverse_downloads_w %>%
+    ggplot(aes(x = date, y = `50%`, color = package)) +
+    # Ribbon
+    geom_ribbon(aes(ymin = `25%`, ymax = `75%`), 
+                color = palette_light()[[1]], fill = palette_light()[[1]], alpha = 0.5) +
+    # Points
+    geom_point() +
+    geom_smooth(method = "loess", se = FALSE) + 
+    # Aesthetics
+    labs(title = "tidyverse packages: Median daily downloads by week", x = "",
+         subtitle = "Range of 1st and 3rd quartile to show volatility",
+         y = "Median Daily Downloads By Week") +
+    facet_wrap(~ package, ncol = 3, scale = "free_y") +
+    expand_limits(y = 0) + 
+    scale_color_tq(theme = "dark") +
+    theme_tq() +
+    theme(legend.position="none")
+
+```
+We can also investigate how the mean and standard deviation relate to each other. In general it appears that higher volatility in daily downloads tends to coincide with higher mean daily downloads.
+
+```{r}
+stats_tidyverse_downloads_w %>%
+    ggplot(aes(x = stdev, y = mean, color = package)) +
+    geom_point() +
+    geom_smooth(method = "lm") + 
+    labs(title = "tidyverse packages: Mean vs standard deviation of daily downloads by week") +
+    facet_wrap(~ package, ncol = 3, scale = "free") +
+    scale_color_tq() +
+    theme_tq() +
+    theme(legend.position="none")
+```
+
+# Tidy Time Series Analysis, Part 2: Rolling Functions
+
+https://www.business-science.io/timeseries-analysis/2017/07/23/tidy-timeseries-analysis-pt-2.html
+```{r}
+library(tidyquant)  # Loads tidyverse, tidyquant, financial pkgs, xts/zoo
+library(cranlogs)   # For inspecting package downloads over time
+```
+
+```{r}
+# tidyverse packages (see my laptop stickers from last post) ;)
+pkgs <- c(
+    "tidyr", "lubridate", "dplyr", 
+    "broom", "tidyquant", "ggplot2", "purrr", 
+    "stringr", "knitr"
+)
+
+# Get the downloads for the individual packages
+tidyverse_downloads <- cran_downloads(
+    packages = pkgs, 
+    from     = "2017-01-01", 
+    to       = "2017-06-30") %>%
+    tibble::as_tibble() %>%
+    group_by(package)
+
+# Visualize the package downloads
+tidyverse_downloads %>%
+    ggplot(aes(x = date, y = count, color = package)) +
+    # Data
+    geom_point(alpha = 0.5) +
+    facet_wrap(~ package, ncol = 3, scale = "free_y") +
+    # Aesthetics
+    labs(title = "tidyverse packages: Daily downloads", x = "",
+         subtitle = "2017-01-01 through 2017-06-30",
+         caption = "Downloads data courtesy of cranlogs package") +
+    scale_color_tq() +
+    theme_tq() +
+    theme(legend.position="none")
+
+```
+Rolling Window Calculations
+
+What are rolling window calculations, and why do we care? In time series analysis, nothing is static. A correlation may exist for a subset of time or an average may vary from one day to the next. Rolling calculations simply apply functions to a fixed width subset of this data (aka a window), indexing one observation each calculation. There are a few common reasons you may want to use a rolling calculation in time series analysis:
+
+Measuring the central tendency over time (mean, median)
+Measuring the volatility over time (sd, var)
+Detecting changes in trend (fast vs slow moving averages)
+Measuring a relationship between two time series over time (cor, cov)
+
+Time Series Functions
+```{r}
+# "roll" functions from zoo
+tq_mutate_fun_options()$zoo %>%
+    stringr::str_subset("^roll")
+```
+
+
+```{r}
+# "run" functions from TTR
+tq_mutate_fun_options()$TTR %>%
+    stringr::str_subset("^run")
+```
+
+Tidy Implementation of Time Series Functions
+```{r}
+# Condensed function options... lot's of 'em
+tq_mutate_fun_options() %>%
+    str()
+```
+**Rolling Mean: Inspecting Fast and Slow Moving Averages**
+
+Suppose we’d like to investigate if significant changes in trend are taking place among the package downloads such that future downloads are likely to continue to increase, decrease or stay the same. One way to do this is to use moving averages. Rather than try to sift through the noise, we can use a combination of a fast and slow moving average to detect momentum.
+
+We’ll create a fast moving average with width = 28 days (just enough to detrend the data) and a slow moving average with width = 84 days (slow window = 3X fast window). To do this we apply two calls to tq_mutate(), the first for the 28 day (fast) and the second for the 84 day (slow) moving average. There are three groups of arguments we need to supply:
+
+- tq_mutate args: These select the column to apply the mutation to (“count”) and the mutation function (mutate_fun) to apply (rollapply from zoo).
+- rollapply args: These set the width, align = "right" (aligns with end of data frame), and the FUN we wish to apply (mean in this case).
+- FUN args: These are arguments that get passed to the function. In this case we want to set na.rm = TRUE so NA values are skipped if present.
+
+I add an additional tq_mutate arg, col_rename, at the end to rename the column. This is my preference, but it can be placed with the other tq_mutate args above.
+
+```{r}
+# Rolling mean
+tidyverse_downloads_rollmean <- tidyverse_downloads %>%
+    tq_mutate(
+        # tq_mutate args
+        select     = count,
+        mutate_fun = rollapply, 
+        # rollapply args
+        width      = 28,
+        align      = "right",
+        FUN        = mean,
+        # mean args
+        na.rm      = TRUE,
+        # tq_mutate args
+        col_rename = "mean_28"
+    ) %>%
+    tq_mutate(
+        # tq_mutate args
+        select     = count,
+        mutate_fun = rollapply,
+        # rollapply args
+        width      = 84,
+        align      = "right",
+        FUN        = mean,
+        # mean args
+        na.rm      = TRUE,
+        # tq_mutate args
+        col_rename = "mean_84"
+    )
+tidyverse_downloads_rollmean
+```
+
+
+```{r}
+# ggplot
+tidyverse_downloads_rollmean %>%
+    ggplot(aes(x = date, y = count, color = package)) +
+    # Data
+    geom_point(alpha = 0.1) +
+    geom_line(aes(y = mean_28), color = palette_light()[[1]], size = 1) +
+    geom_line(aes(y = mean_84), color = palette_light()[[2]], size = 1) +
+    facet_wrap(~ package, ncol = 3, scale = "free_y") +
+    # Aesthetics
+    labs(title = "tidyverse packages: Daily Downloads", x = "",
+         subtitle = "28 and 84 Day Moving Average") +
+    scale_color_tq() +
+    theme_tq() +
+    theme(legend.position="none")
+
+```
+The output is a little difficult to see. We’ll need to zoom in a little more to detect momentum. Let’s drop the “count” data from the plots and inspect just the moving averages. What we are looking for are points where the fast trend is above (has momentum) or below (is slowing) the slow trend. In addition, we want to inspect for cross-over, which indicates shifts in trend.
+
+```{r}
+tidyverse_downloads_rollmean %>%
+    ggplot(aes(x = date, color = package)) +
+    # Data
+    # geom_point(alpha = 0.5) +  # Drop "count" from plots
+    geom_line(aes(y = mean_28), color = palette_light()[[1]], linetype = 1, size = 1) +
+    geom_line(aes(y = mean_84), color = palette_light()[[2]], linetype = 1, size = 1) +
+    facet_wrap(~ package, ncol = 3, scale = "free_y") +
+    # Aesthetics
+    labs(title = "tidyverse packages: Daily downloads", x = "", y = "",
+         subtitle = "Zoomed In: 28 and 84 Day Moving Average") +
+    scale_color_tq() +
+    theme_tq() +
+    theme(legend.position="none")
+```
+
+Rolling Custom Functions: Useful for multiple statistics
+
+```{r}
+# Custom function to return mean, sd, 95% conf interval
+custom_stat_fun_2 <- function(x, na.rm = TRUE) {
+    # x     = numeric vector
+    # na.rm = boolean, whether or not to remove NA's
+    
+    m  <- mean(x, na.rm = na.rm)
+    s  <- sd(x, na.rm = na.rm)
+    hi <- m + 2*s
+    lo <- m - 2*s
+    
+    ret <- c(mean = m, stdev = s, hi.95 = hi, lo.95 = lo) 
+    return(ret)
+}
+```
+
+
+```{r}
+# Roll apply using custom stat function
+tidyverse_downloads_rollstats <- tidyverse_downloads %>%
+    tq_mutate(
+        select     = count,
+        mutate_fun = rollapply, 
+        # rollapply args
+        width      = 28,
+        align      = "right",
+        by.column  = FALSE,
+        FUN        = custom_stat_fun_2,
+        # FUN args
+        na.rm      = TRUE
+    )
+tidyverse_downloads_rollstats
+```
+
+
+```{r}
+tidyverse_downloads_rollstats %>%
+    ggplot(aes(x = date, color = package)) +
+    # Data
+    geom_point(aes(y = count), color = "grey40", alpha = 0.5) +
+    geom_ribbon(aes(ymin = lo.95, ymax = hi.95), alpha = 0.4) +
+    geom_point(aes(y = mean), size = 1, alpha = 0.5) +
+    facet_wrap(~ package, ncol = 3, scale = "free_y") +
+    # Aesthetics
+    labs(title = "tidyverse packages: Volatility and Trend", x = "",
+         subtitle = "28-Day Moving Average with 95% Confidence Interval Bands (+/-2 Standard Deviations)") +
+    scale_color_tq(theme = "light") +
+    theme_tq() +
+    theme(legend.position="none")
+```
+
+# Tidy Time Series Analysis, Part 3: The Rolling Correlation
+https://www.business-science.io/timeseries-analysis/2017/07/30/tidy-timeseries-analysis-pt-3.html
+```{r}
+#install.packages("cowplot")
+library(tidyquant)  # Loads tidyverse, tidyquant, financial pkgs, xts/zoo
+library(cranlogs)   # For inspecting package downloads over time
+library(corrr)      # Tidy correlation tables and correlation plotting
+library(cowplot)    # Multiple plots with plot_grid()
+```
+
+
+```{r}
+# tidyverse packages (see my laptop stickers from first post) ;)
+pkgs <- c(
+    "tidyr", "lubridate", "dplyr", 
+    "broom", "tidyquant", "ggplot2", "purrr", 
+    "stringr", "knitr"
+)
+
+# Get the downloads for the individual packages
+tidyverse_downloads <- cran_downloads(
+    packages = pkgs, 
+    from     = "2017-01-01", 
+    to       = "2017-06-30") %>%
+    tibble::as_tibble() %>%
+    group_by(package)
+
+# Visualize the package downloads
+tidyverse_downloads %>%
+    ggplot(aes(x = date, y = count, color = package)) +
+    # Data
+    geom_point(alpha = 0.5) +
+    facet_wrap(~ package, ncol = 3, scale = "free_y") +
+    # Aesthetics
+    labs(title = "tidyverse packages: Daily downloads", x = "",
+         subtitle = "2017-01-01 through 2017-06-30",
+         caption = "Downloads data courtesy of cranlogs package") +
+    scale_color_tq() +
+    theme_tq() +
+    theme(legend.position="none")
+```
+
+
+```{r}
+# Get data for total CRAN downloads
+all_downloads <- cran_downloads(from = "2017-01-01", to = "2017-06-30") %>%
+    tibble::as_tibble()
+
+# Visualize the downloads
+all_downloads %>%
+    ggplot(aes(x = date, y = count)) +
+    # Data
+    geom_point(alpha = 0.5, color = palette_light()[[1]], size = 2) +
+    # Aesthetics
+    labs(title = "Total CRAN Packages: Daily downloads", x = "",
+         subtitle = "2017-01-01 through 2017-06-30",
+         caption = "Downloads data courtesy of cranlogs package") +
+    scale_y_continuous(labels = scales::comma) +
+    theme_tq() +
+    theme(legend.position="none")
+```
+
+Rolling Correlations
+
+Correlations in time series are very useful because if a relationship exists, you can actually model/predict/forecast using the correlation. However, there’s one issue: a correlation is NOT static! It changes over time. Even the best models can be rendered useless during periods when correlation is low.
+
+One of the most important calculations in time series analysis is the rolling correlation. Rolling correlations are simply applying a correlation between two time series (say sales of product x and product y) as a rolling window calculation.
+```{r}
+# "run" functions from TTR
+tq_mutate_fun_options()$TTR %>%
+    stringr::str_subset("^run")
+```
+
+Tidy Implementation of Time Series Functions
+```{r}
+args(runCor)
+```
+
+```{r}
+args(runSD)
+```
+Static Correlations
+```{r}
+tidyverse_downloads %>%
+    # Data wrangling
+    spread(key = package, value = count) %>%
+    left_join(all_downloads, by = "date") %>%
+    rename(all_cran = count) 
+```
+
+```{r}
+# Correlation table
+tidyverse_static_correlations <- tidyverse_downloads %>%
+    # Data wrangling
+    spread(key = package, value = count) %>%
+    left_join(all_downloads, by = "date") %>%
+    rename(all_cran = count) %>%
+    select(-date) %>%
+    # Correlation and formating
+    correlate() 
+
+# Pretty printing
+tidyverse_static_correlations %>%
+    shave(upper = F)
+```
+
+Fortunately, the corrr package has a nice visualization called a network_plot(). It helps to identify strength of correlation. Similar to a “kmeans” analysis, we are looking for association by distance (or in this case by correlation). How well the packages correlate with each other is akin to how associated they are with each other. The network plot shows us exactly this association!
+
+```{r}
+# Network plot
+gg_all <- tidyverse_static_correlations %>%
+    network_plot(colours = c(palette_light()[[2]], "white", palette_light()[[4]]), legend = TRUE) +
+    labs(
+        title = "Correlations of tidyverse Package Downloads to Total CRAN Downloads",
+        subtitle = "Looking at January through June, tidyquant is a clear outlier"
+        ) +
+    expand_limits(x = c(-0.75, 0.25), y = c(-0.4, 0.4)) +
+    theme_tq() +
+    theme(legend.position = "bottom")
+gg_all
+```
+We can see that tidyquant has a very low correlation to “all_cran” and the rest of the “tidyverse” packages. This would lead us to believe that tidyquant is trending abnormally with respect to the rest, and thus is possibly not as associated as we think. Is this really the case?
+
+Rolling Correlations
+
+Let’s see what happens when we incorporate time using a rolling correlation. The script below uses the runCor function from the TTR package. We apply it using tq_mutate_xy(), which is useful for applying functions such has runCor that have both an x and y input.
+```{r}
+tidyverse_downloads
+```
+```{r}
+all_downloads
+```
+
+```{r}
+# Get rolling correlations
+tidyverse_rolling_corr <- tidyverse_downloads %>%
+    # Data wrangling
+    left_join(all_downloads, by = "date") %>%
+    select(date, package, count.x, count.y) %>%
+    # Mutation
+    tq_mutate_xy(
+        x          = count.x, # each package download
+        y          = count.y, # all cran download
+        mutate_fun = runCor, 
+        # runCor args
+        n          = 30, # 30 rolling windown
+        use        = "pairwise.complete.obs",
+        # tq_mutate args
+        col_rename = "rolling_corr"
+    )
+tidyverse_rolling_corr
+```
+```{r}
+tidyverse_static_correlations
+```
+
+
+```{r}
+# Join static correlations with rolling correlations
+tidyverse_static_correlations <- tidyverse_static_correlations %>%
+    select(term, all_cran) %>%
+    rename(package = term)
+
+tidyverse_rolling_corr <- tidyverse_rolling_corr %>%
+    left_join(tidyverse_static_correlations, by = "package") %>%
+    rename(static_corr = all_cran)
+tidyverse_rolling_corr
+```
+
+
+```{r}
+# Plot
+tidyverse_rolling_corr %>%
+    ggplot(aes(x = date, color = package)) +
+    # Data
+    geom_line(aes(y = static_corr), color = "red") +
+    geom_point(aes(y = rolling_corr), alpha = 0.5) +
+    facet_wrap(~ package, ncol = 3, scales = "free_y") +
+    # Aesthetics
+    scale_color_tq() +
+    labs(
+        title = "tidyverse: 30-Day Rolling Download Correlations, Package vs Total CRAN",
+        subtitle = "Relationships are dynamic vs static correlation (red line)",
+        x = "", y = "Correlation"
+    ) +
+    theme_tq() +
+    theme(legend.position="none")
+```
+
+
+```{r}
+# Redrawing Network Plot from April through June
+gg_subset <- tidyverse_downloads %>%
+    # Filter by date >= April 1, 2017
+    filter(date >= ymd("2017-04-01")) %>%
+    # Data wrangling
+    spread(key = package, value = count) %>%
+    left_join(all_downloads, by = "date") %>%
+    rename(all_cran = count) %>%
+    select(-date) %>%
+    # Correlation and formating
+    correlate() %>%
+    # Network Plot
+    network_plot(colours = c(palette_light()[[2]], "white", palette_light()[[4]]), legend = TRUE) +
+    labs(
+        title = "April through June (Last 3 Months)",
+        subtitle = "tidyquant correlation is increasing"
+        ) +
+    expand_limits(x = c(-0.75, 0.25), y = c(-0.4, 0.4)) +
+    theme_tq() +
+    theme(legend.position = "bottom")
+
+# Modify the January through June network plot (previous plot)
+gg_all <- gg_all +
+    labs(
+        title = "January through June (Last 6 months)",
+        subtitle = "tidyquant is an outlier"
+        )
+
+# Format cowplot
+cow_net_plots <- plot_grid(gg_all, gg_subset, ncol = 2)
+title <- ggdraw() + 
+    draw_label(label = 'tidyquant is getting "tidy"-er',
+               fontface = 'bold', size = 18)
+cow_out <- plot_grid(title, cow_net_plots, ncol=1, rel_heights=c(0.1, 1))
+cow_out
+```
+# Tidy Time Series Analysis, Part 4: Lags and Autocorrelation
+https://www.business-science.io/timeseries-analysis/2017/08/30/tidy-timeseries-analysis-pt-4.html
+
+```{r}
+library(tidyquant)  # Loads tidyverse, tidyquant, financial pkgs, xts/zoo
+library(cranlogs)   # For inspecting package downloads over time
+library(timetk)     # For consistent time series coercion functions
+library(stringr)    # Working with strings
+library(forcats)    # Working with factors/categorical data
+```
+
+
+```{r}
+# tidyverse packages (see my laptop stickers from first post) ;)
+pkgs <- c(
+    "tidyr", "lubridate", "dplyr", 
+    "broom", "tidyquant", "ggplot2", "purrr", 
+    "stringr", "knitr"
+)
+
+# Get the downloads for the individual packages
+tidyverse_downloads <- cran_downloads(
+    packages = pkgs, 
+    from     = "2017-01-01", 
+    to       = "2017-06-30") %>%
+    tibble::as_tibble() %>%
+    group_by(package)
+
+tidyverse_downloads
+```
+
+
+```{r}
+# Visualize the package downloads
+tidyverse_downloads %>%
+    ggplot(aes(x = date, y = count, color = package)) +
+    # Data
+    geom_point(alpha = 0.5) +
+    facet_wrap(~ package, ncol = 3, scale = "free_y") +
+    # Aesthetics
+    labs(title = "tidyverse packages: Daily downloads", x = "",
+         subtitle = "2017-01-01 through 2017-06-30",
+         caption = "Downloads data courtesy of cranlogs package") +
+    scale_color_tq() +
+    theme_tq() +
+    theme(legend.position="none")
+```
+
+
+```{r}
+# tidyquant Integrated functions
+tq_mutate_fun_options() %>%
+    glimpse()
+```
+
+
+```{r}
+set.seed(1)
+my_time_series_tbl <- tibble(
+    date   = seq.Date(ymd("2017-01-01"), length.out = 10, by = "day"),
+    value  = 1:10 + rnorm(10)
+)
+my_time_series_tbl
+```
+
+
+```{r}
+# Bummer, man!
+# Success! Got our lags 1 through 5. One problem: no original values
+my_time_series_tbl %>%
+    tk_xts(silent = TRUE) %>%
+    lag.xts(k = 1:5)
+```
+We get our lags! However, we still have one problem: We need our original values so we can analyze the counts against the lags. If we want to get the original values too, we can do something like this.
+
+```{r}
+# Convert to xts
+my_time_series_xts <- my_time_series_tbl %>%
+    tk_xts(silent = TRUE)
+my_time_series_xts
+```
+
+
+```{r}
+# Get original values and lags in xts
+my_lagged_time_series_xts <- 
+    merge.xts(my_time_series_xts, lag.xts(my_time_series_xts, k = 1:5))
+# Convert back to tbl
+my_lagged_time_series_xts %>%
+    tk_tbl()
+```
+That’s a lot of work for a simple operation. Fortunately we have tq_mutate() to the rescue!
+
+```{r}
+# This is nice, we didn't need to coerce to xts and it merged for us
+my_time_series_tbl %>%
+    tq_mutate(
+        select     = value,
+        mutate_fun = lag.xts,
+        k          = 1:5
+    )
+```
+That’s much easier. We get the value column returned in addition to the lags, which is the benefit of using tq_mutate(). If you use tq_transmute() instead, the result would be the lags only, which is what lag.xts() returns.
+
+Analyzing tidyverse Downloads: Lag and Autocorrelation Analysis
+```{r}
+# Use tq_mutate() to get lags 1:28 using lag.xts()
+k <- 1:28
+col_names <- paste0("lag_", k)
+
+tidyverse_lags <- tidyverse_downloads %>%
+    tq_mutate(
+        select     = count,
+        mutate_fun = lag.xts,
+        k          = 1:28,
+        col_rename = col_names
+    )
+tidyverse_lags
+```
+
+
+```{r}
+# Calculate the autocorrelations and 95% cutoffs
+tidyverse_count_autocorrelations <- tidyverse_lags %>%
+    gather(key = "lag", value = "lag_value", -c(package, date, count)) %>%
+    mutate(lag = str_sub(lag, start = 5) %>% as.numeric) %>%
+    group_by(package, lag) %>%
+    summarize(
+        cor = cor(x = count, y = lag_value, use = "pairwise.complete.obs"),
+        cutoff_upper = 2/(n())^0.5,
+        cutoff_lower = -2/(n())^0.5
+        )
+tidyverse_count_autocorrelations
+```
+Visualizing Autocorrelation: ACF Plot
+
+```{r}
+# Visualize the autocorrelations
+tidyverse_count_autocorrelations %>%
+    ggplot(aes(x = lag, y = cor, color = package, group = package)) +
+    # Add horizontal line a y=0
+    geom_hline(yintercept = 0) +
+    # Plot autocorrelations
+    geom_point(size = 2) +
+    geom_segment(aes(xend = lag, yend = 0), size = 1) +
+    # Add cutoffs
+    geom_line(aes(y = cutoff_upper), color = "blue", linetype = 2) +
+    geom_line(aes(y = cutoff_lower), color = "blue", linetype = 2) +
+    # Add facets
+    facet_wrap(~ package, ncol = 3) +
+    # Aesthetics
+    expand_limits(y = c(-1, 1)) +
+    scale_color_tq() +
+    theme_tq() +
+    labs(
+        title = paste0("Tidyverse ACF Plot: Lags ", rlang::expr_text(k)),
+        subtitle = "Appears to be a weekly pattern",
+        x = "Lags"
+    ) +
+    theme(
+        legend.position = "none",
+        axis.text.x = element_text(angle = 45, hjust = 1)
+    )
+```
+Which Lags Consistently Stand Out?
+We see that there appears to be a weekly pattern, but we want to be sure. We can verify the weekly pattern assessment by reviewing the absolute value of the correlations independent of package. We take the absolute autocorrelation because we use the magnitude as a proxy for how much explanatory value the lag provides. We’ll use dplyr functions to manipulate the data for visualization:
+```{r}
+tidyverse_count_autocorrelations %>%
+    ungroup() 
+```
+
+```{r}
+# Get the absolute autocorrelations
+tidyverse_absolute_autocorrelations <- tidyverse_count_autocorrelations %>%
+    ungroup() %>%
+    mutate(
+        lag = as_factor(as.character(lag)),
+        cor_abs = abs(cor)
+        ) %>%
+    select(lag, cor_abs) %>%
+    group_by(lag) 
+tidyverse_absolute_autocorrelations
+```
+
+```{r}
+# Visualize boxplot of absolute autocorrelations
+break_point <- 1.5*IQR(tidyverse_absolute_autocorrelations$cor_abs) %>% signif(3)
+tidyverse_absolute_autocorrelations %>%    
+    ggplot(aes(x = fct_reorder(lag, cor_abs, .desc = TRUE) , y = cor_abs)) +
+    # Add boxplot
+    geom_boxplot(color = palette_light()[[1]]) +
+    # Add horizontal line at outlier break point
+    geom_hline(yintercept = break_point, color = "red") +
+    annotate("text", label = paste0("Outlier Break Point = ", break_point), 
+             x = 24.5, y = break_point + .03, color = "red") +
+    # Aesthetics
+    expand_limits(y = c(0, 1)) +
+    theme_tq() +
+    labs(
+        title = paste0("Absolute Autocorrelations: Lags ", rlang::expr_text(k)),
+        subtitle = "Weekly pattern is consistently above outlier break point",
+        x = "Lags"
+    ) +
+    theme(
+        legend.position = "none",
+        axis.text.x = element_text(angle = 45, hjust = 1)
+    )
+```
+
+Lags in multiples of seven have the highest autocorrelation and are consistently above the outlier break point indicating the presence of a strong weekly pattern. The autocorrelation with the seven-day lag is the highest, with a median of approximately 0.75. Lags 14, 21, and 28 are also outliers with median autocorrelations in excess of our outlier break point of 0.471.
+
+Note that the median of Lag 1 is essentially at the break point indicating that half of the packages have a presence of “abnormal” autocorrelation. However, this is not part of a seasonal pattern since a periodic frequency is not present.
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
