@@ -1,0 +1,2505 @@
+---
+title: "Job_attrition"
+output: html_document
+---
+# 1. Import Data
+```{r}
+#library(tidyverse)# include dplyr, tidr, ggplot2, tibble, readr, purr
+library(dplyr) # mutate, select, filter, summarize, arrange, group by 
+library(tidyr) # gather, spread, separate, extract, unite, %>%
+library(ggplot2)
+library(tibble) # provide tibble class (better than traditional data frame)
+library(readr) # read_csv, tsv, delim, table, log....
+library(purrr) # map, map_dbl, split,
+library(data.table)
+library(rsample)   # for data splitting
+library(caret)     # for model packages
+```
+
+```{r}
+path="WA_Fn-UseC_-HR-Employee-Attrition.csv"
+data <- fread(path)
+data
+```
+# 2. Summary of data:
+
+Questions we could Ask Ourselves:
+- Columns and Observations: How many columns and observations is there in our dataset?
+- Missing data: Are there any missing data in our dataset?
+- Data Type: The different datatypes we are dealing in this dataset.
+- Distribution of our Data: Is it right-skewed, left-skewed or symmetric? This might be useful especially if we are implementing any type of statistical analysis or even for modelling.
+- Structure of our Data: Some datasets are a bit complex to work with however, the tidyverse package is really useful to deal with complex datasets.
+- Meaning of our Data: What does our data mean? Most features in this dataset are ordinal variables which are similar to categorical variables however, ordering of those variables matter. A lot of the variables in this dataset have a range from 1-4 or 1-5, The lower the ordinal variable, the worse it is in this case. For instance, Job Satisfaction 1 = "Low" while 4 = "Very High".
+- Label: What is our label in the dataset or in otherwords the output?
+```{r}
+#class(data)
+#dim(data)
+#str(data)
+```
+
+```{r}
+# Using an insightful summary with skim and kable
+data %>% glimpse()
+```
+
+```{r}
+summary(data)
+```
+
+```{r}
+psych::describe(data)
+```
+# Check Null value
+
+```{r}
+sum(is.na(data))
+```
+
+
+```{r}
+#install.packages("Tmisc")
+library(Tmisc)
+Tmisc::gg_na(data)
+```
+
+
+```{r}
+Tmisc::propmiss(data)
+```
+# Distribution of our Labels:
+```{r}
+#install.packages("cowplot")
+library(cowplot)
+```
+
+```{r}
+options(repr.plot.width=8, repr.plot.height=4)
+
+# plot count
+attritions_number <- data %>% 
+                    group_by(Attrition) %>% 
+                    summarise(Count=n()) %>%
+ggplot(aes(x=Attrition, y=Count)) + geom_bar(stat="identity", fill="orange", color="grey40") + theme_bw() + coord_flip() + 
+geom_text(aes(x=Attrition, y=0.01, label= Count),
+            hjust=-0.8, vjust=-1, size=3, 
+            colour="black", fontface="bold",
+         angle=360) + labs(title="Employee Attrition (Amount)", x="Employee Attrition",y="Amount") + theme(plot.title=element_text(hjust=0.5))
+
+# plot percentage
+attrition_percentage <- data %>% group_by(Attrition) %>%
+                                  summarise(Count=n()) %>% 
+                                  mutate(pct=round(prop.table(Count),2) * 100) %>% 
+ggplot(aes(x=Attrition, y=pct)) + geom_bar(stat="identity", fill = "dodgerblue", color="grey40") + 
+geom_text(aes(x=Attrition, y=0.01, label= sprintf("%.2f%%", pct)),
+            hjust=0.5, vjust=-3, size=4, 
+            colour="black", fontface="bold") + theme_bw() + labs(x="Employee Attrition", y="Percentage") + 
+labs(title="Employee Attrition (%)") + theme(plot.title=element_text(hjust=0.5))
+
+cowplot::plot_grid(attritions_number, attrition_percentage, align="h", ncol=2)
+```
+
+```{r}
+count(data,Attrition)
+```
+# 3. Data analysis/visualization
+
+```{r}
+ggplot(data,aes(x = Age,fill = Attrition)) +
+  geom_density(alpha = 0.4) 
+```
+
+```{r}
+head(data)
+```
+
+```{r}
+ggplot(data,aes(x = Attrition,y = Age,fill=Attrition)) +
+  geom_boxplot(alpha = 0.4) 
+```
+
+
+```{r}
+ggplot(data, aes(x = BusinessTravel)) + 
+  geom_bar()
+```
+```{r}
+count(data,BusinessTravel)
+```
+```{r}
+#install.packages("memisc")
+library(memisc)
+memisc::percent(data$BusinessTravel)
+```
+
+
+
+```{r}
+ggplot(data, 
+       aes(x = BusinessTravel, 
+           y = ..count.. / sum(..count..))) + 
+  geom_bar()
+```
+
+
+```{r}
+plotdata <- data %>%
+  count(BusinessTravel) %>%
+  mutate(pct = n / sum(n),
+         pctlabel = paste0(round(pct*100), "%"))
+plotdata
+```
+
+
+```{r}
+library(scales)
+ggplot(plotdata, 
+       aes(x = reorder(BusinessTravel, -pct),
+           y = pct)) + 
+  geom_bar(stat = "identity", 
+           #fill = "indianred3", 
+           color = "black") +
+  geom_text(aes(label = pctlabel), 
+            vjust = -0.25) +
+  scale_y_continuous(labels = percent) +
+  labs(x = "Race", 
+       y = "Percent", 
+       title  = "Participants by race")
+```
+
+```{r}
+# create a summary dataset
+library(dplyr)
+plotdata <- data %>%
+  group_by(Attrition, BusinessTravel) %>%
+  summarize(n = n()) %>% 
+  mutate(pct = n/sum(n),
+         lbl = scales::percent(pct))
+plotdata
+```
+
+
+```{r}
+# create segmented bar chart
+# adding labels to each segment
+
+ggplot(plotdata, 
+       aes(x = Attrition,
+           y = pct,
+           fill = BusinessTravel)) + 
+  geom_bar(stat = "identity",
+           position = "fill") +
+  scale_y_continuous(breaks = seq(0, 1, .2),label = percent) +
+  geom_text(aes(label = lbl), 
+            size = 3, 
+            position = position_stack(vjust = 0.5)) +
+  scale_fill_brewer(palette = "Set2") +
+  #labs(y = "Percent",fill = "Drive Train",x = "Class",title = "Automobile Drive by Class") +
+  theme_minimal()
+```
+# 3.1 Plot categorical vs catagorical
+
+```{r}
+data %>%
+  dplyr::group_by(Attrition, BusinessTravel) %>%
+  dplyr::summarize(n = n()) %>% 
+  dplyr::mutate(pct = n/sum(n),lbl = scales::percent(pct)) %>% 
+  ggplot(aes(x = Attrition,y = pct,
+           fill = BusinessTravel)) + 
+  geom_bar(stat = "identity",
+           position = "fill") +
+  scale_y_continuous(breaks = seq(0, 1, .2),label = percent) +
+  geom_text(aes(label = lbl), 
+            size = 3, 
+            position = position_stack(vjust = 0.5)) +
+  scale_fill_brewer(palette = "Set2") +
+  #labs(y = "Percent",fill = "Drive Train",x = "Class",title = "Automobile Drive by Class") +
+  theme_minimal()
+```
+
+```{r}
+Categorical_vs_categorical_plot <- function(data,group_col,fill_col){
+data %>%
+  group_by_(group_col, fill_col) %>%
+  summarize(n = n()) %>% 
+  mutate(pct = n/sum(n),lbl = scales::percent(pct))%>% 
+  ggplot(aes_(x = group_col,y = ~pct,
+           fill = fill_col)) +
+  geom_bar(stat = "identity",
+           position = "fill") +
+  scale_y_continuous(breaks = seq(0, 1, .2),label =scales::percent) +
+  geom_text(aes(label = lbl), 
+            size = 3, 
+            position = position_stack(vjust = 0.5)) +
+  #scale_fill_brewer(palette = "Set2") +
+  labs(y = "Percent",x = "Attrition",title = "Compare attrition accross category")+
+  theme_minimal()  
+  
+}
+```
+
+```{r}
+# Get all character columns
+data %>% 
+  select_if(is.character)
+```
+
+```{r}
+Categorical_vs_categorical_plot(data,~Attrition,~BusinessTravel)
+Categorical_vs_categorical_plot(data,~Attrition,~Department)
+Categorical_vs_categorical_plot(data,~Attrition,~EducationField)
+Categorical_vs_categorical_plot(data,~Attrition,~Gender)
+Categorical_vs_categorical_plot(data,~Attrition,~JobRole)
+Categorical_vs_categorical_plot(data,~Attrition,~MaritalStatus)
+Categorical_vs_categorical_plot(data,~Attrition,~OverTime)
+
+```
+
+# Combine multy plot
+```{r}
+#install.packages("patchwork")
+library(patchwork)
+p1 <- Categorical_vs_categorical_plot(data,~Attrition,~BusinessTravel)
+p2 <- Categorical_vs_categorical_plot(data,~Attrition,~Department)
+p3 <- Categorical_vs_categorical_plot(data,~Attrition,~EducationField)
+```
+
+
+```{r}
+#install.packages("gridExtra")
+library(gridExtra)
+gridExtra::grid.arrange(p1,p2,p3)
+```
+
+# 3.2 Plot Quantitative vs. Quantitative
+
+```{r}
+str(data)
+```
+
+
+```{r}
+# plot the distribution of salaries 
+# by rank using kernel density plots
+ggplot(data, 
+       aes(x = DistanceFromHome, 
+           fill = Attrition)) +
+  geom_density(alpha = 0.4) 
+  #labs(title = "Salary distribution by rank")
+```
+
+```{r}
+#install.packages("ggridges")
+library(ggridges)
+
+ggplot(data, 
+       aes(x = DistanceFromHome, 
+           y = Attrition, 
+           fill = Attrition)) +
+  geom_density_ridges() + 
+  theme_ridges() +
+  theme(legend.position = "none")
+```
+
+```{r}
+# plot the distribution of salaries by rank using boxplots
+ggplot(data, 
+       aes(x = Attrition, 
+           y = DistanceFromHome)) +
+  geom_boxplot() 
+  #labs(title = "Salary distribution by rank")
+
+# plot the distribution using violin and boxplots
+ggplot(data, aes(x = Attrition, 
+                     y = DistanceFromHome)) +
+  geom_violin(fill = "cornflowerblue") +
+  geom_boxplot(width = .2, 
+               fill = "orange",
+               outlier.color = "orange",
+               outlier.size = 2) 
+```
+```{r}
+ggplot(data, 
+       aes(x = EnvironmentSatisfaction, 
+           fill = Attrition)) +
+  geom_density(alpha = 0.4) 
+```
+
+
+```{r}
+ggplot(data, 
+       aes(x = Attrition, 
+           y = EnvironmentSatisfaction)) +
+  geom_boxplot() 
+
+# plot the distribution using violin and boxplots
+ggplot(data, aes(x = Attrition, 
+                     y = EnvironmentSatisfaction)) +
+  geom_violin(fill = "cornflowerblue") +
+  geom_boxplot(width = .2, 
+               fill = "orange",
+               outlier.color = "orange",
+               outlier.size = 2) 
+
+```
+
+```{r}
+facet_plot <- function(data,categorical_col,quantitative_col,facet_col){
+  # plot the distribution using violin and boxplots
+  ggplot(data, aes_(x = categorical_col, 
+                     y = quantitative_col)) +
+  geom_violin(fill = "cornflowerblue") +
+  geom_boxplot(width = .2, 
+               fill = "orange",
+               outlier.color = "orange",
+               outlier.size = 2) +
+  facet_wrap(facet_col) +
+  labs(title=facet_col)
+}
+```
+
+```{r}
+facet_plot(data,~Attrition,~MonthlyIncome,~Department)
+facet_plot(data,~Attrition,~MonthlyIncome,~JobRole)
+facet_plot(data,~Attrition,~MonthlyIncome,~JobSatisfaction)
+facet_plot(data,~Attrition,~MonthlyIncome,~PerformanceRating)
+```
+
+```{r}
+Categorical_vs_quantitative_plot <- function(data,categorical_col,quantitative_col){
+  # plot the distribution using violin and boxplots
+  ggplot(data, aes_(x = categorical_col, 
+                     y = quantitative_col)) +
+  geom_violin(fill = "cornflowerblue") +
+  geom_boxplot(width = .2, 
+               fill = "orange",
+               outlier.color = "orange",
+               outlier.size = 2) 
+}
+```
+
+```{r}
+head(data)
+```
+
+
+```{r}
+Categorical_vs_quantitative_plot(data,~Attrition,~Age)
+Categorical_vs_quantitative_plot(data,~Attrition,~DistanceFromHome)
+Categorical_vs_quantitative_plot(data,~Attrition,~Education)
+Categorical_vs_quantitative_plot(data,~Attrition,~EnvironmentSatisfaction)
+Categorical_vs_quantitative_plot(data,~Attrition,~HourlyRate)
+Categorical_vs_quantitative_plot(data,~Attrition,~JobInvolvement)
+Categorical_vs_quantitative_plot(data,~Attrition,~JobLevel)
+Categorical_vs_quantitative_plot(data,~Attrition,~JobSatisfaction)
+Categorical_vs_quantitative_plot(data,~Attrition,~MonthlyIncome)
+Categorical_vs_quantitative_plot(data,~Attrition,~MonthlyRate)
+Categorical_vs_quantitative_plot(data,~Attrition,~NumCompaniesWorked)
+Categorical_vs_quantitative_plot(data,~Attrition,~PerformanceRating)
+Categorical_vs_quantitative_plot(data,~Attrition,~RelationshipSatisfaction)
+Categorical_vs_quantitative_plot(data,~Attrition,~TotalWorkingYears)
+Categorical_vs_quantitative_plot(data,~Attrition,~WorkLifeBalance)
+Categorical_vs_quantitative_plot(data,~Attrition,~YearsAtCompany)
+Categorical_vs_quantitative_plot(data,~Attrition,~YearsInCurrentRole)
+Categorical_vs_quantitative_plot(data,~Attrition,~YearsSinceLastPromotion)
+Categorical_vs_quantitative_plot(data,~Attrition,~YearsWithCurrManager)
+```
+# 3.3 Quantitative vs. Quantitative
+```{r}
+# scatterplot with linear fit line
+ggplot(data,
+       aes(x = TotalWorkingYears, 
+           y = MonthlyIncome)) +
+  geom_point(color= "steelblue") +
+  geom_smooth(method = "lm")
+# Age vs monthly income
+ggplot(data,
+       aes(x = Age, 
+           y = MonthlyIncome)) +
+  geom_point(color= "steelblue") +
+  geom_smooth(method = "lm")
+```
+```{r}
+fit1 <- lm(MonthlyIncome ~ TotalWorkingYears, data = data)
+summary(fit1)
+```
+# Correlation Matrix:
+```{r}
+# # Let's have a better understanding about each feature through a correlation plot
+options(repr.plot.width=10, repr.plot.height=7) 
+nums <- select_if(data, is.numeric)
+```
+
+```{r}
+library(ggcorrplot)
+corr <- round(cor(nums), 1)
+
+ggcorrplot(corr, 
+           type = "lower", 
+           lab = TRUE, 
+           lab_size = 3, 
+           method="square", 
+           colors = c("tomato2", "white", "#01A9DB"), 
+           title="Correlogram Employee Attritions", 
+           ggtheme=theme_minimal())
+```
+
+```{r}
+library(superheat)
+superheat(nums, scale = TRUE)
+```
+```{r}
+# sorted heat map
+superheat(nums,
+          scale = TRUE,
+          left.label.text.size=3,
+          bottom.label.text.size=3,
+          bottom.label.size = .05,
+          row.dendrogram = TRUE )
+```
+create a scatterplot matrix (long and not good visual)
+```{r}
+# create a scatterplot matrix (long and not good visual)
+#library(GGally)
+#ggpairs(nums)
+```
+# Radar chart
+
+```{r}
+head(data)
+```
+```{r}
+ data %>% select_if(function(col) is.numeric(col) | 
+                                   all(col == .$Attrition))
+```
+
+```{r}
+plotdata <- data %>% 
+            select_if(function(col) is.numeric(col) | all(col == .$Attrition)) %>% 
+            rename(group = Attrition) %>%
+            mutate_at(vars(-group),funs(rescale)) %>% 
+            relocate(group,Age)
+plotdata
+```
+```{r}
+library(ggradar)
+library(scales)
+ggradar::ggradar(plotdata)
+```
+
+# px.parallel_coordinates chart
+```{r}
+#install.packages("parcoords")
+library(parcoords)
+```
+
+```{r}
+data_parrallel_plot <-  data %>% 
+                          select_if(is.character) %>% 
+                          relocate(Attrition, .after = last_col())
+data_parrallel_plot
+```
+
+```{r}
+parcoords(
+ data_parrallel_plot,
+ reorderable = T,
+ brushMode = '1D-axes')
+```
+
+
+```{r}
+library(GGally)
+#set the value of alpha to 0.5
+ggparcoord(data_parrallel_plot, columns=1:8, groupColumn = 9, alphaLines = 0.5)
+```
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+# 3.4 Select column type for data processing
+
+```{r}
+# Get all character columns
+data %>% 
+  select_if(is.character)
+# select_if(~!is.numeric(.))
+```
+
+```{r}
+# Get all character columns
+data %>% 
+  select_if(is.numeric)
+# select_if(~!is.numeric(.))
+```
+
+```{r}
+class(colnames(data))
+```
+
+```{r}
+list(colnames(data))
+```
+
+```{r}
+for (i in list(colnames(data))){
+  print(i)
+}
+```
+
+# 4. Machine learning (ISTA 321)
+```{r}
+library(rsample)   # for data splitting
+library(caret)     # for model packages
+```
+
+```{r}
+path="WA_Fn-UseC_-HR-Employee-Attrition.csv"
+data <- fread(path)
+str(data)
+```
+# Delete unecessary columns
+```{r}
+data_reduce <-data %>% 
+              dplyr::select(-Over18,-EmployeeNumber, -EmployeeCount)
+
+dim(data_reduce)
+```
+# Getting dummy variables - one hot encoding
+
+First, let’s create our dummy object that we’ll use for the conversion. We’ll use the dummyVars() function from caret. Note how the formula is churn ~ . This is telling it not to convert churn as that’s our target, but look at all the other features (that’s what the period does) and convert if needed. I’ve also specified fullRank = TRUE so that it automatically drops one factor level which we want. The level dropped is the reference level then.
+
+```{r}
+data_reduce_dummy <- dummyVars(Attrition ~ ., data = data_reduce, fullRank = TRUE)
+data_reduce_dummy
+```
+
+```{r}
+data_reduce <- predict(data_reduce_dummy, newdata = data_reduce)
+data_reduce <- data.frame(data_reduce)
+str(data_reduce)
+```
+
+```{r}
+data_reduce
+```
+```{r}
+Attrition_vals <- data %>% 
+  dplyr::select(Attrition)
+data_reduce <- cbind(data_reduce, Attrition_vals) # attach it back
+data_reduce
+```
+# Dealing with nuances in model preferences
+
+```{r}
+data_reduce$Attrition <-  factor(ifelse(data_reduce$Attrition == 'Yes', 1, 0))
+```
+# Dealing with nuances in my preferences
+
+When we one hot encoded it took the various levels found in the columns and then created column names that used those levels. The problem is that those values when in the columns had spaces, which it turned into periods in the column names. I can’t deal with periods and underscores in the same column names.
+```{r}
+colnames(data_reduce)
+```
+Let’s use some regex to replace all periods with underscores. Remember that period is a special character so you need to escape it with two backslashes ‘\’. I’m also going to add a ‘+’ to the end of my search string as ‘+’ tells it to look for one or more of the symbols. This way it’ll grab the double period too!
+```{r}
+library(stringr)
+colnames(data_reduce) <- colnames(data_reduce) %>% stringr::str_replace_all('\\.+', '_')
+colnames(data_reduce) # check!
+```
+# 4.3 Splitting into training and test sets
+The caret package has function that makes this really easy. You can feed the function createDataPartition() your target, and your split ratio and it’ll give you back a list of row numbers that you can use to randomly select 80% of the data. Let’s see it in action.
+```{r}
+# Method 2 From ISTA 321
+data_split <- createDataPartition(data_reduce$Attrition, p = 0.8, list = FALSE)
+dim(data_reduce)
+dim(data_split)
+head(data_split, 10)
+
+```
+So what’s in this ts_split object? Looking at the first 10 values we see that there is a continuous index but then under Resample1 we see that there are some randomly missing values… those are the 20% that weren’t selected!
+```{r}
+features_train <- data_reduce[ data_split, !(names(data_reduce) %in% c('Attrition'))] 
+dim(features_train)
+```
+```{r}
+features_test <- data_reduce[ -data_split, !(names(data_reduce) %in% c('Attrition'))] 
+dim(features_test)
+```
+
+
+```{r}
+target_train <- data_reduce[ data_split, "Attrition"]
+target_test <- data_reduce[-data_split, "Attrition"]
+
+#check propation target
+table(target_train)
+table(target_test)
+prop.table(table(target_train))
+prop.table(table(target_test))
+```
+
+#  Centering and scaling
+We’ll use the preProcess() function to do our preprocessing. What’s great is that we can tell it all the things we want it to do at once within method = In this case we’ll tell it to center, scale, and even use KNN to impute missing values.
+
+```{r}
+preprocess_object <- preProcess(features_train, 
+                                  method = c('center', 'scale', 'knnImpute'))
+preprocess_object # We can look at the object and it'll tell us what it did
+```
+Now we can use ’predict()` to apply that preprocess object to our data (just like we used predict for creating our dummy variables).
+```{r}
+features_train <- predict(preprocess_object, newdata = features_train)
+features_test <- predict(preprocess_object, newdata = features_test)
+```
+A quick histogram shows that Age has been scaled
+```{r}
+hist(features_train$Age)
+```
+
+# Fitting our models
+
+Fitting a kNN model
+```{r}
+knn_fit <- knn3(features_train, target_train, k = 5)
+knn_fit # just check it
+```
+
+
+```{r}
+knn_pred <- predict(knn_fit, features_test, type = 'class' )
+predictions <- cbind(data.frame(target_test, knn_pred))
+summary(predictions)
+```
+```{r}
+confusionMatrix(knn_pred, target_test)
+```
+
+Fitting a logistic regression model
+```{r}
+full_train <- cbind(features_train, target_train)
+#glimpse(full_train)
+```
+
+
+```{r}
+log_train <- glm(target_train ~ ., family = 'binomial', data = full_train)
+summary(log_train)
+```
+Alright, now predict our test targets using our test features. Use type = 'response' so R knows to give you back the probability.
+
+```{r}
+log_pred <- predict(log_train, newdata = features_test, type = 'response')
+head(log_pred) # just look at the first few values... note the 0-1 scale.
+```
+We can convert these probabilities to classes. In this case anything greater than or equal to 0.5 is a 1 and everything else a 0.
+
+```{r}
+log_pred <- ifelse(log_pred >= 0.5, 1, 0)
+```
+
+```{r}
+predictions$log_pred <- factor(log_pred)
+summary(predictions)
+```
+
+
+```{r}
+confusionMatrix(factor(log_pred), target_test)
+```
+
+Fitting a linear discriminant analysis (LDA) model
+```{r}
+full_train[[37]]
+```
+
+```{r}
+library(MASS) # Load mass - install if needed
+lda_train <- lda(target_train ~ ., data = full_train) # fit model
+lda_pred <- predict(lda_train, newdata = features_test, type = 'response') # predict
+predictions$lda_pred <- lda_pred$class # add predictions to data frame
+summary(predictions)
+```
+
+# 4. Mahicne learning model (ML BOOK)
+```{r}
+library(rsample)   # for data splitting
+# Modeling packages
+library(caret)     # for logistic regression modeling
+# Model interpretability packages
+library(vip)       # variable importance
+```
+
+```{r}
+path="WA_Fn-UseC_-HR-Employee-Attrition.csv"
+data <- fread(path)
+dim(data)
+```
+Remove unnessary columns:
+```{r}
+data <-data %>%dplyr::select(-Over18,-EmployeeNumber, -EmployeeCount)
+dim(data)
+str(data)
+```
+Convert all character columns to factor
+```{r}
+# all character columns to factor:
+data <- mutate_if(data, is.character, as.factor)
+str(data)
+```
+
+
+```{r}
+# Create training (70%) and test (30%) sets for the 
+# rsample::attrition data.
+set.seed(123)  # for reproducibility
+churn_split <- initial_split(data, prop = .7, strata = "Attrition")
+churn_train <- training(churn_split)
+churn_test  <- testing(churn_split)
+```
+# Multiple logistic regression
+# MLP khong su dung preprocess
+```{r}
+set.seed(123)
+cv_model <- train(
+  Attrition ~ ., 
+  data = churn_train, 
+  method = "glm",
+  family = "binomial",
+  trControl = trainControl(method = "cv", number = 5)
+)
+```
+
+
+```{r}
+summary(cv_model)
+```
+
+
+```{r}
+# predict class
+pred_class <- predict(cv_model, churn_train)
+# create confusion matrix
+confusionMatrix(
+  data = pred_class, 
+  reference = churn_train$Attrition
+)
+# NOTE: dung theo kieu nay khong duoc do hieu nham positive class la No, sensitivity, specificity, pos , neg lon nguoc so voi binh thuong
+```
+
+```{r}
+pred_class <- predict(cv_model, churn_train)
+# create confusion matrix (pp chuan phai relevel)
+confusionMatrix(
+  data = relevel(pred_class, ref = "Yes"), 
+  reference = relevel(churn_train$Attrition, ref = "Yes")
+)
+```
+
+
+```{r}
+library(ROCR)
+# Compute predicted probabilities
+m1_prob <- predict(cv_model, churn_train, type = "prob")$Yes
+
+# Compute AUC metrics for cv_model1 and cv_model3
+perf1 <- prediction(m1_prob, churn_train$Attrition) %>%
+  performance(measure = "tpr", x.measure = "fpr")
+
+# Plot ROC curves for cv_model1 and cv_model3
+plot(perf1, col = "black", lty = 2)
+
+```
+
+
+```{r}
+vip(cv_model, num_features = 20)
+```
+Note: Neu chuyen cac column Job satisfaction tu int (1,2,3,4) thanh factor (low, normal, high) thi important feature explain se dien giai chinh xac column + factor tuong ung, vd: Job satisfaction Very_high, Job satisfaction _ Normal 
+
+# MLP Su dung preprocess 
+```{r}
+set.seed(123)
+cv_model <- train(
+  Attrition ~ ., 
+  data = churn_train, 
+  method = "glm",
+  family = "binomial",
+  preProcess = c("zv", "center", "scale"), # loai bo near zero/constant column, center and scale column value
+  trControl = trainControl(method = "cv", number = 5)
+)
+```
+
+```{r}
+pred_class <- predict(cv_model, churn_train)
+# create confusion matrix (pp chuan phai relevel)
+confusionMatrix(
+  data = relevel(pred_class, ref = "Yes"), 
+  reference = relevel(churn_train$Attrition, ref = "Yes")
+)
+```
+
+```{r}
+library(ROCR)
+# Compute predicted probabilities
+m1_prob <- predict(cv_model, churn_train, type = "prob")$Yes
+
+# Compute AUC metrics for cv_model1 and cv_model3
+perf1 <- prediction(m1_prob, churn_train$Attrition) %>%
+  performance(measure = "tpr", x.measure = "fpr")
+
+# Plot ROC curves for cv_model1 and cv_model3
+plot(perf1, col = "black", lty = 2)
+```
+
+
+```{r}
+vip(cv_model, num_features = 20)
+```
+
+#  GBM from library gbm
+
+
+```{r}
+# Read data
+path="WA_Fn-UseC_-HR-Employee-Attrition.csv"
+data <- fread(path)
+dim(data)
+
+# Remove unnessary columns:
+data <-data %>%dplyr::select(-Over18,-EmployeeNumber, -EmployeeCount)
+# all character columns to factor:
+data <- mutate_if(data, is.character, as.factor)
+data$Attrition<-ifelse(data$Attrition=="Yes", 1, 0)
+# Create training (80%) and test (20%) sets for the 
+set.seed(430)
+churn_split = createDataPartition(data$Attrition, p =0.8, list = FALSE)
+churn_train = data[churn_split, ]
+churn_test = data[-churn_split, ]
+dim(churn_train)
+dim(churn_test)
+
+```
+```{r}
+head(churn_train)
+```
+
+
+```{r}
+library(gbm)      # for original implementation of regular and stochastic GBMs
+```
+
+ Zero- and Near Zero-Variance Predictors
+```{r}
+nzv <- nearZeroVar(churn_train)
+nzv
+```
+```{r}
+head(churn_train[[24]])
+```
+
+```{r}
+churn_train[,-nzv]
+```
+
+```{r}
+nzv <- nearZeroVar(churn_train)
+print(nzv)
+churn_train_nzv <- churn_train[,-24]
+dim(churn_train)
+dim(churn_train_nzv)
+```
+
+```{r}
+set.seed(123)  # for reproducibility
+gbm.model <- gbm(
+  formula = Attrition ~ .,
+  data = churn_train_nzv,
+  distribution = "bernoulli",  # SSE loss function
+  n.trees = 1000,
+  shrinkage = 0.1,
+  interaction.depth = 3,
+  n.minobsinnode = 10,
+  cv.folds = 5
+)
+```
+
+```{r}
+print(gbm.model )
+```
+
+```{r}
+best.iter = gbm.perf(gbm.model, method="cv")
+best.iter
+```
+
+```{r}
+summary(gbm.model)
+```
+```{r}
+library(vip)
+vip(gbm.model)
+```
+
+```{r}
+plot.gbm(gbm.model, 1, best.iter)
+plot.gbm(gbm.model, 2, best.iter) 
+plot.gbm(gbm.model, 3, best.iter)
+plot.gbm(gbm.model, 4, best.iter)
+```
+
+# GBM from Caret package
+
+```{r}
+# Read data
+path="WA_Fn-UseC_-HR-Employee-Attrition.csv"
+data <- fread(path)
+dim(data)
+
+# Remove unnessary columns:
+data <-data %>%dplyr::select(-Over18,-EmployeeNumber, -EmployeeCount)
+# all character columns to factor:
+data <- mutate_if(data, is.character, as.factor)
+#data$Attrition<-ifelse(data$Attrition=="Yes", 1, 0)
+# Create training (80%) and test (20%) sets for the 
+set.seed(430)
+churn_split = createDataPartition(data$Attrition, p =0.8, list = FALSE)
+churn_train = data[churn_split, ]
+churn_test = data[-churn_split, ]
+dim(churn_train)
+dim(churn_test)
+```
+
+```{r}
+churn_train_nzv <- churn_train[,-24]
+```
+
+Note: Target must be factor char, not numeric. Not include near zero
+```{r}
+
+set.seed(123)
+fitControl = trainControl(method="cv", number=5, returnResamp = "all")
+
+model2 = train(Attrition~., 
+               data=churn_train_nzv, 
+               method="gbm",
+               distribution="bernoulli",
+               trControl=fitControl, 
+               verbose=F
+    )
+```
+
+```{r}
+model2
+```
+```{r}
+confusionMatrix(model2)
+```
+```{r}
+churn_test_nzv <- churn_test[,-24]
+mPred = predict(model2, churn_test_nzv, na.action = na.pass)
+postResample(mPred, churn_test_nzv$Attrition)
+```
+
+
+```{r}
+confusionMatrix(mPred, churn_test_nzv$Attrition)
+# Note: need to change positive class to Yes
+```
+# XGBOOST
+```{r}
+library(xgboost)
+```
+
+
+```{r}
+# Read data
+path="WA_Fn-UseC_-HR-Employee-Attrition.csv"
+data <- fread(path)
+dim(data)
+
+# Remove unnessary columns:
+data <-data %>%dplyr::select(-Over18,-EmployeeNumber, -EmployeeCount)
+# all character columns to factor:
+data <- mutate_if(data, is.character, as.factor)
+#data$Attrition<-ifelse(data$Attrition=="Yes", 1, 0)
+# Create training (80%) and test (20%) sets for the 
+set.seed(430)
+churn_split = createDataPartition(data$Attrition, p =0.8, list = FALSE)
+churn_train = data[churn_split, ]
+churn_test = data[-churn_split, ]
+dim(churn_train)
+dim(churn_test)
+```
+Up to this point, we dealt with basic data cleaning and data inconsistencies. To use xgboost package, keep these things in mind:
+1. Convert the categorical variables into numeric using one hot encoding
+2. For classification, if the dependent variable belongs to class factor, convert it to numeric
+```{r}
+train_labels <- churn_train$Attrition 
+test_label <- churn_test$Attrition
+
+new_train <- model.matrix(~.+0,data = churn_train[,-c("Attrition"),with=F]) 
+new_test <- model.matrix(~.+0,data = churn_test[,-c("Attrition"),with=F])
+
+#convert factor to numeric 
+train_labels <- as.numeric(train_labels)-1
+test_label <- as.numeric(test_label)-1
+```
+
+```{r}
+
+dtrain <- xgb.DMatrix(data = new_train,label = train_labels) 
+dtest <- xgb.DMatrix(data = new_test,label=test_label)
+```
+
+
+```{r}
+#default parameters
+params <- list(booster = "gbtree", objective = "binary:logistic", eta=0.3, gamma=0, max_depth=6, min_child_weight=1, subsample=1, colsample_bytree=1)
+```
+
+
+```{r}
+xgbcv <- xgb.cv( params = params, data = dtrain, nrounds = 100, nfold = 5, showsd = T, stratified = T, print.every.n = 10, early.stop.round = 20, maximize = F)
+##best iteration = 79
+```
+
+```{r}
+min(xgbcv$test.error.mean)
+```
+
+```{r}
+xgb1 <- xgb.train (params = params, data = dtrain, nrounds = 79, watchlist = list(val=dtest,train=dtrain), print.every.n = 10, early.stop.round = 10, maximize = F , eval_metric = "error")
+```
+
+```{r}
+#model prediction
+xgbpred <- predict (xgb1,dtest)
+xgbpred <- ifelse (xgbpred > 0.5,1,0)
+```
+
+```{r}
+class(test_label)
+class(xgbpred)
+```
+
+```{r}
+#confusion matrix
+confusionMatrix(as.factor(xgbpred), as.factor(test_label))
+```
+```{r}
+#view variable importance plot
+mat <- xgb.importance (feature_names = colnames(new_train),model = xgb1)
+xgb.plot.importance (importance_matrix = mat[1:20]) 
+```
+# GBM from H20 package
+```{r}
+# Read data
+path="WA_Fn-UseC_-HR-Employee-Attrition.csv"
+data <- fread(path)
+dim(data)
+
+# Remove unnessary columns:
+data <-data %>%dplyr::select(-Over18,-EmployeeNumber, -EmployeeCount)
+# all character columns to factor:
+data <- mutate_if(data, is.character, as.factor)
+#data$Attrition<-ifelse(data$Attrition=="Yes", 1, 0)
+# Create training (80%) and test (20%) sets for the 
+set.seed(430)
+churn_split = createDataPartition(data$Attrition, p =0.8, list = FALSE)
+churn_train = data[churn_split, ]
+churn_test = data[-churn_split, ]
+dim(churn_train)
+dim(churn_test)
+```
+
+```{r}
+# create feature names
+y <- "Attrition"
+x <- setdiff(names(churn_train), y)
+```
+
+```{r}
+library(h2o)
+h2o.no_progress()
+h2o.init(max_mem_size = "2g")
+```
+
+
+```{r}
+# turn training set into h2o object
+train.h2o <- as.h2o(churn_train)
+
+```
+
+
+```{r}
+# training basic GBM model with defaults
+h2o.fit1 <- h2o.gbm(
+  x = x,
+  y = y,
+  training_frame = train.h2o,
+  nfolds = 5
+)
+
+# assess model results
+h2o.fit1
+```
+Similar to XGBoost, we can incorporate automated stopping so that we can crank up the number of trees but terminate training once model improvement decreases or stops. There is also an option to terminate training after so much time has passed (see max_runtime_secs). In this example, I train a default model with 5,000 trees but stop training after 10 consecutive trees have no improvement on the cross-validated error. In this case, training stops after 3828 trees and has a cross-validated RMSE of $24,684.
+
+Must drop constant columns before H2O
+```{r}
+train.h2o_nzv <- train.h2o[,-24]
+```
+
+```{r}
+# create feature names
+y <- "Attrition"
+x <- setdiff(names(train.h2o_nzv), y)
+```
+
+```{r}
+# training basic GBM model with defaults
+h2o.fit2 <- h2o.gbm(
+  x = x,
+  y = y,
+  training_frame = train.h2o_nzv,
+  nfolds = 5,
+  ntrees = 5000,
+  stopping_rounds = 10,
+  stopping_tolerance = 0,
+  seed = 123
+)
+
+# model stopped after xx trees
+h2o.fit2@parameters$ntrees
+```
+
+
+```{r}
+h2o.fit2
+```
+```{r}
+# cross validated RMSE
+h2o.rmse(h2o.fit2, xval = TRUE)
+```
+```{r}
+h2o.varimp_plot(h2o.fit2, num_of_features = 10)
+```
+```{r}
+h2o.partialPlot(h2o.fit2, data = train.h2o, cols = "MonthlyIncome")
+```
+```{r}
+# get a few observations to perform local interpretation on
+# convert test set to h2o object
+test.h2o <- as.h2o(churn_test)
+test.h2o_nzv <- test.h2o[,-24]
+local_obs <- test.h2o_nzv[1:2, ]
+local_obs
+# apply LIME
+library(lime)
+explainer <- lime(churn_train_nzv, h2o.fit2)
+explainer
+explanation <- explain(local_obs, explainer, n_features = 5)
+plot_features(explanation)
+```
+Predict
+```{r}
+# convert test set to h2o object
+test.h2o <- as.h2o(churn_test)
+test.h2o_nzv <- test.h2o[,-24]
+```
+
+
+```{r}
+# evaluate performance on new data
+h2o.performance(model = h2o.fit2, newdata = test.h2o)
+```
+
+
+```{r}
+predict_value <-h2o.predict(h2o.fit2, newdata = test.h2o)
+```
+
+```{r}
+predict_value$predict
+test.h2o$Attrition
+class(predict_value$predict)
+class(test.h2o$Attrition)
+```
+```{r}
+class(test.h2o$Attrition)
+class(as.factor(test.h2o$Attrition))
+```
+
+
+```{r}
+confusionMatrix(as.factor(predict_value$predict),as.factor(test.h2o$Attrition))
+```
+# Automate ML with H20
+```{r}
+#library(tidyverse)# include dplyr, tidr, ggplot2, tibble, readr, purr
+library(dplyr) # mutate, select, filter, summarize, arrange, group by 
+library(tidyr) # gather, spread, separate, extract, unite, %>%
+library(ggplot2)
+library(tibble) # provide tibble class (better than traditional data frame)
+library(readr) # read_csv, tsv, delim, table, log....
+library(purrr) # map, map_dbl, split,
+library(data.table)
+library(h2o)
+h2o.init()
+```
+
+```{r}
+path="WA_Fn-UseC_-HR-Employee-Attrition.csv"
+data <- fread(path)
+dim(data)
+# all character columns to factor:
+data <- mutate_if(data, is.character, as.factor)
+# Putting the original dataframe into an h2o format
+h2o_df <- as.h2o(data)
+
+# Splitting into training, validation and testing sets
+split_df <- h2o.splitFrame(h2o_df, c(0.7, 0.15), seed=12)
+# Obtaining our three types of sets into three separate values
+h2o_train <- h2o.assign(split_df[[1]], "train")
+h2o_validation <- h2o.assign(split_df[[2]], "validation")
+h2o_test <- h2o.assign(split_df[[2]], "test")
+```
+
+```{r}
+dim(data)
+dim(h2o_train)
+dim(h2o_validation)
+dim(h2o_test)
+```
+
+
+```{r}
+h2o.describe(h2o_train)
+```
+```{r}
+h2o_train
+```
+
+```{r}
+# Establish X and Y (Features and Labels)
+y <- "Attrition"
+x <- setdiff(names(h2o_train), y)
+```
+
+
+```{r}
+auto_ml <- h2o.automl(
+    y = y,
+    x = x,
+    training_frame = h2o_train,
+    #leaderboard_frame = h2o_validation,
+    project_name = "Attrition",
+    max_models = 10,
+    seed = 12
+)
+```
+
+
+```{r}
+# Check for the top models
+top_models <- auto_ml@leaderboard
+print(top_models)
+```
+
+
+```{r}
+# Get the best model
+# Our aim is to determine the feature importance
+model_id <- as.data.frame(top_models$model_id)[,1]
+best_family <- h2o.getModel(grep("StackedEnsemble_BestOfFamily", model_id, value=TRUE)[1])
+obtain_model <- h2o.getModel(best_family@model$metalearner$name)
+model_id
+best_family
+obtain_model
+```
+
+```{r}
+# How important is each model to the StackEnsemble
+h2o.varimp(obtain_model)
+```
+
+
+```{r}
+options(repr.plot.width=8, repr.plot.height=4) 
+h2o.varimp_plot(obtain_model)
+```
+
+
+```{r}
+xgb <- h2o.getModel(grep("XGBoost", model_id, value = TRUE)[1])
+
+# Examine the variable importance of the top XGBoost model
+# XGBoost can show the feature importance as oppose to the stack ensemble
+h2o.varimp(xgb)
+```
+
+
+```{r}
+# We can also plot the base learner contributions to the ensemble.
+h2o.varimp_plot(xgb)
+```
+# 5. IBM's attrition. Tackling class imbalance with GBM
+https://www.kaggle.com/aljaz91/ibm-s-attrition-tackling-class-imbalance-with-gbm
+
+Modeling (Random Forest & simple GBM)
+```{r}
+# Read data
+path="WA_Fn-UseC_-HR-Employee-Attrition.csv"
+data <- fread(path)
+dim(data)
+
+# Remove unnessary columns:
+data <-data %>%dplyr::select(-Over18,-EmployeeNumber, -EmployeeCount)
+# all character columns to factor:
+data <- mutate_if(data, is.character, as.factor)
+#data$Attrition<-ifelse(data$Attrition=="Yes", 1, 0)
+# Create training (80%) and test (20%) sets for the 
+set.seed(430)
+split = createDataPartition(data$Attrition, p =0.8, list = FALSE)
+train = data[split, ]
+test = data[-split, ]
+dim(train)
+dim(test)
+```
+
+# Random forest
+```{r}
+library(randomForest)
+library(caret)
+library(pROC)
+fit.forest <- randomForest(Attrition ~., data = train)
+rfpreds <- predict(fit.forest, test, type = "class")
+
+rocrf <- roc(as.numeric(test$Attrition), as.numeric(rfpreds))
+rocrf$auc
+confusionMatrix(rfpreds,test$Attrition,positive="Yes")
+```
+# Decision tree
+```{r}
+# Decision tree
+library(rpart)
+library(rpart.plot)
+dtree <- rpart(Attrition ~., data = train)
+preds <- predict(dtree, test, type = "class")
+
+rocv <- roc(as.numeric(test$Attrition), as.numeric(preds))
+rocv$auc
+confusionMatrix(preds,test$Attrition,positive="Yes")
+```
+
+
+```{r}
+# Pruning & plotting the tree
+
+dtreepr <- prune(dtree, cp = 0.01666667)
+predspr <- predict(dtreepr, test, type = "class")
+
+rocvpr <- roc(as.numeric(test$Attrition), as.numeric(predspr))
+rocvpr$auc
+
+rpart.plot(dtreepr, 
+           type = 4, 
+           extra = 104, 
+           tweak = 0.9, 
+           fallen.leaves = F)
+```
+# GBM
+```{r}
+
+# Setting the basic train control used in all GBM models
+
+ctrl <- trainControl(method = "cv",
+                     number = 5,
+                     summaryFunction = twoClassSummary,
+                     classProbs = TRUE)
+
+# Simple GBM
+
+gbmfit <- train(Attrition ~., 
+                data = train, 
+                method = "gbm", 
+                verbose = FALSE, 
+                preProcess = c("zv", "center", "scale"),
+                metric = "ROC", 
+                trControl = ctrl)
+
+gbmpreds <- predict(gbmfit, test)
+
+rocgbm <- roc(as.numeric(test$Attrition), as.numeric(gbmpreds))
+rocgbm$auc
+confusionMatrix(gbmpreds,test$Attrition,positive="Yes")
+```
+# Modeling (GBM with weighting, SMOTE and up & down-sampling)
+```{r}
+ctrl <- trainControl(method = "cv",
+                     number = 5,
+                     summaryFunction = twoClassSummary,
+                     classProbs = TRUE)
+# Use the same seed to ensure same cross-validation splits
+ctrl$seeds <- gbmfit$control$seeds
+ctrl$seeds
+```
+Maybe we should tackle the class imbalance? Note that usually this would be considered if the ratio between classes is 1:10 or higher; in our case it's 1:5, but still it may be justified since we have seen with the decision tree that our main problem is predicting those who actually leave (sensitivity).
+
+I will try different techniques: weighting (punishing the errors in the minority class), down-sampling (randomly removing cases from the majority class), up-sampling (randomly replicating instances in the minority class) and SMOTE (downsampling and synthesizing new minority cases).
+
+# Weighting 
+
+```{r}
+# Create model weights (they sum to one)
+table(train$Attrition)
+table(train$Attrition)[1]
+(1/table(train$Attrition)[1]) * 0.5
+(1/table(train$Attrition)[2]) * 0.5
+```
+```{r}
+library(DMwR)
+```
+
+```{r}
+model_weights <- ifelse(train$Attrition == "No",
+                        (1/table(train$Attrition)[1]) * 0.5,
+                        (1/table(train$Attrition)[2]) * 0.5)
+```
+
+```{r}
+weightedfit <- train(Attrition ~ .,
+                      data = train,
+                      method = "gbm",
+                      verbose = FALSE,
+                      weights = model_weights,
+                      metric = "ROC",
+                      trControl = ctrl)
+
+weightedpreds <- predict(weightedfit, test)
+rocweight <- roc(as.numeric(test$Attrition), as.numeric(weightedpreds))
+rocweight$auc
+confusionMatrix(weightedpreds,test$Attrition,positive="Yes")
+
+```
+
+```{r}
+# SMOTE 
+
+ctrl$sampling <- "smote"
+
+smotefit <- train(Attrition ~., 
+                  data = train, 
+                  method = "gbm", 
+                  verbose = FALSE, 
+                  metric = "ROC", 
+                  trControl = ctrl)
+
+smotepreds <- predict(smotefit, test)
+rocsmote <- roc(as.numeric(test$Attrition), as.numeric(smotepreds))
+rocsmote$auc
+confusionMatrix(smotepreds,test$Attrition,positive="Yes")
+```
+# UP-sampling
+```{r}
+ctrl$sampling <- "up"
+
+upfit <- train(Attrition ~., 
+               data = train, 
+               method = "gbm", 
+               verbose = FALSE, 
+               metric = "ROC", 
+               trControl = ctrl)
+
+uppreds <- predict(upfit, test)
+rocup <- roc(as.numeric(test$Attrition), as.numeric(uppreds))
+rocup$auc
+confusionMatrix(uppreds,test$Attrition,positive="Yes")
+```
+
+# DOWN-sampling
+```{r}
+ctrl$sampling <- "down"
+
+downfit <- train(Attrition ~., 
+                 data = train, 
+                 method = "gbm", 
+                 verbose = FALSE, 
+                 metric = "ROC", 
+                 trControl = ctrl)
+
+downpreds <- predict(downfit, test)
+rocdown <- roc(as.numeric(test$Attrition), as.numeric(downpreds))
+rocdown$auc
+confusionMatrix(downpreds,test$Attrition,positive="Yes")
+```
+
+```{r}
+plot(rocv, ylim = c(0,1), print.thres = T, print.thres.cex = 0.8, main = "ROC curves", col = "salmon")
+plot(rocrf, ylim = c(0,1), print.thres = T, print.thres.cex = 0.8, col = "darkolivegreen", add = T)
+plot(rocweight, ylim = c(0,1), print.thres = T, print.thres.cex = 0.8, col = "steelblue", add = T)
+plot(rocgbm, ylim = c(0,1), print.thres = T, print.thres.cex = 0.8, col = "burlywood", add = T)
+```
+Let us plot the variable importance list from our best model.
+
+```{r}
+library(gbm)
+ggplot(varImp(weightedfit)) + 
+geom_bar(stat = 'identity', fill = 'steelblue', color = 'black') + 
+scale_y_continuous(limits = c(0, 105), expand = c(0, 0)) +
+theme_light()
+```
+# Deep learning (problem with Keras )
+
+```{r}
+# Helper packages
+library(data.table)
+library(dplyr)         # for basic data wrangling
+library(caret)
+# Modeling packages
+library(keras)         # for fitting DNNs
+library(tfruns)        # for additional grid search & model training functions
+# Modeling helper package - not necessary for reproducibility
+library(tfestimators)  # provides grid search & model training interface
+```
+
+
+```{r}
+# Read data
+path="WA_Fn-UseC_-HR-Employee-Attrition.csv"
+data <- fread(path)
+dim(data)
+
+# Remove unnessary columns:
+data <-data %>%dplyr::select(-Over18,-EmployeeNumber, -EmployeeCount)
+# all character columns to factor:
+data <- mutate_if(data, is.character, as.factor)
+#data$Attrition<-ifelse(data$Attrition=="Yes", 1, 0)
+
+```
+
+```{r}
+dummy <- dummyVars(~ ., data=data %>% dplyr::select(-Attrition))
+newdata <- data.frame(predict(dummy, newdata = data %>% dplyr::select(-Attrition)) )
+newdata["Attrition"] <-data$Attrition
+newdata
+```
+
+```{r}
+# Create training (80%) and test (20%) sets for the 
+set.seed(430)
+split = createDataPartition(newdata$Attrition, p =0.8, list = FALSE)
+train = newdata[split, ]
+test = newdata[-split, ]
+dim(train)
+dim(test)
+```
+
+```{r}
+library(superml)
+lbl = LabelEncoder$new()
+
+# Size and format of data frame
+X_train <- scale(train %>% select(-Attrition))
+y_train <- lbl$fit_transform(train$Attrition)
+X_test <- scale(test %>% select(-Attrition))
+y_test <- lbl$fit_transform(test$Attrition)
+```
+```{r}
+ncol(X_train)
+```
+```{r}
+install_tensorflow(method = "virtualenv")
+```
+
+```{r}
+# Network design
+ model <- keras_model_sequential()
+ model %>%# Input layer
+ layer_dense(units = 50, activation = "relu", input_shape =  ncol(X_train)) %>% 
+ layer_dropout(rate = 0.4) %>% 
+# Hidden layer
+ layer_dense(units = 20, activation = "relu") %>%
+# Output layer
+ layer_dropout(rate = 0.3) %>%
+ layer_dense(units = 2, activation = "sigmoid")
+```
+
+
+```{r}
+# Network config
+history <- model %>% compile(
+ loss = "binary_crossentropy",
+ optimizer = "adam",
+ metrics = c("accuracy")
+)# Running our data
+model %>% fit(
+ X_train, y_train, 
+ epochs = 100, 
+ batch_size = 50,
+ validation_split = 0.3
+)summary(model)
+```
+
+
+```{r}
+# Calculating accuracy
+predictions <- model %>% predict_classes(X_test)# Confusion Matrix
+df.test$diagnosis_B=as.integer(df.test$diagnosis_B)-1
+table(factor(predictions, levels=min(df.test$diagnosis_B):max(df.test$diagnosis_B)),factor(df.test$diagnosis_B, levels=min(df.test$diagnosis_B):max(df.test$diagnosis_B)))
+```
+
+
+```{r}
+```
+
+# [Other] ML Follow statistic machine learning BOOK
+
+```{r}
+# Read data
+path="WA_Fn-UseC_-HR-Employee-Attrition.csv"
+data <- fread(path)
+dim(data)
+# Remove unnessary columns:
+data <-data %>%dplyr::select(-Over18,-EmployeeNumber, -EmployeeCount)
+# all character columns to factor:
+data <- mutate_if(data, is.character, as.factor)
+# Create training (70%) and test (30%) sets for the 
+# rsample::attrition data.
+set.seed(123)  # for reproducibility
+churn_split <- initial_split(data, prop = .8, strata = "Attrition")
+churn_train <- training(churn_split)
+churn_test  <- testing(churn_split)
+dim(churn_train)
+dim(churn_test)
+```
+At first glance, it might appear as if the use of createDataPartition() is no different than our previous use of sample(). However, createDataPartition() tries to ensure a split that has a similar distribution of the supplied variable in both datasets. See the documentation for details.
+
+```{r}
+set.seed(430)
+churn_split = createDataPartition(data$Attrition, p =0.8, list = FALSE)
+churn_train = data[churn_split, ]
+churn_test = data[-churn_split, ]
+dim(churn_train)
+dim(churn_test)
+```
+# Simple additive logistic regression.
+
+```{r}
+glm_mod = train(
+  form = Attrition ~ .,
+  data = churn_train,
+  trControl = trainControl(method = "cv", number = 5),
+  method = "glm",
+  family = "binomial"
+)
+glm_mod
+```
+
+```{r}
+#summary(glm_mod)
+```
+
+```{r}
+pred_class <- predict(glm_mod, churn_test)
+# create confusion matrix (pp chuan phai relevel)
+confusionMatrix(
+  data = relevel(pred_class, ref = "Yes"), 
+  reference = relevel(churn_test$Attrition, ref = "Yes")
+)
+```
+# KNN
+```{r}
+knn_mod = train(
+  Attrition ~ .,
+  data = churn_train,
+  method = "knn",
+  trControl = trainControl(method = "cv", number = 5)
+)
+knn_mod
+```
+Here we are again using 5-fold cross-validation and no pre-processing. Notice that we now have multiple results, for k = 5, k = 7, and k = 9.
+
+Let’s modifying this training by introducing pre-processing, and specifying our own tuning parameters, instead of the default values above.
+
+Perprocess nzv: For some other models, this might be an issue (especially if we resample or down-sample the data). We can add a filter to check for zero- or near zero-variance predictors prior to running the pre-processing calculations:
+```{r}
+knn_mod = train(
+  Attrition ~ .,
+  data = churn_train,
+  method = "knn",
+  trControl = trainControl(method = "cv", number = 5),
+  preProcess = c("nzv","center", "scale"),
+  tuneGrid = expand.grid(k = seq(1, 101, by = 2))
+)
+```
+
+
+```{r}
+head(knn_mod$results, 5)
+```
+
+
+```{r}
+plot(knn_mod)
+```
+
+
+```{r}
+knn_mod$bestTune
+```
+
+
+```{r}
+pred_class <- predict(knn_mod, churn_test)
+# create confusion matrix (pp chuan phai relevel)
+confusionMatrix(
+  data = relevel(pred_class, ref = "Yes"), 
+  reference = relevel(churn_test$Attrition, ref = "Yes")
+)
+```
+
+# 7. Check all method
+```{r}
+#library(tidyverse)# include dplyr, tidr, ggplot2, tibble, readr, purr
+library(dplyr) # mutate, select, filter, summarize, arrange, group by 
+library(tidyr) # gather, spread, separate, extract, unite, %>%
+library(ggplot2)
+library(tibble) # provide tibble class (better than traditional data frame)
+library(readr) # read_csv, tsv, delim, table, log....
+library(purrr) # map, map_dbl, split,
+library(data.table)
+library(rsample)   # for data splitting
+library(caret)     # for model packages
+library(recipes)
+```
+
+```{r}
+# Read data
+path="WA_Fn-UseC_-HR-Employee-Attrition.csv"
+data <- fread(path)
+dim(data)
+
+# Remove unnessary columns:
+data <-data %>%dplyr::select(-Over18,-EmployeeNumber, -EmployeeCount)
+# all character columns to factor:
+data <- mutate_if(data, is.character, as.factor)
+#data$Attrition<-ifelse(data$Attrition=="Yes", 1, 0)
+# Create training (80%) and test (20%) sets for the 
+set.seed(430)
+split = createDataPartition(data$Attrition, p =0.8, list = FALSE)
+train = data[split, ]
+test = data[-split, ]
+dim(train)
+dim(test)
+```
+```{r}
+train
+#sum(is.na(train))
+```
+
+
+```{r}
+blueprint <- recipe(Attrition ~ ., data = train) %>%
+  step_nzv(all_nominal())  %>% #Remove near-zero variance features like sex, yes/no...
+  step_nzv(all_numeric(), -all_outcomes())  %>%
+  #step_knnimpute(all_predictors(), neighbors = 6) %>%  # Impute, very slow in large data in train, need step outside
+  step_YeoJohnson(all_numeric(),-all_outcomes()) %>% # Remove skewness
+  #step_integer(matches("Qual|Cond|QC|Qu")) %>% # Ordinal encoder
+  step_center(all_numeric(), -all_outcomes()) %>% # center 
+  step_scale(all_numeric(), -all_outcomes()) #%>% # scale
+  #step_dummy(all_nominal(), one_hot = TRUE) %>% 
+  #step_pca(all_numeric(), -all_outcomes()) #Perform dimension reduction
+blueprint
+```
+```{r}
+prepare <- prep(blueprint, training = train)
+prepare
+```
+
+
+```{r}
+baked_train <- bake(prepare, new_data = train)
+baked_test <- bake(prepare, new_data = test)
+baked_train
+```
+```{r}
+sum(is.na(train))
+sum(is.na(baked_train))
+```
+```{r}
+sapply(baked_train, function(x) sum(is.na(x)))
+```
+
+```{r}
+library(doParallel)
+cl <-makePSOCKcluster(5)
+registerDoParallel(cl)
+```
+
+
+```{r}
+cv <- trainControl(
+  method = "cv", 
+  number = 4)
+
+metric <- "Accuracy"
+# Create blank modelList
+modelList <- vector(mode = "list", length = 0)
+timeList <- vector(mode = "list", length = 0)
+
+list_model <- c("knn","rpart","lda","svmRadial","ranger","LogitBoost","naive_bayes","gbm") 
+
+for (model_name in list_model){
+  print(model_name)
+  set.seed(7)
+  start_time <- lubridate::second(Sys.time())
+  
+  Model <- train(Attrition~., data=baked_train, method=model_name, metric=metric, trControl=cv)
+  
+  end_time <- lubridate::second(Sys.time())
+  time <- (end_time - start_time)
+  print(time)
+  
+  modelList[[model_name]] <- Model
+  timeList[[model_name]] <- time
+}
+```
+
+
+```{r}
+bwplot(resamples(modelList))
+```
+
+
+```{r}
+time_s <- t(data.frame(timeList)) # transpose
+time_df<-data.frame(time_s)
+# name id column in R
+time_df <- cbind(model_name= rownames(time_df), time= time_df)
+rownames(time_df) <- NULL
+ggplot(time_df,aes(model_name,time_s))+geom_point()+ geom_line(aes(group = 1))
+```
+
+
+```{r}
+summary(resamples(modelList))
+```
+Prediction:
+
+```{r}
+for (model_name in names(modelList) ){
+  print(model_name)
+  pred <- predict(modelList[[model_name]], baked_test)
+  print(confusionMatrix(data = relevel(pred, ref = "Yes"), 
+  reference = relevel(baked_test$Attrition, ref = "Yes")) )
+}
+```
+
+# H2O all ML
+
+```{r}
+# Read data
+path="WA_Fn-UseC_-HR-Employee-Attrition.csv"
+data <- fread(path)
+dim(data)
+
+# Remove unnessary columns:
+data <-data %>%dplyr::select(-Over18,-EmployeeNumber, -EmployeeCount)
+# all character columns to factor:
+data <- mutate_if(data, is.character, as.factor)
+#data$Attrition<-ifelse(data$Attrition=="Yes", 1, 0)
+# Create training (80%) and test (20%) sets for the 
+set.seed(430)
+split = createDataPartition(data$Attrition, p =0.8, list = FALSE)
+train = data[split, ]
+test = data[-split, ]
+dim(train)
+dim(test)
+```
+
+```{r}
+blueprint <- recipe(Attrition ~ ., data = train) %>%
+  step_nzv(all_nominal())  %>% #Remove near-zero variance features like sex, yes/no...
+  step_nzv(all_numeric(), -all_outcomes())  %>%
+  #step_knnimpute(all_predictors(), neighbors = 6) %>%  # Impute, very slow in large data in train, need step outside
+  step_YeoJohnson(all_numeric(),-all_outcomes()) %>% # Remove skewness
+  #step_integer(matches("Qual|Cond|QC|Qu")) %>% # Ordinal encoder
+  step_center(all_numeric(), -all_outcomes()) %>% # center 
+  step_scale(all_numeric(), -all_outcomes()) #%>% # scale
+  #step_dummy(all_nominal(), one_hot = TRUE) %>% 
+  #step_pca(all_numeric(), -all_outcomes()) #Perform dimension reduction
+prepare <- prep(blueprint, training = train)
+baked_train <- bake(prepare, new_data = train)
+baked_test <- bake(prepare, new_data = test)
+```
+
+```{r}
+library(h2o)
+h2o.no_progress()
+h2o.init(max_mem_size = "5g")
+```
+
+
+```{r}
+# convert training data to h2o object
+train_h2o <- as.h2o(baked_train)
+test_h2o <- as.h2o(baked_test)
+# set the response column to Sale_Price
+response <- "Attrition"
+n_features <- length(setdiff(names(baked_train), "Attrition"))
+# set the predictor names
+predictors <- setdiff(colnames(baked_train), response)
+```
+
+
+```{r}
+start_time <- lubridate::second(Sys.time())
+h2o_rf1 <- h2o.randomForest(
+    x = predictors, 
+    y = response,
+    training_frame = train_h2o, 
+    #ntrees = n_features * 10, # very slow if high dim, not pca
+    #ntrees=300,
+    seed = 123
+)
+end_time <- lubridate::second(Sys.time())
+h2o_rf1
+pred <-h2o.predict(h2o_rf1, newdata = test_h2o)
+time <- (end_time - start_time)
+print(time)
+```
+```{r}
+pred$predict
+baked_test$Attrition
+class(pred$predict)
+class(baked_test$Attrition)
+```
+
+```{r}
+h2o.performance(h2o_rf1,test_h2o)
+```
+
+
+```{r}
+vip::vip(h2o_rf1, num_features = 25)
+```
+
+XGBoost
+
+```{r}
+start_time <- lubridate::second(Sys.time())
+h2o_model <- h2o.xgboost(
+    x = predictors, 
+    y = response,
+    training_frame = train_h2o, 
+    seed = 123
+)
+end_time <- lubridate::second(Sys.time())
+h2o_model
+pred <-h2o.predict(h2o_model, newdata = test_h2o)
+time <- (end_time - start_time)
+print(time)
+# From 2.7 minutes to 1.69 s for xgboost
+```
+
+```{r}
+vip::vip(h2o_model, num_features = 25)
+```
+
+
+```{r}
+h2o.performance(h2o_model,test_h2o)
+```
+Deep learning
+
+```{r}
+start_time <- lubridate::second(Sys.time())
+h2o_dl <- h2o.deeplearning(
+    x = predictors, 
+    y = response,
+    training_frame = train_h2o, 
+    hidden = 25,
+    seed = 123
+)
+end_time <- lubridate::second(Sys.time())
+h2o_dl
+pred <-h2o.predict(h2o_dl, newdata = test_h2o)
+
+time <- (end_time - start_time)
+print(time)
+```
+
+
+```{r}
+h2o.performance(h2o_dl,test_h2o)
+```
+
+# LIME: Machine Learning Model Interpretability with LIME
+https://www.business-science.io/business/2018/06/25/lime-local-feature-interpretation.html
+
+```{r}
+# required packages
+# install vip from github repo: devtools::install_github("koalaverse/vip")
+library(lime)       # ML local interpretation
+library(vip)        # ML global interpretation
+library(pdp)        # ML global interpretation
+library(ggplot2)    # visualization pkg leveraged by above packages
+library(caret)      # ML model building
+library(h2o)        # ML model building
+
+# other useful packages
+library(tidyverse)  # Use tibble, dplyr
+library(rsample)    # Get HR Data via rsample::attrition
+library(gridExtra)  # Plot multiple lime plots on one graph
+
+# initialize h2o
+h2o.init()
+```
+
+
+```{r}
+h2o.no_progress()
+```
+
+```{r}
+library(modeldata) # data for some ML model
+data("attrition")
+```
+
+
+```{r}
+# create data sets
+df <- attrition %>% 
+  mutate_if(is.ordered, factor, ordered = FALSE) %>%
+  mutate(Attrition = factor(Attrition, levels = c("Yes", "No")))
+df
+```
+For this exemplar I retain most of the observations in the training data sets and retain 5 observations in the local_obs set. These 5 observations are going to be treated as new observations that we wish to understand why the particular predicted response was made.
+
+```{r}
+index <- 1:5
+train_obs <- df[-index, ]
+local_obs <- df[index, ]
+
+# create h2o objects for modeling
+y <- "Attrition"
+x <- setdiff(names(train_obs), y)
+train_obs.h2o <- as.h2o(train_obs)
+local_obs.h2o <- as.h2o(local_obs)
+```
+
+
+```{r}
+train_obs.h2o
+local_obs.h2o
+```
+We will explore how to visualize a few of the more popular machine learning algorithms and packages in R. For brevity I train default models and do not emphasize hyperparameter tuning. The following produces:
+
+Random forest model using ranger via the caret package
+Random forest model using h2o
+Elastic net model using h2o
+GBM model using h2o
+Random forest model using ranger directly
+
+```{r}
+# Create Random Forest model with ranger via caret
+fit.caret <- train(
+  Attrition ~ ., 
+  data       = train_obs, 
+  method     = 'ranger',
+  trControl  = trainControl(method = "cv", number = 5, classProbs = TRUE),
+  tuneLength = 1,
+  importance = 'impurity'
+  )
+
+# create h2o models
+h2o_rf  <- h2o.randomForest(x, y, training_frame = train_obs.h2o)
+h2o_glm <- h2o.glm(x, y, training_frame = train_obs.h2o, family = "binomial")
+h2o_gbm <- h2o.gbm(x, y, training_frame = train_obs.h2o)
+
+# ranger model --> model type not built in to LIME
+fit.ranger <- ranger::ranger(
+  Attrition ~ ., 
+  data        = train_obs, 
+  importance  = 'impurity',
+  probability = TRUE
+)
+```
+
+# Global Interpretation
+```{r}
+vip(fit.ranger) + ggtitle("ranger: RF")
+```
+```{r}
+# built-in PDP support in H2O
+h2o.partialPlot(h2o_rf, data = train_obs.h2o, cols = "MonthlyIncome")
+```
+
+
+```{r}
+fit.ranger %>%
+  pdp::partial(pred.var = "MonthlyIncome", grid.resolution = 25, ice = TRUE) %>%
+  autoplot(rug = TRUE, train = train_obs, alpha = 0.1, center = TRUE)
+```
+# Local Interpretation
+
+```{r}
+explainer_caret <- lime::lime(train_obs, fit.caret, n_bins = 5)
+
+class(explainer_caret)
+```
+
+
+```{r}
+summary(explainer_caret)
+```
+
+
+```{r}
+explanation_caret <- lime::explain(
+  x               = local_obs, 
+  explainer       = explainer_caret, 
+  n_permutations  = 5000,
+  dist_fun        = "gower",
+  kernel_width    = .75,
+  n_features      = 5, 
+  feature_select  = "highest_weights",
+  labels          = "Yes"
+  )
+```
+
+
+```{r}
+tibble::glimpse(explanation_caret)
+```
+```{r}
+plot_features(explanation_caret)
+```
+
+
+```{r}
+plot_explanations(explanation_caret)
+```
+
+Tuning LIME
+```{r}
+# tune LIME algorithm
+explanation_caret <- lime::explain(
+  x               = local_obs, 
+  explainer       = explainer_caret, 
+  n_permutations  = 5000,
+  dist_fun        = "manhattan",
+  kernel_width    = 3,
+  n_features      = 5, 
+  feature_select  = "lasso_path",
+  labels          = "Yes"
+  )
+
+plot_features(explanation_caret)
+```
+
+Supported vs Non-support models
+
+Currently, lime supports supervised models produced in caret, mlr, xgboost, h2o, keras, and MASS::lda. Consequently, any supervised models created with these packages will function just fine with lime.
+```{r}
+explainer_h2o_rf  <- lime(train_obs, h2o_rf, n_bins = 5)
+explainer_h2o_glm <- lime(train_obs, h2o_glm, n_bins = 5)
+explainer_h2o_gbm <- lime(train_obs, h2o_gbm, n_bins = 5)
+
+explanation_rf  <- lime::explain(local_obs, 
+                                 explainer_h2o_rf, 
+                                 n_features      = 5, 
+                                 labels          = "Yes", 
+                                 kernel_width    = .1, 
+                                 feature_select  = "highest_weights")
+explanation_glm <- lime::explain(local_obs, 
+                                 explainer_h2o_glm, 
+                                 n_features      = 5, 
+                                 labels          = "Yes", 
+                                 kernel_width    = .1, 
+                                 feature_select  = "highest_weights")
+explanation_gbm <- lime::explain(local_obs, 
+                                 explainer_h2o_gbm, 
+                                 n_features      = 5, 
+                                 labels          = "Yes", 
+                                 kernel_width    = .1, 
+                                 feature_select  = "highest_weights")
+
+p1 <- plot_features(explanation_rf,  ncol = 1) + ggtitle("rf")
+p2 <- plot_features(explanation_glm, ncol = 1) + ggtitle("glm")
+p3 <- plot_features(explanation_gbm, ncol = 1) + ggtitle("gbm")
+
+gridExtra::grid.arrange(p1, p2, p3, nrow = 1)
+```
+
+## Machine learning model KAGGLE
+```{r}
+library(tidyverse) # metapackage of all tidyverse packages
+library(data.table) # fast read file
+library(rsample)   # for data splitting
+library(caret)     # for model packages
+library(recipes)
+```
+
+
+```{r}
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+path <- "WA_Fn-UseC_-HR-Employee-Attrition.csv"
+data <- fread(path)
+```
+
+
+```{r}
+# Remove unnessary columns:
+data <-data %>%dplyr::select(-Over18,-EmployeeNumber, -EmployeeCount)
+# all character columns to factor:
+data <- mutate_if(data, is.character, as.factor)
+#data$Attrition<-ifelse(data$Attrition=="Yes", 1, 0)
+# Create training (80%) and test (20%) sets for the 
+set.seed(430)
+split = createDataPartition(data$Attrition, p =0.8, list = FALSE)
+train = data[split, ]
+test = data[-split, ]
+dim(train)
+dim(test)
+```
+
+```{r}
+blueprint <- recipe(Attrition ~ ., data = train) %>%
+  step_nzv(all_numeric(), -all_outcomes())  %>%  #Remove near-zero variance features like sex, yes/no...
+  #step_knnimpute(all_predictors(), neighbors = 6) %>%  # Impute, very slow in large data in train, need step outside
+  step_YeoJohnson(all_numeric(),-all_outcomes()) %>% # Remove skewness
+  #step_integer(matches("Qual|Cond|QC|Qu")) %>% # Ordinal encoder
+  step_center(all_numeric(), -all_outcomes()) %>% # center 
+  step_scale(all_numeric(), -all_outcomes()) #%>% # scale
+  #step_dummy(all_nominal(), one_hot = TRUE) %>% 
+  #step_pca(all_numeric(), -all_outcomes()) #Perform dimension reduction
+blueprint
+```
+
+
+```{r}
+prepare <- prep(blueprint, training = train)
+baked_train <- bake(prepare, new_data = train)
+baked_test <- bake(prepare, new_data = test)
+head(baked_train)
+```
+
+
+```{r}
+library(h2o)
+h2o.no_progress()
+h2o.init()
+```
+
+
+```{r}
+# convert training data to h2o object
+train_h2o <- as.h2o(baked_train)
+test_h2o <- as.h2o(baked_test)
+# set the response column to Sale_Price
+response <- "Attrition"
+n_features <- length(setdiff(names(baked_train), "Attrition"))
+# set the predictor names
+predictors <- setdiff(colnames(baked_train), response)
+```
+
+```{r}
+start_time <- lubridate::minute(Sys.time())
+h2o_model <- h2o.xgboost(
+    x = predictors, 
+    y = response,
+    training_frame = train_h2o, 
+    seed = 123
+)
+end_time <- lubridate::minute(Sys.time())
+#h2o_model
+time <- (end_time - start_time)
+print(time)
+```
+
+```{r}
+# Apply h2o model to test set
+pred <-h2o.predict(h2o_model, newdata = test_h2o)
+h2o.performance(h2o_model,test_h2o)
+```
+
+```{r}
+# save the model
+model_path <- h2o.saveModel(object = h2o_model, path = getwd(), force = TRUE)
+print(model_path)
+```
+
+```{r}
+# load the model
+saved_model <- h2o.loadModel(model_path)
+```
+
+```{r}
+pred <-h2o.predict(saved_model, newdata = test_h2o)
+h2o.performance(h2o_model,test_h2o)
+```
+
+## New method 
+```{r}
+library(data.table)
+library(tidyverse)
+library(rsample)   # for data splitting
+library(h2o)
+library(caret)
+h2o.no_progress()
+h2o.init()
+```
+
+```{r}
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+path <- "WA_Fn-UseC_-HR-Employee-Attrition.csv"
+data <- fread(path)
+```
+
+```{r}
+
+#data$Attrition<-ifelse(data$Attrition=="Yes", 1, 0)
+# Create training (80%) and test (20%) sets for the 
+set.seed(430)
+split = createDataPartition(data$Attrition, p =0.8, list = FALSE)
+train = data[split, ]
+test = data[-split, ]
+```
+Convert to factor
+```{r}
+# all character columns to factor:
+train <- mutate_if(train, is.character, as.factor)
+```
+
+Clean the Near Zero Variance Variables.
+```{r}
+column_near_zero_var <-nearZeroVar(train)
+column_near_zero_var
+```
+
+```{r}
+train <- train[,-..column_near_zero_var]
+```
+
+With tree method, no need to standar scaler, remove null value, encoder (due to factor transform)...
+```{r}
+test <- mutate_if(test, is.character, as.factor)
+test <- test[,-..column_near_zero_var]
+```
+
+```{r}
+# convert training data to h2o object
+train_h2o <- as.h2o(train)
+test_h2o <- as.h2o(test)
+# set the response column to Sale_Price
+response <- "Attrition"
+n_features <- length(setdiff(names(train), "Attrition"))
+# set the predictor names
+predictors <- setdiff(colnames(train), response)
+```
+
+```{r}
+start_time <- lubridate::minute(Sys.time())
+h2o_model <- h2o.gbm(
+    x = predictors, 
+    y = response,
+    training_frame = train_h2o, 
+    seed = 123
+)
+end_time <- lubridate::minute(Sys.time())
+#h2o_model
+time <- (end_time - start_time)
+print(time)
+```
+
+```{r}
+# Apply h2o model to test set
+pred <-h2o.predict(h2o_model, newdata = test_h2o)
+h2o.performance(h2o_model,test_h2o)
+```
+
+```{r}
+getwd()
+```
+
+```{r}
+# save the model
+model_path <- h2o.saveModel(object = h2o_model, path = getwd(), force = TRUE)
+print(model_path)
+```
+
+```{r}
+# load the model
+model_path <- "GBM_model_R_1610154635473_1"
+saved_model <- h2o.loadModel(model_path)
+```
+```{r}
+performance <- h2o.performance(saved_model,test_h2o)
+performance
+```
+```{r}
+as.data.frame(h2o.performance)
+```
+
+Explain model
+```{r}
+perf <- h2o.performance(saved_model, newdata = test_h2o)
+plot(perf, type = "roc")
+```
+
+## Create data for predict
+```{r}
+train
+```
+```{r}
+dim(data)
+```
+
+```{r}
+num_input <- 2
+employ.data <- data.frame(matrix(ncol = dim(data)[2], nrow = num_input))
+names(employ.data) <- colnames(data)
+
+```
+
+```{r}
+employ.data$MonthlyIncome <- c(2000,5000) 
+employ.data$OverTime <- c("Yes","No")
+employ.data$DailyRate <- c(1000,591)
+employ.data$MonthlyRate <- c(9964,1000)
+employ.data$DistanceFromHome <- c(24,5)
+employ.data$Age <- c(25,40)
+employ.data$StockOptionLevel <- c(1,3)
+employ.data$RelationshipSatisfaction <- c(1,3)
+```
+
+```{r}
+employ.data <- mutate_if(employ.data, is.character, as.factor)
+#employ.data <- employ.data[,-..column_near_zero_var]
+employ.data <- as.h2o(employ.data)
+```
+
+```{r}
+pred <-h2o.predict(saved_model, newdata = employ.data)
+pred
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+

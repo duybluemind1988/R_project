@@ -1,0 +1,315 @@
+---
+title: "Job attrition analytyic"
+author: "Nguyen Ngoc Duy"
+date: "Jan 9, 2021"
+output: ioslides_presentation
+---
+
+```{r setup, include=FALSE,message = FALSE,warning = FALSE}
+knitr::opts_chunk$set(echo = FALSE,message = FALSE,warning = FALSE)
+```
+## Some information
+
+- Github link to shiniapp code, data file and presentation file:
+https://github.com/duybluemind1988/datasciencecoursera/tree/main/9.%20Develop%20Data%20product/Job_attrition
+
+- Job attrition instroduction:
+Uncover the factors that lead to employee attrition and explore important questions such as ‘show me a breakdown of distance from home by job role and attrition’ or ‘compare average monthly income by education and attrition’. This is a fictional data set created by IBM data scientists.
+
+- Link to Kaggle job attrition information:
+https://www.kaggle.com/pavansubhasht/ibm-hr-analytics-attrition-dataset
+
+```{r message = FALSE,warning = FALSE,include=FALSE}
+library(data.table)
+library(tidyverse)
+library(rsample)   # for data splitting
+library(h2o)
+library(caret)
+h2o.no_progress()
+h2o.init()
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+path <- "WA_Fn-UseC_-HR-Employee-Attrition.csv"
+data <- fread(path)
+# Create training (80%) and test (20%) sets for the 
+set.seed(430)
+split = createDataPartition(data$Attrition, p =0.8, list = FALSE)
+train = data[split, ]
+test = data[-split, ]
+# all character columns to factor:
+train <- mutate_if(train, is.character, as.factor)
+column_near_zero_var <-nearZeroVar(train)
+train <- train[,-..column_near_zero_var]
+test <- mutate_if(test, is.character, as.factor)
+test <- test[,-..column_near_zero_var]
+# convert training data to h2o object
+train_h2o <- as.h2o(train)
+test_h2o <- as.h2o(test)
+```
+## Plot categorical vs catagorical
+Compare Attrition percentage between business travel categorical
+```{r}
+Categorical_vs_categorical_plot <- function(data,group_col,fill_col){
+data %>%
+  group_by_(group_col, fill_col) %>%
+  summarize(n = n()) %>% 
+  mutate(pct = n/sum(n),lbl = scales::percent(pct))%>% 
+  ggplot(aes_(x = group_col,y = ~pct,
+           fill = fill_col)) +
+  geom_bar(stat = "identity",
+           position = "fill") +
+  scale_y_continuous(breaks = seq(0, 1, .2),label =scales::percent) +
+  geom_text(aes(label = lbl), 
+            size = 3, 
+            position = position_stack(vjust = 0.5)) +
+  #scale_fill_brewer(palette = "Set2") +
+  labs(y = "Percent",x = "Attrition",title = "Compare attrition accross category")+
+  theme_minimal()  
+  
+}
+Categorical_vs_categorical_plot(data,~Attrition,~BusinessTravel)
+```
+## Plot Categorical vs. Quantitative
+```{r}
+Categorical_vs_quantitative_plot <- function(data,categorical_col,quantitative_col){
+  # plot the distribution using violin and boxplots
+  ggplot(data, aes_(x = categorical_col, 
+                     y = quantitative_col)) +
+  geom_violin(fill = "cornflowerblue") +
+  geom_boxplot(width = .2, 
+               fill = "orange",
+               outlier.color = "orange",
+               outlier.size = 2) 
+}
+Categorical_vs_quantitative_plot(data,~Attrition,~Age)
+#Categorical_vs_quantitative_plot(data,~Attrition,~DistanceFromHome)
+#Categorical_vs_quantitative_plot(data,~Attrition,~Education)
+
+```
+```{r}
+facet_plot <- function(data,categorical_col,quantitative_col,facet_col){
+  # plot the distribution using violin and boxplots
+  ggplot(data, aes_(x = categorical_col, 
+                     y = quantitative_col)) +
+  geom_violin(fill = "cornflowerblue") +
+  geom_boxplot(width = .2, 
+               fill = "orange",
+               outlier.color = "orange",
+               outlier.size = 2) +
+  facet_wrap(facet_col) +
+  labs(title=facet_col)
+}
+
+facet_plot(data,~Attrition,~MonthlyIncome,~Department)
+#facet_plot(data,~Attrition,~MonthlyIncome,~JobRole)
+#facet_plot(data,~Attrition,~MonthlyIncome,~JobSatisfaction)
+#facet_plot(data,~Attrition,~MonthlyIncome,~PerformanceRating)
+```
+
+
+# Train model
+
+```{r}
+
+#data$Attrition<-ifelse(data$Attrition=="Yes", 1, 0)
+# Create training (80%) and test (20%) sets for the 
+set.seed(430)
+split = createDataPartition(data$Attrition, p =0.8, list = FALSE)
+train = data[split, ]
+test = data[-split, ]
+```
+Convert to factor
+```{r}
+# all character columns to factor:
+train <- mutate_if(train, is.character, as.factor)
+```
+
+Clean the Near Zero Variance Variables.
+```{r}
+#column_near_zero_var <-nearZeroVar(train)
+#column_near_zero_var
+```
+
+```{r}
+#train <- train[,-..column_near_zero_var]
+```
+
+With tree method, no need to standar scaler, remove null value, encoder (due to factor transform)...
+```{r}
+test <- mutate_if(test, is.character, as.factor)
+test <- test[,-..column_near_zero_var]
+```
+
+```{r}
+# convert training data to h2o object
+train_h2o <- as.h2o(train)
+test_h2o <- as.h2o(test)
+# set the response column to Sale_Price
+response <- "Attrition"
+n_features <- length(setdiff(names(train), "Attrition"))
+# set the predictor names
+predictors <- setdiff(colnames(train), response)
+```
+
+```{r}
+start_time <- lubridate::minute(Sys.time())
+h2o_model <- h2o.gbm(
+    x = predictors, 
+    y = response,
+    training_frame = train_h2o, 
+    nfolds=5,
+    seed = 123
+)
+end_time <- lubridate::minute(Sys.time())
+#h2o_model
+time <- (end_time - start_time)
+print(time)
+```
+Evaluate test data set
+```{r}
+# Apply h2o model to test set
+test_pred <-h2o.predict(h2o_model, newdata = test_h2o)
+h2o.performance(h2o_model,test_h2o)
+```
+https://groups.google.com/g/h2ostream/c/TkNkMFprzf0
+
+h2o.predict uses .5 threshold for class prediction.
+
+h2o.performance uses the threshold that maximizes F1 by default.
+
+these thresholds are not in general the same.
+
+```{r}
+table(as.data.frame(test_h2o)$Attrition)
+table( as.data.frame(test_pred)$predict)
+```
+```{r}
+# Confusion matrix, number of cases
+table(as.data.frame(test_h2o)$Attrition, as.data.frame(test_pred)$predict)
+```
+```{r}
+#install.packages("mltools")
+library(mltools)
+mcc(as.data.frame(test_pred)$predict,as.data.frame(test_h2o)$Attrition) # 0.4520577
+```
+```{r}
+#install.packages("Metrics")
+library(Metrics)
+Metrics::f1(as.data.frame(test_h2o)$Attrition,as.data.frame(test_pred)$predict)
+Metrics::precision(as.data.frame(test_h2o)$Attrition,as.data.frame(test_pred)$predict)
+Metrics::recall(as.data.frame(test_h2o)$Attrition,as.data.frame(test_pred)$predict)
+Metrics::auc(as.data.frame(test_h2o)$Attrition,as.data.frame(test_pred)$predict)
+```
+
+```{r}
+confusionMatrix(as.data.frame(test_pred)$predict,as.data.frame(test_h2o)$Attrition,positive = "Yes")
+```
+```{r}
+confusionMatrix(
+  data = relevel(as.data.frame(test_pred)$predict, ref = "Yes"), 
+  reference = relevel(as.data.frame(test_h2o)$Attrition, ref = "Yes")
+)
+```
+
+Evaluate train data set
+```{r}
+h2o.performance(h2o_model,train=TRUE)
+```
+
+```{r}
+table(as.data.frame(train_h2o)$Attrition)
+```
+
+```{r}
+train_pred <-h2o.predict(h2o_model, newdata = train_h2o)
+confusionMatrix(as.data.frame(train_pred)$predict,as.data.frame(train_h2o)$Attrition,positive = "Yes")
+```
+
+```{r}
+getwd()
+```
+
+# save the model
+```{r}
+model_path <- h2o.saveModel(object = h2o_model, path = getwd(), force = TRUE)
+print(model_path)
+```
+
+# Load the model
+
+```{r}
+# load the model
+model_path <- "GBM_model_R_1610154635473_1"
+h2o_model <- h2o.loadModel(model_path)
+```
+
+# Explain model
+```{r}
+## Variable important
+h2o.varimp_plot(h2o_model)
+```
+```{r}
+## Shap explain model
+h2o.shap_summary_plot(h2o_model,test_h2o)
+```
+```{r}
+h2o.pd_plot(h2o_model, test_h2o, column = "OverTime")
+h2o.pd_plot(h2o_model, test_h2o, column = "MonthlyIncome")
+h2o.pd_plot(h2o_model, test_h2o, column = "StockOptionLevel")
+h2o.pd_plot(h2o_model, test_h2o, column = "DistanceFromHome")
+h2o.pd_plot(h2o_model, test_h2o, column = "EnvironmentSatisfaction")
+```
+```{r}
+h2o.ice_plot(h2o_model, test_h2o, column = "MonthlyIncome")
+```
+```{r}
+# Class = No
+h2o.shap_explain_row_plot(h2o_model, test_h2o,row_index = 10)
+h2o.shap_explain_row_plot(h2o_model, test_h2o,row_index = 4)
+```
+
+
+```{r}
+# Class =Yes #2,17,20
+h2o.shap_explain_row_plot(h2o_model, test_h2o,row_index = 18)
+h2o.shap_explain_row_plot(h2o_model, test_h2o,row_index = 3)
+```
+
+## Create data for predict
+
+```{r}
+dim(data)
+```
+
+```{r}
+num_input <- 2 # how many data for predict ?
+employ.data <- data.frame(matrix(ncol = dim(data)[2], nrow = num_input))
+names(employ.data) <- colnames(data)
+employ.data
+```
+
+```{r}
+employ.data$MonthlyIncome <- c(2000,5000) 
+employ.data$OverTime <- c("Yes","No")
+employ.data$DailyRate <- c(1000,591)
+employ.data$MonthlyRate <- c(9964,1000)
+employ.data$DistanceFromHome <- c(24,5)
+employ.data$Age <- c(25,40)
+employ.data$StockOptionLevel <- c(1,3)
+employ.data$RelationshipSatisfaction <- c(1,3)
+```
+
+```{r}
+employ.data <- mutate_if(employ.data, is.character, as.factor)
+#employ.data <- employ.data[,-..column_near_zero_var]
+employ.data <- as.h2o(employ.data)
+```
+
+```{r}
+pred <-h2o.predict(h2o_model, newdata = employ.data)
+pred
+```
+```{r}
+h2o.shap_explain_row_plot(h2o_model, employ.data,row_index = 1)
+h2o.shap_explain_row_plot(h2o_model, employ.data,row_index = 2)
+```
+

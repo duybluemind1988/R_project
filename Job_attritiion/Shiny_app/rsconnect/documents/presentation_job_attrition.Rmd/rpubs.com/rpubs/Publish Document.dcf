@@ -1,0 +1,10 @@
+name: Publish Document
+title:
+username:
+account: rpubs
+server: rpubs.com
+hostUrl: rpubs.com
+appId: https://api.rpubs.com/api/v1/document/711326/bc0d7af609054904ab0a79f4c6eaaad6
+bundleId: https://api.rpubs.com/api/v1/document/711326/bc0d7af609054904ab0a79f4c6eaaad6
+url: http://rpubs.com/dnn_bluemind/711326
+when: 1610168186.18914
