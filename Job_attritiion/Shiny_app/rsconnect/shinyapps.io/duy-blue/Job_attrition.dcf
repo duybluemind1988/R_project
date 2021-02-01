@@ -1,0 +1,13 @@
+name: Job_attrition
+title: Job_attrition
+username:
+account: duy-blue
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 3455946
+bundleId: 4074788
+url: https://duy-blue.shinyapps.io/Job_attrition/
+when: 1610167498.35798
+asMultiple: FALSE
+asStatic: FALSE
+ignoredFiles: FQC.R|GBM_model_R_1610154635473_1|Job_attrition_DNN.Rmd|presentation_job_attrition.html|presentation_job_attrition.Rmd|trial_shiny.R
