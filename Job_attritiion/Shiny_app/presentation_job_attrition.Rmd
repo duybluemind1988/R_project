@@ -5,9 +5,6 @@ date: "Jan 9, 2021"
 output: ioslides_presentation
 ---
 
-```{r setup, include=FALSE,message = FALSE,warning = FALSE}
-knitr::opts_chunk$set(echo = FALSE,message = FALSE,warning = FALSE)
-```
 ## Some information
 
 - Github link to shiniapp code, data file and presentation file:
@@ -30,20 +27,6 @@ h2o.init()
 setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
 path <- "WA_Fn-UseC_-HR-Employee-Attrition.csv"
 data <- fread(path)
-# Create training (80%) and test (20%) sets for the 
-set.seed(430)
-split = createDataPartition(data$Attrition, p =0.8, list = FALSE)
-train = data[split, ]
-test = data[-split, ]
-# all character columns to factor:
-train <- mutate_if(train, is.character, as.factor)
-column_near_zero_var <-nearZeroVar(train)
-train <- train[,-..column_near_zero_var]
-test <- mutate_if(test, is.character, as.factor)
-test <- test[,-..column_near_zero_var]
-# convert training data to h2o object
-train_h2o <- as.h2o(train)
-test_h2o <- as.h2o(test)
 ```
 ## Plot categorical vs catagorical
 Compare Attrition percentage between business travel categorical
@@ -109,7 +92,6 @@ facet_plot(data,~Attrition,~MonthlyIncome,~Department)
 # Train model
 
 ```{r}
-
 #data$Attrition<-ifelse(data$Attrition=="Yes", 1, 0)
 # Create training (80%) and test (20%) sets for the 
 set.seed(430)
@@ -136,7 +118,7 @@ Clean the Near Zero Variance Variables.
 With tree method, no need to standar scaler, remove null value, encoder (due to factor transform)...
 ```{r}
 test <- mutate_if(test, is.character, as.factor)
-test <- test[,-..column_near_zero_var]
+#test <- test[,-..column_near_zero_var]
 ```
 
 ```{r}
@@ -179,66 +161,63 @@ h2o.performance uses the threshold that maximizes F1 by default.
 these thresholds are not in general the same.
 
 ```{r}
-table(as.data.frame(test_h2o)$Attrition)
-table( as.data.frame(test_pred)$predict)
+reference <- as.data.frame(test_h2o)$Attrition
+predict <- as.data.frame(test_pred)$predict
+table(reference)
+table(predict)
 ```
 ```{r}
 # Confusion matrix, number of cases
-table(as.data.frame(test_h2o)$Attrition, as.data.frame(test_pred)$predict)
+table(reference, predict)
+```
+
+```{r}
+caret::confusionMatrix(predict,reference,positive = "Yes")
+# missing f1 score and mcc
 ```
 ```{r}
-#install.packages("mltools")
 library(mltools)
-mcc(as.data.frame(test_pred)$predict,as.data.frame(test_h2o)$Attrition) # 0.4520577
-```
-```{r}
-#install.packages("Metrics")
-library(Metrics)
-Metrics::f1(as.data.frame(test_h2o)$Attrition,as.data.frame(test_pred)$predict)
-Metrics::precision(as.data.frame(test_h2o)$Attrition,as.data.frame(test_pred)$predict)
-Metrics::recall(as.data.frame(test_h2o)$Attrition,as.data.frame(test_pred)$predict)
-Metrics::auc(as.data.frame(test_h2o)$Attrition,as.data.frame(test_pred)$predict)
-```
-
-```{r}
-confusionMatrix(as.data.frame(test_pred)$predict,as.data.frame(test_h2o)$Attrition,positive = "Yes")
-```
-```{r}
-confusionMatrix(
-  data = relevel(as.data.frame(test_pred)$predict, ref = "Yes"), 
-  reference = relevel(as.data.frame(test_h2o)$Attrition, ref = "Yes")
-)
-```
-
-Evaluate train data set
-```{r}
-h2o.performance(h2o_model,train=TRUE)
+library(MLmetrics)
+print("mcc")
+mltools::mcc(predict,reference) # 0.4520577
+#install.packages("MLmetrics")
+result <- data_frame( reference,predict)
+colnames(result) <-c("obs","pred")
+#result
+print("precision")
+caret::precision(predict,reference) # Neg Pred value 0.91393
+print("recall")
+caret::recall(predict,reference) # Specificity 0.9065
+print("prSummary")
+caret::prSummary(result,lev = levels(result$obs))
+print("F1_Score")
+MLmetrics::F1_Score(predict,reference) # 0.910204
+print("AUC")
+MLmetrics::AUC(predict,reference)
 ```
 
 ```{r}
-table(as.data.frame(train_h2o)$Attrition)
+caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
 ```
 
 ```{r}
-train_pred <-h2o.predict(h2o_model, newdata = train_h2o)
-confusionMatrix(as.data.frame(train_pred)$predict,as.data.frame(train_h2o)$Attrition,positive = "Yes")
-```
 
+```
+# save the model
 ```{r}
 getwd()
 ```
 
-# save the model
 ```{r}
-model_path <- h2o.saveModel(object = h2o_model, path = getwd(), force = TRUE)
-print(model_path)
+#model_path <- h2o.saveModel(object = h2o_model, path = getwd(), force = TRUE)
+#print(model_path)
 ```
 
 # Load the model
 
 ```{r}
 # load the model
-model_path <- "GBM_model_R_1610154635473_1"
+model_path <- "GBM_model_R_1612186807441_436"
 h2o_model <- h2o.loadModel(model_path)
 ```
 
