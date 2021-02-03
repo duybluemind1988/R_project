@@ -1,0 +1,203 @@
+---
+title: "Untitled"
+output: html_document
+---
+```{r}
+library(tidyverse)# include dplyr, tidr, ggplot2, tibble, readr, purr
+library(data.table)
+# library(rsample)   # for data splitting
+library(caret)     # for model packages
+library(h2o)
+library(tictoc)
+```
+# 1. Get data
+
+```{r}
+#setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+path <- "WA_Fn-UseC_-HR-Employee-Attrition.csv"
+data <- fread(path)
+head(data)
+```
+# 2. EDA
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+# 3. Models
+```{r}
+split = caret::createDataPartition(data$Attrition, p =0.8, list = FALSE)
+train = data[split, ]
+test = data[-split, ]
+```
+
+```{r}
+# Convert numeric value to factor
+#data$Education <- factor(data$Education)
+#data$EnvironmentSatisfaction <- factor(data$EnvironmentSatisfaction)
+#data$JobInvolvement <- factor(data$JobInvolvement)
+#data$JobLevel <- factor(data$JobLevel)
+#data$JobSatisfaction <- factor(data$JobSatisfaction)
+#data$PerformanceRating <- factor(data$PerformanceRating)
+#data$RelationshipSatisfaction <- factor(data$RelationshipSatisfaction)
+#data$StockOptionLevel <- factor(data$StockOptionLevel)
+#data$WorkLifeBalance <- factor(data$WorkLifeBalance)
+```
+
+```{r}
+recipe_obj <- recipe(Attrition ~ ., data = train) %>%
+  #step_rm(EmployeeNumber,StandardHours,Over18,EmployeeCount) %>% 
+  #step_string2factor(all_nominal()) %>% # convert character to factor
+  #step_integer(Education,EnvironmentSatisfaction) %>% # Ordinal encoder
+  #step_num2factor(Education,EnvironmentSatisfaction,JobInvolvement,JobLevel,JobSatisfaction,PerformanceRating,RelationshipSatisfaction,StockOptionLevel,WorkLifeBalance) %>%  # convert number to factor
+  step_nzv(all_numeric(), -all_outcomes())  %>% #Remove near-zero variance features like sex, yes/no...
+  #step_knnimpute(all_predictors(), neighbors = 6) %>%  # Impute, very slow in large data in train, need step outside
+  step_YeoJohnson(all_numeric(),-all_outcomes()) %>% # Remove skewness
+  
+  step_center(all_numeric(), -all_outcomes()) %>% # center 
+  step_scale(all_numeric(), -all_outcomes()) %>% # scale
+  #step_dummy(all_nominal(), one_hot = TRUE) %>% 
+  #step_pca(all_numeric(), -all_outcomes()) #Perform dimension reduction
+  prep()
+baked_train <- bake(recipe_obj, new_data = train)
+baked_test <- bake(recipe_obj, new_data = test)
+baked_train
+```
+
+
+```{r}
+h2o.init()
+```
+
+
+```{r}
+# convert training data to h2o object
+train_h2o <- as.h2o(baked_train)
+test_h2o <- as.h2o(baked_test)
+# set the response column to Sale_Price
+response <- "Attrition"
+n_features <- length(setdiff(names(baked_train), "Attrition"))
+# set the predictor names
+predictors <- setdiff(colnames(baked_train), response)
+```
+
+## Base model
+```{r}
+tic()
+h2o_model_gbm <- h2o.gbm(
+    x = predictors, 
+    y = response,
+    training_frame = train_h2o, 
+    nfolds=5,
+    seed = 123
+)
+toc()
+```
+
+
+```{r}
+test_pred <-h2o.predict(h2o_model_gbm, newdata = test_h2o)
+reference <- as.data.frame(test_h2o)$Attrition
+predict <- as.data.frame(test_pred)$predict
+caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
+```
+## Auto ML H2O
+
+```{r}
+auto_ml <- h2o.automl(
+    x = predictors, 
+    y = response,
+    training_frame = train_h2o,
+    #leaderboard_frame = h2o_validation,
+    project_name = "Attrition",
+    #max_runtime_secs = 300,
+    max_models = 10,
+    seed = 12
+)
+```
+
+
+```{r}
+# Check for the top models
+top_models <- auto_ml@leaderboard
+print(top_models)
+```
+
+
+```{r}
+test_pred <- h2o.predict(auto_ml, test_h2o) 
+reference <- as.data.frame(test_h2o)$Attrition
+predict <- as.data.frame(test_pred)$predict
+caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+

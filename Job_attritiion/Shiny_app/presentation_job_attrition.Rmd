@@ -90,7 +90,7 @@ facet_plot(data,~Attrition,~MonthlyIncome,~Department)
 ```
 
 
-# Train model
+# Train model with no feature engineer
 
 ```{r}
 #data$Attrition<-ifelse(data$Attrition=="Yes", 1, 0)
@@ -258,7 +258,6 @@ h2o_model <- h2o.gbm(
     nfolds=5,
     seed = 123
 )
-end_time <- lubridate::minute(Sys.time())
 toc()
 ```
 
@@ -301,8 +300,13 @@ predict <- as.data.frame(test_pred)$predict
 caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
 ```
 
-# Try ML model with 90 acc
+# [BEST] Try ML model with 90 acc from Kaggle (fail, just learn feature engineer and visual)
+
+The model have high accuracy due to not split by data by category, very low positive class so high accuracy
+Another problem: not declare positive class in classification report, wrong information
+
 https://www.kaggle.com/esmaeil391/ibm-hr-analysis-with-90-3-acc-and-89-auc
+
 ```{r}
 setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
 path <- "WA_Fn-UseC_-HR-Employee-Attrition.csv"
@@ -339,31 +343,191 @@ indexes = sample(1:nrow(rfData), size=0.8*nrow(rfData))
 RFRaw.train.Data <- rfData[indexes,]
 RFRaw.test.Data <- rfData[-indexes,]
 
-
-Split way 2:
-
+Use recipe 
 ```{r}
+path <- "WA_Fn-UseC_-HR-Employee-Attrition.csv"
+data <- fread(path)
+head(data)
+
 split = createDataPartition(data$Attrition, p =0.8, list = FALSE)
 train = data[split, ]
 test = data[-split, ]
 ```
 
 ```{r}
-library(randomForest)
-Raw.rf.model <- randomForest(Attrition~.,RFRaw.train.Data, importance=TRUE,ntree=1000)
+recipe_obj <- recipe(Attrition ~ ., data = train) %>%
+  step_rm(EmployeeNumber,StandardHours,Over18,EmployeeCount) %>% 
+  step_string2factor(all_nominal()) %>% # convert character to factor
+  #step_integer(Education,EnvironmentSatisfaction) %>% # Ordinal encoder
+  #step_num2factor(Education,EnvironmentSatisfaction,JobInvolvement,JobLevel,JobSatisfaction,PerformanceRating,RelationshipSatisfaction,StockOptionLevel,WorkLifeBalance) %>%  # convert number to factor
+  step_nzv(all_numeric(), -all_outcomes())  %>% #Remove near-zero variance features like sex, yes/no...
+  #step_knnimpute(all_predictors(), neighbors = 6) %>%  # Impute, very slow in large data in train, need step outside
+  step_YeoJohnson(all_numeric(),-all_outcomes()) %>% # Remove skewness
+  
+  step_center(all_numeric(), -all_outcomes()) %>% # center 
+  step_scale(all_numeric(), -all_outcomes()) %>% # scale
+  #step_dummy(all_nominal(), one_hot = TRUE) %>% 
+  #step_pca(all_numeric(), -all_outcomes()) #Perform dimension reduction
+  prep()
+baked_train <- bake(recipe_obj, new_data = train)
+baked_test <- bake(recipe_obj, new_data = test)
+baked_train
 ```
 
+## Under-sampling
+
+Luckily, caret makes it very easy to incorporate over- and under-sampling techniques with cross-validation resampling. We can simply add the sampling option to our trainControl and choose down for under- (also called down-) sampling. The rest stays the same as with our original model.
 ```{r}
-predict <- predict(Raw.rf.model, newdata = RFRaw.test.Data)
-reference <- RFRaw.test.Data$Attrition
-confusionMatrix( predict, reference ,positive="Yes",mode="prec_recall")
+ctrl <- trainControl(#method = "repeatedcv", 
+                     #number = 10, 
+                     #repeats = 10, 
+                     sampling = "down",
+                     verboseIter = FALSE)
+set.seed(42)
+model_down <- caret::train(Attrition ~ .,
+                         data = baked_train,
+                         method = "gbm",
+                         trControl = ctrl)
 ```
 
+
 ```{r}
-test_pred <- predict(Raw.rf.model, test) 
-reference <- test$Attrition
-predict <- test_pred
+test_pred <- predict(model_down, baked_test)
+reference <- baked_test$Attrition
+predict <-  test_pred
 caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
+```
+## Oversampling
+
+```{r}
+ctrl <- trainControl(#method = "repeatedcv", 
+                     #number = 10, 
+                     #repeats = 10, 
+                     sampling = "up",
+                     verboseIter = FALSE)
+set.seed(42)
+model_over <- caret::train(Attrition ~ .,
+                         data = baked_train,
+                         method = "gbm",
+                         trControl = ctrl)
+```
+
+
+```{r}
+test_pred <- predict(model_over, baked_test)
+reference <- baked_test$Attrition
+predict <-  test_pred
+caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
+```
+## ROSE
+
+Besides over- and under-sampling, there are hybrid methods that combine under-sampling with the generation of additional data. Two of the most popular are ROSE and SMOTE.
+
+```{r}
+ctrl <- trainControl(#method = "repeatedcv", 
+                     #number = 10, 
+                     #repeats = 10, 
+                     sampling = "rose",
+                     verboseIter = FALSE)
+set.seed(42)
+model <- caret::train(Attrition ~ .,
+                      data = baked_train,
+                      method = "gbm",
+                      trControl = ctrl,
+                      verbose=FALSE)
+```
+
+
+```{r}
+test_pred <- predict(model, baked_test)
+reference <- baked_test$Attrition
+predict <-  test_pred
+caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
+```
+
+## SMOTE
+
+```{r}
+ctrl <- trainControl(#method = "repeatedcv", 
+                     #number = 10, 
+                     #repeats = 10, 
+                     sampling = "smote",
+                     verboseIter = FALSE)
+set.seed(42)
+model <- caret::train(Attrition ~ .,
+                      data = baked_train,
+                      method = "gbm",
+                      trControl = ctrl,
+                      verbose=FALSE)
+```
+
+
+```{r}
+test_pred <- predict(model, baked_test)
+reference <- baked_test$Attrition
+predict <-  test_pred
+caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
+```
+# FROM Business science website:
+https://www.business-science.io/business/2017/09/18/hr_employee_attrition.html
+```{r}
+library(tidyverse)# include dplyr, tidr, ggplot2, tibble, readr, purr
+library(data.table)
+# library(rsample)   # for data splitting
+library(caret)     # for model packages
+library(h2o)
+library(tictoc)
+```
+
+
+```{r}
+path <- "WA_Fn-UseC_-HR-Employee-Attrition.csv"
+data <- fread(path)
+head(data)
+```
+
+```{r}
+data[1:10,] %>%
+    knitr::kable(caption = "First 10 rows")
+```
+The only pre-processing we’ll do in this example is change all character data types to factors. This is needed for H2O. We could make a number of other numeric data that is actually categorical factors, but this tends to increase modeling time and can have little improvement on model performance.
+
+```{r}
+data <- data %>%
+    mutate_if(is.character, as.factor) %>%
+    select(Attrition, everything())
+glimpse(data)
+```
+
+
+```{r}
+# Initialize H2O JVM
+h2o.init()
+```
+
+
+```{r}
+h2o.no_progress() # Turn off output of progress bars
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
 ```
 
 

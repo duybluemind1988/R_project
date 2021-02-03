@@ -2,15 +2,17 @@
 title: "Untitled"
 output: html_document
 ---
+# Get data
 ```{r}
+#install.packages("tidymodels")
 library(modeldata)
+library(tidymodels)
 data(ames)
 ames
 ```
 
+# Split data
 ```{r}
-library(tidymodels)
-data(ames)
 ames <- ames %>% mutate(Sale_Price = log10(Sale_Price))
 
 set.seed(123)
@@ -21,6 +23,11 @@ ames_train_select <- ames_train %>% select(Sale_Price, Neighborhood , Gr_Liv_Are
                 Latitude , Longitude)
 ames_train_select
 ```
+```{r}
+summary(ames_train_select)
+```
+# Recipe:
+
 The call to recipe() with a formula tells the recipe the roles of the variables (e.g., predictor, outcome). It only uses the data to determine the data types for the columns.
 
 step_log() declares that Gr_Liv_Area should be log transformed.
@@ -37,19 +44,104 @@ ames_rec <-
   step_log(Gr_Liv_Area, base = 10) %>% # declares that Gr_Liv_Area should be log transformed.
   step_other(Neighborhood, threshold = 0.01) %>% #  the bottom 1% of the neighborhoods will be lumped into a new level called “other”
   step_dummy(all_nominal()) %>% 
-  #step_interact( ~ Gr_Liv_Area:starts_with("Bldg_Type_") ) %>% 
-  #step_ns(Latitude, Longitude, deg_free = 20) %>% 
+  step_interact( ~ Gr_Liv_Area:starts_with("Bldg_Type_") ) %>% 
+  step_ns(Latitude, Longitude, deg_free = 20) %>% 
   prep()
 
 baked_train <- bake(ames_rec, new_data = ames_train)
 baked_test <- bake(ames_rec, new_data = ames_test)
-baked_train
+#str(baked_train)
+```
+
+# Fitting model with parsnip
+```{r}
+library(parsnip)
 ```
 
 ```{r}
-ggplot(ames_train, aes(y = Neighborhood)) + 
-  geom_bar() + 
-  labs(y = NULL)
+linear_reg() %>% set_engine("glmnet") %>% translate()
+```
+
+
+```{r}
+lm_model <- 
+  linear_reg() %>% 
+  set_engine("lm")
+```
+
+
+```{r}
+lm_form_fit <- 
+  lm_model %>% 
+  # Recall that Sale_Price has been pre-logged
+  fit(Sale_Price ~ Longitude + Latitude, data = ames_train)
+lm_form_fit
+```
+
+
+```{r}
+ames_test %>% 
+  select(Sale_Price) %>% 
+  bind_cols(predict(lm_form_fit, ames_test)) %>% 
+  # Add 95% prediction intervals to the results:
+  bind_cols(predict(lm_form_fit, ames_test, type = "pred_int")) 
+```
+
+# WORKFLOW BASICS
+
+```{r}
+lm_model <- linear_reg() %>% set_engine("lm")
+
+lm_wflow <- 
+  workflow() %>% 
+  add_model(lm_model) %>% 
+  add_recipe(ames_rec)
+
+lm_fit <- fit(lm_wflow, ames_train)
+```
+
+
+```{r}
+predict(lm_fit, ames_test %>% slice(1:3))
+```
+
+# Judging model effectiveness
+
+```{r}
+ames_test_res <- predict(lm_fit, new_data = ames_test %>% select(-Sale_Price))
+ames_test_res <- bind_cols(ames_test_res, ames_test %>% select(Sale_Price))
+ames_test_res
+```
+
+```{r}
+ames_metrics <- metric_set(rmse, rsq, mae)
+ames_metrics(ames_test_res, truth = Sale_Price, estimate = .pred)
+```
+BINARY CLASSIFICATION METRICS
+
+```{r}
+data(two_class_example)
+str(two_class_example)
+```
+
+
+```{r}
+# A confusion matrix: 
+yardstick::conf_mat(two_class_example, truth = truth, estimate = predicted)
+yardstick::accuracy(two_class_example, truth = truth, estimate = predicted)
+yardstick::mcc(two_class_example, truth, predicted)
+yardstick::f_meas(two_class_example, truth, predicted)
+```
+
+
+```{r}
+roc_auc(two_class_example, truth, Class1)
+```
+
+
+```{r}
+two_class_curve <- roc_curve(two_class_example, truth, Class1)
+autoplot(two_class_curve)
 ```
 
 
@@ -60,6 +152,17 @@ ggplot(ames_train, aes(y = Neighborhood)) +
 ```{r}
 ```
 
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
 
 ```{r}
 ```
