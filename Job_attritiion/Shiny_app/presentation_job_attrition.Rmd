@@ -5,7 +5,7 @@ date: "Jan 9, 2021"
 output: ioslides_presentation
 ---
 
-## Some information
+# Some information
 
 - Github link to shiniapp code, data file and presentation file:
 https://github.com/duybluemind1988/datasciencecoursera/tree/main/9.%20Develop%20Data%20product/Job_attrition
@@ -27,8 +27,9 @@ h2o.init()
 setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
 path <- "WA_Fn-UseC_-HR-Employee-Attrition.csv"
 data <- fread(path)
+head(data)
 ```
-## Plot categorical vs catagorical
+# Plot categorical vs catagorical
 Compare Attrition percentage between business travel categorical
 ```{r}
 Categorical_vs_categorical_plot <- function(data,group_col,fill_col){
@@ -51,7 +52,7 @@ data %>%
 }
 Categorical_vs_categorical_plot(data,~Attrition,~BusinessTravel)
 ```
-## Plot Categorical vs. Quantitative
+# Plot Categorical vs. Quantitative
 ```{r}
 Categorical_vs_quantitative_plot <- function(data,categorical_col,quantitative_col){
   # plot the distribution using violin and boxplots
@@ -146,7 +147,6 @@ end_time <- lubridate::minute(Sys.time())
 time <- (end_time - start_time)
 print(time)
 ```
-Evaluate test data set
 ```{r}
 # Apply h2o model to test set
 test_pred <-h2o.predict(h2o_model, newdata = test_h2o)
@@ -165,44 +165,215 @@ reference <- as.data.frame(test_h2o)$Attrition
 predict <- as.data.frame(test_pred)$predict
 table(reference)
 table(predict)
-```
-```{r}
 # Confusion matrix, number of cases
 table(reference, predict)
 ```
 
 ```{r}
-caret::confusionMatrix(predict,reference,positive = "Yes")
-# missing f1 score and mcc
-```
-```{r}
 library(mltools)
-library(MLmetrics)
 print("mcc")
 mltools::mcc(predict,reference) # 0.4520577
+#library(MLmetrics)
 #install.packages("MLmetrics")
-result <- data_frame( reference,predict)
-colnames(result) <-c("obs","pred")
-#result
-print("precision")
-caret::precision(predict,reference) # Neg Pred value 0.91393
-print("recall")
-caret::recall(predict,reference) # Specificity 0.9065
-print("prSummary")
-caret::prSummary(result,lev = levels(result$obs))
-print("F1_Score")
-MLmetrics::F1_Score(predict,reference) # 0.910204
-print("AUC")
-MLmetrics::AUC(predict,reference)
+#result <- data_frame( reference,predict)
+#colnames(result) <-c("obs","pred")
+#result (NOT accuracy - wrong)
+#print("precision")
+#caret::precision(predict,reference) # Neg Pred value 0.91393
+#print("recall")
+#caret::recall(predict,reference) # Specificity 0.9065
+#print("prSummary")
+#caret::prSummary(result,lev = levels(result$obs))
+#print("F1_Score")
+#MLmetrics::F1_Score(predict,reference) # 0.910204
+#print("AUC")
+#MLmetrics::AUC(predict,reference)
 ```
 
 ```{r}
 caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
 ```
+# Try to improve machine learning model with recipe
+```{r}
+library(data.table)
+library(tidyverse)
+library(rsample)   # for data splitting
+library(h2o)
+library(caret)
+library(recipes)
+library(tictoc)
+```
 
 ```{r}
-
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+path <- "WA_Fn-UseC_-HR-Employee-Attrition.csv"
+data <- fread(path)
+head(data)
 ```
+```{r}
+split = createDataPartition(data$Attrition, p =0.8, list = FALSE)
+train = data[split, ]
+test = data[-split, ]
+```
+
+
+```{r}
+# Convert character to factor ? (dummy ?)
+# Convert numeric to factor ? 
+recipe_obj <- recipe(Attrition ~ ., data = train) %>%
+  step_nzv(all_numeric(), -all_outcomes())  %>% #Remove near-zero variance features like sex, yes/no...
+  #step_knnimpute(all_predictors(), neighbors = 6) %>%  # Impute, very slow in large data in train, need step outside
+  step_YeoJohnson(all_numeric(),-all_outcomes()) %>% # Remove skewness
+  #step_integer(matches("Qual|Cond|QC|Qu")) %>% # Ordinal encoder
+  step_center(all_numeric(), -all_outcomes()) %>% # center 
+  step_scale(all_numeric(), -all_outcomes()) %>% # scale
+  #step_dummy(all_nominal(), one_hot = TRUE) %>% 
+  #step_pca(all_numeric(), -all_outcomes()) #Perform dimension reduction
+  prep()
+
+baked_train <- bake(recipe_obj, new_data = train)
+baked_test <- bake(recipe_obj, new_data = test)
+baked_train
+```
+
+
+```{r}
+# convert training data to h2o object
+train_h2o <- as.h2o(baked_train)
+test_h2o <- as.h2o(baked_test)
+# set the response column to Sale_Price
+response <- "Attrition"
+n_features <- length(setdiff(names(baked_train), "Attrition"))
+# set the predictor names
+predictors <- setdiff(colnames(baked_train), response)
+```
+
+
+```{r}
+tic()
+h2o_model <- h2o.gbm(
+    x = predictors, 
+    y = response,
+    training_frame = train_h2o, 
+    nfolds=5,
+    seed = 123
+)
+end_time <- lubridate::minute(Sys.time())
+toc()
+```
+
+
+```{r}
+test_pred <-h2o.predict(h2o_model, newdata = test_h2o)
+reference <- as.data.frame(test_h2o)$Attrition
+predict <- as.data.frame(test_pred)$predict
+caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
+```
+```{r}
+rocgbm <- roc(as.numeric(reference), as.numeric(predict))
+rocgbm$auc
+```
+
+# Auto ML H2O
+```{r}
+auto_ml <- h2o.automl(
+    x = predictors, 
+    y = response,
+    training_frame = train_h2o,
+    #leaderboard_frame = h2o_validation,
+    project_name = "Attrition",
+    #max_runtime_secs = 300,
+    max_models = 10,
+    seed = 12
+)
+```
+
+
+```{r}
+# Check for the top models
+top_models <- auto_ml@leaderboard
+print(top_models)
+```
+```{r}
+test_pred <- h2o.predict(auto_ml, test_h2o) 
+reference <- as.data.frame(test_h2o)$Attrition
+predict <- as.data.frame(test_pred)$predict
+caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
+```
+
+# Try ML model with 90 acc
+https://www.kaggle.com/esmaeil391/ibm-hr-analysis-with-90-3-acc-and-89-auc
+```{r}
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+path <- "WA_Fn-UseC_-HR-Employee-Attrition.csv"
+data <- fread(path)
+head(data)
+```
+```{r}
+# Convert char/string to factor
+data <- mutate_if(data, is.character, as.factor)
+# Remove non nessearry column:
+data$EmployeeNumber<- NULL
+data$StandardHours <- NULL
+data$Over18 <- NULL
+data$EmployeeCount <- NULL
+# Convert numeric value to factor
+data$Education <- factor(data$Education)
+data$EnvironmentSatisfaction <- factor(data$EnvironmentSatisfaction)
+data$JobInvolvement <- factor(data$JobInvolvement)
+data$JobLevel <- factor(data$JobLevel)
+data$JobSatisfaction <- factor(data$JobSatisfaction)
+data$PerformanceRating <- factor(data$PerformanceRating)
+data$RelationshipSatisfaction <- factor(data$RelationshipSatisfaction)
+data$StockOptionLevel <- factor(data$StockOptionLevel)
+data$WorkLifeBalance <- factor(data$WorkLifeBalance)
+
+head(data)
+```
+
+Split way 1: Wrong because not split by percentage minor group, if minor group is low, accuracy with be higher
+
+rfData <- data
+set.seed(123)
+indexes = sample(1:nrow(rfData), size=0.8*nrow(rfData))
+RFRaw.train.Data <- rfData[indexes,]
+RFRaw.test.Data <- rfData[-indexes,]
+
+
+Split way 2:
+
+```{r}
+split = createDataPartition(data$Attrition, p =0.8, list = FALSE)
+train = data[split, ]
+test = data[-split, ]
+```
+
+```{r}
+library(randomForest)
+Raw.rf.model <- randomForest(Attrition~.,RFRaw.train.Data, importance=TRUE,ntree=1000)
+```
+
+```{r}
+predict <- predict(Raw.rf.model, newdata = RFRaw.test.Data)
+reference <- RFRaw.test.Data$Attrition
+confusionMatrix( predict, reference ,positive="Yes",mode="prec_recall")
+```
+
+```{r}
+test_pred <- predict(Raw.rf.model, test) 
+reference <- test$Attrition
+predict <- test_pred
+caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
 # save the model
 ```{r}
 getwd()
@@ -253,7 +424,7 @@ h2o.shap_explain_row_plot(h2o_model, test_h2o,row_index = 18)
 h2o.shap_explain_row_plot(h2o_model, test_h2o,row_index = 3)
 ```
 
-## Create data for predict
+# Create data for predict
 
 ```{r}
 dim(data)

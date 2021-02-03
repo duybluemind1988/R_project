@@ -1,0 +1,70 @@
+---
+title: "Untitled"
+output: html_document
+---
+```{r}
+library(modeldata)
+data(ames)
+ames
+```
+
+```{r}
+library(tidymodels)
+data(ames)
+ames <- ames %>% mutate(Sale_Price = log10(Sale_Price))
+
+set.seed(123)
+ames_split <- initial_split(ames, prob = 0.80, strata = Sale_Price)
+ames_train <- training(ames_split)
+ames_test  <-  testing(ames_split)
+ames_train_select <- ames_train %>% select(Sale_Price, Neighborhood , Gr_Liv_Area , Year_Built , Bldg_Type , 
+                Latitude , Longitude)
+ames_train_select
+```
+The call to recipe() with a formula tells the recipe the roles of the variables (e.g., predictor, outcome). It only uses the data to determine the data types for the columns.
+
+step_log() declares that Gr_Liv_Area should be log transformed.
+
+step_dummy() is used to specify which variables should be converted from a qualitative format to a quantitative format, in this case, using dummy or indicator variables. An indicator or dummy variable is a binary numeric variable (a column of ones and zeroes) that encodes qualitative information; we will dig deeper into these kinds of variables in Section 6.3.
+
+The function all_nominal() captures the names of any columns that are currently factor or character (i.e., nominal) in nature. This is a dplyr selector function similar to starts_with() or matches() but can only be used inside of a recipe.
+
+Other selectors specific to the recipes package are: all_numeric(), all_predictors(), and all_outcomes(). As with dplyr, one or more unquoted expressions, separated by commas, can be used to select which columns are affected by each step.
+```{r}
+ames_rec <- 
+  recipe(Sale_Price ~ Neighborhood + Gr_Liv_Area + Year_Built + Bldg_Type + 
+           Latitude + Longitude, data = ames_train) %>%
+  step_log(Gr_Liv_Area, base = 10) %>% # declares that Gr_Liv_Area should be log transformed.
+  step_other(Neighborhood, threshold = 0.01) %>% #  the bottom 1% of the neighborhoods will be lumped into a new level called “other”
+  step_dummy(all_nominal()) %>% 
+  #step_interact( ~ Gr_Liv_Area:starts_with("Bldg_Type_") ) %>% 
+  #step_ns(Latitude, Longitude, deg_free = 20) %>% 
+  prep()
+
+baked_train <- bake(ames_rec, new_data = ames_train)
+baked_test <- bake(ames_rec, new_data = ames_test)
+baked_train
+```
+
+```{r}
+ggplot(ames_train, aes(y = Neighborhood)) + 
+  geom_bar() + 
+  labs(y = NULL)
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
