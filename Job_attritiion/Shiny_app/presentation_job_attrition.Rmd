@@ -468,7 +468,7 @@ reference <- baked_test$Attrition
 predict <-  test_pred
 caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
 ```
-# FROM Business science website:
+# [Auto ML]FROM Business science website:
 https://www.business-science.io/business/2017/09/18/hr_employee_attrition.html
 ```{r}
 library(tidyverse)# include dplyr, tidr, ggplot2, tibble, readr, purr
@@ -507,27 +507,173 @@ h2o.init()
 
 
 ```{r}
-h2o.no_progress() # Turn off output of progress bars
+#h2o.no_progress() # Turn off output of progress bars
+```
+
+```{r}
+split1 = createDataPartition(data$Attrition, p =0.7, list = FALSE)
+train = data[split1, ]
+test_valid = data[-split1, ]
+split2 = createDataPartition(test_valid$Attrition, p =0.5, list = FALSE)
+valid = test_valid[split2, ]
+test = test_valid[-split2, ]
+table(train$Attrition)
+prop.table(table(train$Attrition))
+table(valid$Attrition)
+prop.table(table(valid$Attrition))
+table(test$Attrition)
+prop.table(table(test$Attrition))
+```
+
+```{r}
+# Split data into Train/Validation/Test Sets
+#hr_data_h2o <- as.h2o(data)
+
+#split_h2o <- h2o.splitFrame(hr_data_h2o, c(0.7, 0.15), seed = 1234 )
+
+#train_h2o <- h2o.assign(split_h2o[[1]], "train" ) # 70%
+#valid_h2o <- h2o.assign(split_h2o[[2]], "valid" ) # 15%
+#test_h2o  <- h2o.assign(split_h2o[[3]], "test" )  # 15%
+train_h2o <- as.h2o(train)
+valid_h2o <- as.h2o(valid)
+test_h2o <- as.h2o(test)
 ```
 
 
 ```{r}
+# Set names for h2o
+y <- "Attrition"
+x <- setdiff(names(train_h2o), y)
 ```
 
 
 ```{r}
+# Run the automated machine learning 
+automl_models_h2o <- h2o.automl(
+    x = x, 
+    y = y,
+    training_frame    = train_h2o,
+    validation_frame = valid_h2o, # auto stop
+    #leaderboard_frame = valid_h2o, #
+    max_runtime_secs  = 30
+    )
 ```
 
 
 ```{r}
+automl_models_h2o
+# Extract leader model
+automl_leader <- automl_models_h2o@leader
+#automl_leader
+```
+
+```{r}
+# Get model ids for all models in the AutoML Leaderboard
+model_ids <- as.data.frame(automl_models_h2o@leaderboard$model_id)[,1]
+model_ids
+slect_model <- h2o.getModel(model_ids[4])
+h2o.varimp(slect_model)
+#options(repr.plot.width=8, repr.plot.height=4) 
+#h2o.varimp_plot(slect_model)
+```
+
+```{r}
+test_pred <-h2o.predict(automl_leader, newdata = test_h2o)
+reference <- as.data.frame(test_h2o)$Attrition
+predict <- as.data.frame(test_pred)$predict
+caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
+```
+Most HR groups would probably prefer to incorrectly classify folks not looking to quit as high potential of quiting rather than classify those that are likely to quit as not at risk. Because it’s important to not miss at risk employees, HR will really care about recall or when the actual value is Attrition = YES how often the model predicts YES.
+
+Recall for our model is 62%. In an HR context, this is 62% more employees that could potentially be targeted prior to quiting. From that standpoint, an organization that loses 100 people per year could possibly target 62 implementing measures to retain.
+
+```{r}
+class(automl_leader)
+```
+Next we create our model_type function. It’s only input is x the h2o model. The function simply returns “classification”, which tells LIME we are classifying.
+```{r}
+# Setup lime::model_type() function for h2o
+model_type.H2OBinomialModel <- function(x, ...) {
+    # Function tells lime() what model type we are dealing with
+    # 'classification', 'regression', 'survival', 'clustering', 'multilabel', etc
+    #
+    # x is our h2o model
+    
+    return("classification")
+}
+```
+
+Now we can create our predict_model function. The trick here is to realize that it’s inputs must be x a model, newdata a dataframe object (this is important), and type which is not used but can be use to switch the output type. The output is also a little tricky because it must be in the format of probabilities by classification (this is important; shown next). Internally we just call the h2o.predict() function.
+```{r}
+# Setup lime::predict_model() function for h2o
+predict_model.H2OBinomialModel <- function(x, newdata, type, ...) {
+    # Function performs prediction and returns dataframe with Response
+    #
+    # x is h2o model
+    # newdata is data frame
+    # type is only setup for data frame
+    
+    pred <- h2o.predict(x, as.h2o(newdata))
+    
+    # return probs
+    return(as.data.frame(pred[,-1]))
+    
+}
 ```
 
 
 ```{r}
+# Test our predict_model() function
+predict_model.H2OBinomialModel(x = automl_leader, newdata = as.data.frame(test_h2o[,-1]), type = 'raw') %>%
+    tibble::as_tibble()
 ```
 
 
 ```{r}
+# Run lime() on training set
+explainer <- lime::lime(
+    as.data.frame(train_h2o[,-1]), 
+    model          = automl_leader, 
+    bin_continuous = FALSE)
+```
+
+
+```{r}
+# Run explain() on explainer
+explanation <- lime::explain(
+    as.data.frame(test_h2o[1:10,-1]), 
+    explainer    = explainer, 
+    n_labels     = 1, 
+    n_features   = 4,
+    kernel_width = 0.5)
+```
+
+
+```{r}
+lime::plot_features(explanation) +
+    labs(title = "HR Predictive Analytics: LIME Feature Importance Visualization",
+         subtitle = "Hold Out (Test) Set, First 10 Cases Shown")
+```
+
+
+```{r}
+# Focus on critical features of attrition
+attrition_critical_features <- data %>%
+    tibble::as_tibble() %>%
+    select(Attrition, TrainingTimesLastYear, JobRole, OverTime) %>%
+    rowid_to_column(var = "Case")
+attrition_critical_features
+```
+
+
+```{r}
+## Variable important
+h2o.varimp_plot(automl_leader)
+```
+
+
+```{r}
+h2o.shap_summary_plot(h2o_model,test_h2o)
 ```
 
 

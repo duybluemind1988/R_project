@@ -19,15 +19,118 @@ data <- fread(path)
 head(data)
 ```
 # 2. EDA
+## Plot categorical vs catagorical
+Compare Attrition percentage between business travel categorical
 ```{r}
+Categorical_vs_categorical_plot <- function(data,group_col,fill_col){
+data %>%
+  group_by_(group_col, fill_col) %>%
+  summarize(n = n()) %>% 
+  mutate(pct = n/sum(n),lbl = scales::percent(pct))%>% 
+  ggplot(aes_(x = group_col,y = ~pct,
+           fill = fill_col)) +
+  geom_bar(stat = "identity",
+           position = "fill") +
+  scale_y_continuous(breaks = seq(0, 1, .2),label =scales::percent) +
+  geom_text(aes(label = lbl), 
+            size = 3, 
+            position = position_stack(vjust = 0.5)) +
+  #scale_fill_brewer(palette = "Set2") +
+  labs(y = "Percent",x = "Attrition",title = "Compare attrition accross category")+
+  theme_minimal()  
+  
+}
+Categorical_vs_categorical_plot(data,~Attrition,~BusinessTravel)
+Categorical_vs_categorical_plot(data,~Attrition,~Department)
+Categorical_vs_categorical_plot(data,~Attrition,~Education)
+Categorical_vs_categorical_plot(data,~Attrition,~WorkLifeBalance)
+```
+```{r}
+Categorical_vs_categorical_plot_2 <- function(data,group_col,fill_col){
+  data %>%
+        ggplot(aes_(x = fill_col, group = group_col)) + 
+        geom_bar(aes(y = ..prop.., fill = factor(..x..)), 
+                 stat="count", 
+                 alpha = 0.7) +
+        geom_text(aes(label = scales::percent(..prop..), y = ..prop.. ), 
+                  stat= "count", 
+                  vjust = 2) +
+        labs(y = "Percentage", fill= "Education") +
+        facet_grid(~Attrition) +
+        theme_minimal()+
+        theme(legend.position = "none", plot.title = element_text(hjust = 0.5)) + 
+        ggtitle("Attrition") 
+  
+}
+Categorical_vs_categorical_plot_2(data,~Attrition,~BusinessTravel)
+Categorical_vs_categorical_plot_2(data,~Attrition,~WorkLifeBalance)
+```
+```{r}
+data %>%
+        ggplot(aes(x = BusinessTravel, group = Attrition)) + 
+        geom_bar(aes(y = ..prop.., fill = factor(..x..)), 
+                 stat="count", 
+                 alpha = 0.7) +
+        geom_text(aes(label = scales::percent(..prop..), y = ..prop.. ), 
+                  stat= "count", 
+                  vjust = 2) +
+        labs(y = "Percentage", fill= "Education") +
+        facet_grid(~Attrition) +
+        theme_minimal()+
+        theme(legend.position = "none", plot.title = element_text(hjust = 0.5)) + 
+        ggtitle("Attrition") 
 ```
 
-
+## Plot Categorical vs. Quantitative
 ```{r}
+Categorical_vs_quantitative_plot <- function(data,categorical_col,quantitative_col){
+  # plot the distribution using violin and boxplots
+  ggplot(data, aes_(x = categorical_col, 
+                     y = quantitative_col)) +
+  geom_violin(fill = "cornflowerblue") +
+  geom_boxplot(width = .2, 
+               fill = "orange",
+               outlier.color = "orange",
+               outlier.size = 2) 
+}
+Categorical_vs_quantitative_plot(data,~Attrition,~Age)
+#Categorical_vs_quantitative_plot(data,~Attrition,~DistanceFromHome)
+#Categorical_vs_quantitative_plot(data,~Attrition,~Education)
+#Categorical_vs_quantitative_plot(data,~Attrition,~WorkLifeBalance)
+```
+```{r}
+# density plot
+density_plot <-function(data,categorical_col,quantitative_col ){
+  ggplot(data, 
+            aes_(x = quantitative_col, fill = categorical_col)) + 
+            geom_density(alpha = 0.7) + 
+            scale_fill_manual(values = c("#386cb0","#fdb462"))
+}
+density_plot(data,~Attrition,~MonthlyIncome)
+#density_plot(data,~Attrition,~HourlyRate)
+#density_plot(data,~Attrition,~DailyRate)
+#density_plot(data,~Attrition,~MonthlyRate)
 ```
 
-
+## Plot combine
 ```{r}
+facet_plot <- function(data,categorical_col,quantitative_col,facet_col){
+  # plot the distribution using violin and boxplots
+  ggplot(data, aes_(x = categorical_col, 
+                     y = quantitative_col)) +
+  geom_violin(fill = "cornflowerblue") +
+  geom_boxplot(width = .2, 
+               fill = "orange",
+               outlier.color = "orange",
+               outlier.size = 2) +
+  facet_wrap(facet_col) +
+  labs(title=facet_col)
+}
+
+facet_plot(data,~Attrition,~MonthlyIncome,~Department)
+#facet_plot(data,~Attrition,~MonthlyIncome,~JobRole)
+#facet_plot(data,~Attrition,~MonthlyIncome,~JobSatisfaction)
+#facet_plot(data,~Attrition,~MonthlyIncome,~PerformanceRating)
 ```
 
 
@@ -40,6 +143,24 @@ head(data)
 
 # 3. Models
 ```{r}
+library(tidyverse)# include dplyr, tidr, ggplot2, tibble, readr, purr
+library(data.table)
+library(recipes)
+# library(rsample)   # for data splitting
+library(caret)     # for model packages
+library(h2o)
+library(tictoc)
+```
+
+```{r}
+#setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+path <- "WA_Fn-UseC_-HR-Employee-Attrition.csv"
+data <- fread(path)
+head(data)
+```
+
+```{r}
+set.seed(430)
 split = caret::createDataPartition(data$Attrition, p =0.8, list = FALSE)
 train = data[split, ]
 test = data[-split, ]
@@ -57,7 +178,7 @@ test = data[-split, ]
 #data$StockOptionLevel <- factor(data$StockOptionLevel)
 #data$WorkLifeBalance <- factor(data$WorkLifeBalance)
 ```
-
+## Recipe
 ```{r}
 recipe_obj <- recipe(Attrition ~ ., data = train) %>%
   #step_rm(EmployeeNumber,StandardHours,Over18,EmployeeCount) %>% 
@@ -83,7 +204,7 @@ baked_train
 h2o.init()
 ```
 
-
+Method 1: transform data by recipe
 ```{r}
 # convert training data to h2o object
 train_h2o <- as.h2o(baked_train)
@@ -93,6 +214,16 @@ response <- "Attrition"
 n_features <- length(setdiff(names(baked_train), "Attrition"))
 # set the predictor names
 predictors <- setdiff(colnames(baked_train), response)
+```
+Method 2: No transform data
+```{r}
+#train <- mutate_if(train, is.character, as.factor)
+#test <- mutate_if(test, is.character, as.factor)
+#train_h2o <- as.h2o(train)
+#test_h2o <- as.h2o(test)
+#response <- "Attrition"
+#n_features <- length(setdiff(names(train), "Attrition"))
+#predictors <- setdiff(colnames(train), response)
 ```
 
 ## Base model
@@ -105,7 +236,7 @@ h2o_model_gbm <- h2o.gbm(
     nfolds=5,
     seed = 123
 )
-toc()
+toc() # 7 s
 ```
 
 
@@ -118,6 +249,7 @@ caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
 ## Auto ML H2O
 
 ```{r}
+tic()
 auto_ml <- h2o.automl(
     x = predictors, 
     y = response,
@@ -128,25 +260,152 @@ auto_ml <- h2o.automl(
     max_models = 10,
     seed = 12
 )
+toc()
 ```
-
 
 ```{r}
 # Check for the top models
-top_models <- auto_ml@leaderboard
-print(top_models)
+#top_models <- auto_ml@leaderboard
+#print(top_models)
+model_ids <- as.data.frame(auto_ml@leaderboard$model_id)[,1]
+auto_ml
 ```
 
-
 ```{r}
+# Check performance best model auto ML (stacked)
 test_pred <- h2o.predict(auto_ml, test_h2o) 
 reference <- as.data.frame(test_h2o)$Attrition
 predict <- as.data.frame(test_pred)$predict
 caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
 ```
 
+```{r}
+# Check performance GBM autoML
+slect_model <- h2o.getModel(model_ids[5])
+test_pred <- h2o.predict(slect_model, test_h2o) 
+reference <- as.data.frame(test_h2o)$Attrition
+predict <- as.data.frame(test_pred)$predict
+caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
+```
+Choose select model because best Recall/F1/balanced accuracy and easy model explanation
+
+# 4. Save model for Shiny app
 
 ```{r}
+# Save recipe
+#write_rds(recipe_obj,"recipe.Rds")
+
+#Save model
+#getwd()
+#model_path <- h2o.saveModel(object = slect_model, path = getwd(), force = TRUE)
+#print(model_path)
+```
+# 5. Load the model
+```{r}
+# Load recipe
+recipe_load <- readr::read_rds("recipe.Rds")
+# Load model
+model_path <- "GBM_1_AutoML_20210204_095214"
+h2o_model_load <- h2o.loadModel(model_path)
+```
+
+# 6. Explain model
+
+```{r}
+h2o.varimp(h2o_model_load)
+```
+
+```{r}
+h2o.varimp_plot(h2o_model_load)
+```
+
+
+```{r}
+h2o.shap_summary_plot(h2o_model_load,test_h2o)
+```
+
+
+```{r}
+h2o.pd_plot(h2o_model_load, test_h2o, column = "OverTime")
+#h2o.pd_plot(h2o_model_load, test_h2o, column = "MonthlyIncome")
+#h2o.pd_plot(h2o_model_load, test_h2o, column = "StockOptionLevel")
+#h2o.pd_plot(h2o_model_load, test_h2o, column = "DistanceFromHome")
+#h2o.pd_plot(h2o_model_load, test_h2o, column = "EnvironmentSatisfaction")
+```
+```{r}
+h2o.ice_plot(h2o_model_load, test_h2o, column = "MonthlyIncome")
+```
+```{r}
+# Class = No
+h2o.shap_explain_row_plot(h2o_model_load, test_h2o,row_index = 10)
+h2o.shap_explain_row_plot(h2o_model_load, test_h2o,row_index = 4)
+# Class =Yes #2,17,20
+h2o.shap_explain_row_plot(h2o_model_load, test_h2o,row_index = 18)
+h2o.shap_explain_row_plot(h2o_model_load, test_h2o,row_index = 3)
+```
+
+# 7. Create data for predict
+
+```{r}
+num_input <- 2 # how many data for predict ?
+employ.data <- data.frame(matrix(ncol = dim(data)[2], nrow = num_input))
+names(employ.data) <- colnames(data)
+employ.data
+```
+
+
+```{r}
+employ.data$MonthlyIncome <- c(2000,5000) 
+employ.data$OverTime <- c("Yes","No")
+employ.data$DailyRate <- c(1000,591)
+employ.data$MonthlyRate <- c(9964,1000)
+employ.data$DistanceFromHome <- c(24,5)
+employ.data$Age <- c(25,40)
+employ.data$StockOptionLevel <- c(1,3)
+employ.data$RelationshipSatisfaction <- c(1,3)
+employ.data
+```
+
+
+```{r}
+employ.data_process <- bake(recipe_load, new_data = employ.data)
+employ.data_process <- as.h2o(employ.data_process)
+employ.data_process
+```
+
+
+```{r}
+pred <-h2o.predict(h2o_model_load, newdata = employ.data_process)
+pred
+```
+
+
+```{r}
+h2o.shap_explain_row_plot(h2o_model_load, employ.data_process,row_index = 1)
+h2o.shap_explain_row_plot(h2o_model_load, employ.data_process,row_index = 2)
+```
+
+```{r}
+# Run lime() on training set
+explainer <- lime::lime(
+    as.data.frame(train_h2o[,-1]), 
+    model          = h2o_model, 
+    bin_continuous = FALSE)
+# Run explain() on explainer
+explanation <- lime::explain(
+    as.data.frame(test_h2o[1:10,-1]), 
+    explainer    = explainer, 
+    n_labels     = 1, 
+    n_features   = 4,
+    kernel_width = 0.5)
+explanation
+```
+
+
+```{r}
+lime::plot_features(explanation) +
+      labs(title = "HR Predictive Analytics: LIME Feature Importance Visualization",
+           subtitle = "Hold Out (Test) Set, First 10 Cases Shown")
 ```
 
 
@@ -157,8 +416,89 @@ caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
 ```{r}
 ```
 
+# Trial Worklfow
+```{r}
+library(tidymodels)
+```
 
 ```{r}
+set.seed(430)
+split = caret::createDataPartition(data$Attrition, p =0.8, list = FALSE)
+train = data[split, ]
+test = data[-split, ]
+train <- mutate_if(train, is.character, as.factor)
+test <- mutate_if(test, is.character, as.factor)
+```
+
+```{r}
+recipe_new <- recipe(Attrition ~ ., data = train) %>%
+  #step_rm(EmployeeNumber,StandardHours,Over18,EmployeeCount) %>% 
+  #step_string2factor(all_nominal()) %>% # convert character to factor
+  #step_integer(Education,EnvironmentSatisfaction) %>% # Ordinal encoder
+  #step_num2factor(Education,EnvironmentSatisfaction,JobInvolvement,JobLevel,JobSatisfaction,PerformanceRating,RelationshipSatisfaction,StockOptionLevel,WorkLifeBalance) %>%  # convert number to factor
+  step_nzv(all_numeric(), -all_outcomes())  %>% #Remove near-zero variance features like sex, yes/no...
+  #step_knnimpute(all_predictors(), neighbors = 6) %>%  # Impute, very slow in large data in train, need step outside
+  step_YeoJohnson(all_numeric(),-all_outcomes()) %>% # Remove skewness
+  
+  step_center(all_numeric(), -all_outcomes()) %>% # center 
+  step_scale(all_numeric(), -all_outcomes())  # scale
+  #step_dummy(all_nominal(), one_hot = TRUE) %>% 
+  #step_pca(all_numeric(), -all_outcomes()) #Perform dimension reduction
+```
+
+```{r}
+model1 <- boost_tree() %>% 
+            set_engine("xgboost") %>% 
+            set_mode("classification") %>% 
+            translate()
+model2 <- logistic_reg() %>% 
+            set_engine("glm") %>% 
+            set_mode("classification") %>% 
+            translate()
+rf_model <- 
+  # specify that the model is a random forest
+  rand_forest() %>%
+  # specify that the `mtry` parameter needs to be tuned
+  set_args(mtry = tune()) %>%
+  # select the engine/package that underlies the model
+  set_engine("ranger", importance = "impurity") %>%
+  # choose either the continuous regression or binary classification mode
+  set_mode("classification") 
+lr_model <- 
+  # specify that the model is a random forest
+  logistic_reg() %>%
+  # select the engine/package that underlies the model
+  set_engine("glm") %>%
+  # choose either the continuous regression or binary classification mode
+  set_mode("classification") 
+```
+
+
+```{r}
+lm_wflow <- 
+  workflow() %>% 
+  add_recipe(recipe_new)%>% 
+  add_model(rf_model) 
+```
+
+
+
+```{r}
+lm_fit <- fit(lm_wflow, train)
+lm_fit
+```
+```{r}
+write_rds(lm_fit,"lm_wflow_fit.Rds")
+lm_fit_load <- readr::read_rds("lm_wflow_fit.Rds")
+```
+
+
+```{r}
+# Check performance best model auto ML (stacked)
+test_pred <- predict(lm_fit_load, test) 
+reference <- test$Attrition
+predict <- test_pred$.pred_class
+caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
 ```
 
 
