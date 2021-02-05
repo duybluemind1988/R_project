@@ -1,7 +1,9 @@
 library(tidyverse)
-library(modeldata)
+library(data.table)
+#library(modeldata)
 library(shiny)
-data(attrition)
+
+path <- "C:/Users/DNN/Data_science/Git/R_project/Job_attritiion/Shiny_app/WA_Fn-UseC_-HR-Employee-Attrition.csv"
 
 ui <- fluidPage(
   sidebarLayout(
@@ -10,15 +12,21 @@ ui <- fluidPage(
       "This app was created for basic analytic job attrition"
     ), #endsidebarpanel
     mainPanel(
-      tableOutput("data"),
-      plotOutput("cat_vs_cat_chart2"),
+      dataTableOutput("data_head_DT"),
+      
+      observeEvent(data(),updateSelectInput(session, "cat_compare", 
+                                           choices=names(data() %>% select_if(is.character)),selected='BusinessTravel')),
+     # plotOutput("cat_vs_cat_chart2"),
     )#end mainpanel
   )# end sidebarlayout
 )
 
 server <- function(input, output, session) {
   
-  output$data <- reactive(as.data.frame(attrition))
+  data <- reactive({fread(path)})
+  output$data_head_DT<-renderDataTable(data(),
+                                       options =list(pageLength = 5)
+  )
   observeEvent(data(),updateSelectInput(session, "cat_compare", 
                                         choices=names(data() %>% select_if(is.character)),selected='BusinessTravel'))
 
@@ -41,3 +49,4 @@ server <- function(input, output, session) {
 }
 
 shinyApp(ui = ui, server = server)
+

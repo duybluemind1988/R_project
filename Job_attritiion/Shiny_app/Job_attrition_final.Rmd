@@ -45,6 +45,7 @@ Categorical_vs_categorical_plot(data,~Attrition,~Department)
 Categorical_vs_categorical_plot(data,~Attrition,~Education)
 Categorical_vs_categorical_plot(data,~Attrition,~WorkLifeBalance)
 ```
+
 ```{r}
 Categorical_vs_categorical_plot_2 <- function(data,group_col,fill_col){
   data %>%
@@ -65,21 +66,7 @@ Categorical_vs_categorical_plot_2 <- function(data,group_col,fill_col){
 Categorical_vs_categorical_plot_2(data,~Attrition,~BusinessTravel)
 Categorical_vs_categorical_plot_2(data,~Attrition,~WorkLifeBalance)
 ```
-```{r}
-data %>%
-        ggplot(aes(x = BusinessTravel, group = Attrition)) + 
-        geom_bar(aes(y = ..prop.., fill = factor(..x..)), 
-                 stat="count", 
-                 alpha = 0.7) +
-        geom_text(aes(label = scales::percent(..prop..), y = ..prop.. ), 
-                  stat= "count", 
-                  vjust = 2) +
-        labs(y = "Percentage", fill= "Education") +
-        facet_grid(~Attrition) +
-        theme_minimal()+
-        theme(legend.position = "none", plot.title = element_text(hjust = 0.5)) + 
-        ggtitle("Attrition") 
-```
+
 
 ## Plot Categorical vs. Quantitative
 ```{r}
@@ -322,6 +309,9 @@ h2o.varimp_plot(h2o_model_load)
 ```{r}
 h2o.shap_summary_plot(h2o_model_load,test_h2o)
 ```
+```{r}
+#h2o.init()
+```
 
 
 ```{r}
@@ -334,6 +324,10 @@ h2o.pd_plot(h2o_model_load, test_h2o, column = "OverTime")
 ```{r}
 h2o.ice_plot(h2o_model_load, test_h2o, column = "MonthlyIncome")
 ```
+```{r}
+h2o.performance(h2o_model_load,test_h2o)
+```
+
 ```{r}
 # Class = No
 h2o.shap_explain_row_plot(h2o_model_load, test_h2o,row_index = 10)
@@ -529,14 +523,46 @@ Categorical_vs_categorical_plot_2(attrition,~Attrition,~BusinessTravel)
 
 
 ```{r}
+class(attrition)
+attrition
 ```
 
 
 ```{r}
+path <- "C:/Users/DNN/Data_science/Git/R_project/Job_attritiion/Shiny_app/WA_Fn-UseC_-HR-Employee-Attrition.csv"
+data <-fread(path)
+# bar chart function function
+Categorical_vs_categorical_plot_2 <- function(data,group_col,fill_col){
+  data %>%
+    ggplot(aes_(x = fill_col, group = group_col)) + 
+    geom_bar(aes(y = ..prop.., fill = factor(..x..)), 
+             stat="count", 
+             alpha = 0.7) +
+    geom_text(aes(label = scales::percent(..prop..), y = ..prop.. ), 
+              stat= "count", 
+              vjust = 2) +
+    labs(y = "Percentage", fill= "Education") +
+    facet_grid(~Attrition) +
+    theme_minimal()+
+    theme(legend.position = "none", plot.title = element_text(hjust = 0.5)) + 
+    ggtitle("Attrition") 
+  
+}
+
+Categorical_vs_categorical_plot_2(data,~Attrition,~BusinessTravel)
 ```
 
 
 ```{r}
+
+density_plot <-function(data,categorical_col,quantitative_col ){
+  ggplot(data, 
+            aes_(x = quantitative_col, fill = categorical_col)) + 
+            geom_density(alpha = 0.7) + 
+            scale_fill_manual(values = c("#386cb0","#fdb462"))
+}
+density_plot(data,~Attrition,~MonthlyIncome)
+
 ```
 
 

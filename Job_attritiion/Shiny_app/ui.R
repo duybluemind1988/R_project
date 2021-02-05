@@ -18,18 +18,38 @@ ui <- fluidPage(
     mainPanel(
       "First some rows of data:",
       dataTableOutput("data_head_DT"),
-      selectInput("cat_compare", "Choose category column to compare", choices=NULL, selected=NULL),
+      selectInput("category_column", "Choose category column to compare", choices=NULL, selected=NULL),
       plotOutput("cat_vs_cat_chart"),
       plotOutput("cat_vs_cat_chart2"),
-      selectInput("num_compare", "Choose numeric column to compare", choices=NULL, selected=NULL),
+      selectInput("numeric_column", "Choose numeric column to compare", choices=NULL, selected=NULL),
       plotOutput("cat_vs_num_chart"),
       plotOutput("density_chart"),
+      "For complex feature compare (facet_wrap)",
+      selectInput("category_column2", "Choose column for facet_wrap", choices=NULL, selected=NULL),
+      selectInput("numeric_column2", "Choose numeric column to compare", choices=NULL, selected=NULL),
+      plotOutput("complex_chart"),
       "Variable important H2O model:",
       plotOutput("variable_important"),
-      #"Table test set",
-      #tableOutput("test_set"),
+      #"Output test set:",
+      #tableOutput('test_set'),
       "Shap summary plot via test set:",
-      plotOutput("shap_summary_plot")
+      plotOutput("shap_summary_plot"),
+      "Partial Dependence (PD) Plots:",
+      selectInput("all_column", "Choose column for PDP and ICE plot explaination", choices=NULL, selected=NULL),
+      plotOutput("partial_dependence_plot"),
+      "Individual Conditional Expectiation (ICE) Plots:",
+      plotOutput("Individual_Conditional_Expectiation_plot"),
+      
+      "Explain each row on test set by shap h2o: ",
+      sliderInput("obs", "Number of observations:",
+                  min = 1, max = 100, value = 10),
+      tableOutput("test_row_choose"),
+      plotOutput("Shap_Explain_Row_plot"),
+      
+      "Performance model:",
+      tableOutput("performance"),
+      
+      
     )#end mainpanel
   )# end sidebarlayout
 )
