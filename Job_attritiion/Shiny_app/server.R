@@ -8,32 +8,13 @@ library(h2o)
 
 #setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
 path <- "WA_Fn-UseC_-HR-Employee-Attrition.csv"
-ui <- fluidPage(
-  
-  titlePanel("Job Attrition Analytics"),
-  h5("Created by: DNN - Version: 1.0"),
-  sidebarLayout(
-    
-    sidebarPanel(
-      "This app was created for basic analytic job attrition"
-    ), #endsidebarpanel
-    
-    mainPanel(
-      "First some rows of data:",
-      dataTableOutput("data_head_DT"),
-      selectInput("cat_compare", "Choose category column to compare", choices=NULL, selected=NULL),
-      plotOutput("cat_vs_cat_chart"),
-      plotOutput("cat_vs_cat_chart2"),
-      selectInput("num_compare", "Choose numeric column to compare", choices=NULL, selected=NULL),
-      plotOutput("cat_vs_num_chart"),
-      plotOutput("density_chart"),
-      "Variable important H2O model:",
-      plotOutput("variable_important"),
-    )#end mainpanel
-  )# end sidebarlayout
-)
+# load the model
+model_path <- "GBM_1_AutoML_20210204_095214"
+h2o_model <- h2o.loadModel(model_path)
+recipe_load <- readr::read_rds("recipe.Rds")
 
 server <- function(input, output, session) {
+  
   data <- reactive({fread(path)})
   
   output$data_head_DT<-renderDataTable(data(),
@@ -98,19 +79,28 @@ server <- function(input, output, session) {
                   scale_fill_manual(values = c("#386cb0","#fdb462"))
   })
   
-  # Load model
-  # load the model
-  model_path <- "GBM_1_AutoML_20210204_095214"
-  h2o_model <- h2o.loadModel(model_path)
-  
+  # Variable important
   output$variable_important<-renderPlot({
     h2o.varimp_plot(h2o_model)
   })
+  
+  output$test_set <- reactive({
+    set.seed(430)
+    split = caret::createDataPartition(data()$Attrition, p =0.8, list = FALSE)
+    train = data()[split, ]
+    test = data()[-split, ]
+    test <- bake(recipe_load, test)
+    test <- as.h2o(test)
+    #test <- as.data.frame(test)
+    test
+  })
+    
+  # Shap summary plot
   output$shap_summary_plot<-renderPlot({
-    h2o.shap_summary_plot(h2o_model,test_h2o)
+    h2o.shap_summary_plot(h2o_model,test_set())
+    #h2o.pd_plot(h2o_model, test_set(), column = "OverTime")
   })
   
 }
 
-
-shinyApp(ui = ui, server = server)
+#shinyApp(ui = ui, server = server)

@@ -319,7 +319,6 @@ h2o.varimp(h2o_model_load)
 h2o.varimp_plot(h2o_model_load)
 ```
 
-
 ```{r}
 h2o.shap_summary_plot(h2o_model_load,test_h2o)
 ```
@@ -501,8 +500,31 @@ predict <- test_pred$.pred_class
 caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
 ```
 
-
+# Stack over flow
 ```{r}
+library(tidyverse)
+library(modeldata)
+data(attrition)
+#attrition
+
+# R function
+Categorical_vs_categorical_plot_2 <- function(data,group_col,fill_col){
+  data %>%
+    ggplot(aes_(x = fill_col, group = group_col)) + 
+    geom_bar(aes(y = ..prop.., fill = factor(..x..)), 
+             stat="count", 
+             alpha = 0.7) +
+    geom_text(aes(label = scales::percent(..prop..), y = ..prop.. ), 
+              stat= "count", 
+              vjust = 2) +
+    labs(y = "Percentage", fill= "Education") +
+    facet_grid(~Attrition) +
+    theme_minimal()+
+    theme(legend.position = "none", plot.title = element_text(hjust = 0.5)) + 
+    ggtitle("Attrition") 
+  
+}
+Categorical_vs_categorical_plot_2(attrition,~Attrition,~BusinessTravel)
 ```
 
 
