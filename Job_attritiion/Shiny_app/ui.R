@@ -16,6 +16,7 @@ ui <- fluidPage(
     ), #endsidebarpanel
     
     mainPanel(
+      ### EDA
       "First some rows of data:",
       dataTableOutput("data_head_DT"),
       selectInput("category_column", "Choose category column to compare", choices=NULL, selected=NULL),
@@ -28,10 +29,10 @@ ui <- fluidPage(
       selectInput("category_column2", "Choose column for facet_wrap", choices=NULL, selected=NULL),
       selectInput("numeric_column2", "Choose numeric column to compare", choices=NULL, selected=NULL),
       plotOutput("complex_chart"),
+      
+      ### MODEL INFORMATION
       "Variable important H2O model:",
       plotOutput("variable_important"),
-      #"Output test set:",
-      #tableOutput('test_set'),
       "Shap summary plot via test set:",
       plotOutput("shap_summary_plot"),
       "Partial Dependence (PD) Plots:",
@@ -43,17 +44,24 @@ ui <- fluidPage(
       verbatimTextOutput("h2o_performance"),
       "Model confusion matrix:",
       verbatimTextOutput("confusionmatrix"),
+      
+      ### PREDICTION
       "Show all test set:",
       dataTableOutput("test_set_DT"),
       "Predict test set",
-      sliderInput("obs", "Please choose row on test set for prediction",min = 1, max = 100, value = 10),
+      numericInput("obs", "Please choose row on test set for prediction",value = 10,min = 1, max = 100),
       "Show test row choose",
       tableOutput("test_row_choose"), # Show test set choose all column
       "Prediction row choose",
       tableOutput("test_predict"),
       "Explain each row on test set by shap h2o: ",
       plotOutput("Shap_Explain_Row_plot"),
-      
+      # Predict base on file input:
+      fileInput("file",h3("Choose csv file"),accept = ".csv"),
+      "Show test row choose",
+      tableOutput("test_row_choose_upload"), # Show test set choose all column
+      "Prediction row choose",
+      tableOutput("test_predict_upload"),
     )#end mainpanel
   )# end sidebarlayout
 )

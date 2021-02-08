@@ -151,6 +151,7 @@ set.seed(430)
 split = caret::createDataPartition(data$Attrition, p =0.8, list = FALSE)
 train = data[split, ]
 test = data[-split, ]
+write.csv(test,"test_sample1.csv",row.names = FALSE)
 ```
 
 ```{r}
