@@ -39,16 +39,20 @@ ui <- fluidPage(
       plotOutput("partial_dependence_plot"),
       "Individual Conditional Expectiation (ICE) Plots:",
       plotOutput("Individual_Conditional_Expectiation_plot"),
-      
+      "H2O Performance",
+      verbatimTextOutput("h2o_performance"),
+      "Model confusion matrix:",
+      verbatimTextOutput("confusionmatrix"),
+      "Show all test set:",
+      dataTableOutput("test_set_DT"),
+      "Predict test set",
+      sliderInput("obs", "Please choose row on test set for prediction",min = 1, max = 100, value = 10),
+      "Show test row choose",
+      tableOutput("test_row_choose"), # Show test set choose all column
+      "Prediction row choose",
+      tableOutput("test_predict"),
       "Explain each row on test set by shap h2o: ",
-      sliderInput("obs", "Number of observations:",
-                  min = 1, max = 100, value = 10),
-      tableOutput("test_row_choose"),
       plotOutput("Shap_Explain_Row_plot"),
-      
-      "Performance model:",
-      tableOutput("performance"),
-      
       
     )#end mainpanel
   )# end sidebarlayout

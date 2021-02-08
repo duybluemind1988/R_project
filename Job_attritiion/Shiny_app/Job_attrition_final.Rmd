@@ -229,8 +229,8 @@ toc() # 7 s
 
 ```{r}
 test_pred <-h2o.predict(h2o_model_gbm, newdata = test_h2o)
-reference <- as.data.frame(test_h2o)$Attrition
 predict <- as.data.frame(test_pred)$predict
+reference <- as.data.frame(test_h2o)$Attrition
 caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
 ```
 ## Auto ML H2O
@@ -289,11 +289,48 @@ Choose select model because best Recall/F1/balanced accuracy and easy model expl
 ```
 # 5. Load the model
 ```{r}
+path <- "WA_Fn-UseC_-HR-Employee-Attrition.csv"
 # Load recipe
-recipe_load <- readr::read_rds("recipe.Rds")
+recipe_load <- readr::read_rds("/home/dnn/Data_science/Git/R_project/Job_attritiion/Shiny_app/recipe.Rds")
 # Load model
-model_path <- "GBM_1_AutoML_20210204_095214"
+model_path <- "/home/dnn/Data_science/Git/R_project/Job_attritiion/Shiny_app/GBM_1_AutoML_20210204_095214"
 h2o_model_load <- h2o.loadModel(model_path)
+```
+```{r}
+data <- fread(path)
+set.seed(430)
+split = caret::createDataPartition(data$Attrition, p =0.8, list = FALSE)
+train = data[split, ]
+test = data[-split, ]
+test <- bake(recipe_load, test)
+test_h2o <- as.h2o(test)
+```
+
+```{r}
+class(test_h2o)
+#test_h2o [1,c("Attrition")]
+#test_h2o[-c(33)] #test_h2o[-c("Attrition")]
+test_h2o[1,-c(33)]
+# Ad ID to test set
+test_h2o_dt <- as.data.table(test_h2o)
+test_h2o_dt$Id <- seq.int(nrow(test_h2o_dt))
+setcolorder(test_h2o_dt, c("Id", setdiff(names(test_h2o_dt), "Id")))
+test_h2o_dt
+```
+
+```{r}
+class(h2o.performance(h2o_model_load,test_h2o))
+h2o.performance(h2o_model_load,test_h2o)
+```
+
+```{r}
+test_pred <- h2o.predict(h2o_model_load, test_h2o) 
+predict <- as.data.frame(test_pred)$predict
+reference <- as.data.frame(test_h2o)$Attrition
+caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
+```
+```{r}
+test_pred
 ```
 
 # 6. Explain model

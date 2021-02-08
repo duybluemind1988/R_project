@@ -7,13 +7,15 @@ library(rsample)
 library(caret)
 library(h2o)
 h2o.init()
+h2o.no_progress() # diseable progress bar
 #setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
-path <- "WA_Fn-UseC_-HR-Employee-Attrition.csv"
+path <- "/home/dnn/Data_science/Git/R_project/Job_attritiion/Shiny_app/WA_Fn-UseC_-HR-Employee-Attrition.csv"
 #path <- "C:/Users/DNN/Data_science/Git/R_project/Job_attritiion/Shiny_app/WA_Fn-UseC_-HR-Employee-Attrition.csv"
 # load the model
-model_path <- "GBM_1_AutoML_20210204_095214"
+model_path <- "/home/dnn/Data_science/Git/R_project/Job_attritiion/Shiny_app/GBM_1_AutoML_20210204_095214"
 #model_path <- "C:/Users/DNN/Data_science/Git/R_project/Job_attritiion/Shiny_app/GBM_1_AutoML_20210204_095214"
-recipe_path <- "recipe.Rds"
+#recipe_path <- "Job_attritiion/Shiny_app/recipe.Rds"
+recipe_path <- "/home/dnn/Data_science/Git/R_project/Job_attritiion/Shiny_app/recipe.Rds"
 
 h2o_model <- h2o.loadModel(model_path)
 recipe_load <- readr::read_rds(recipe_path)
@@ -143,16 +145,35 @@ server <- function(input, output, session) {
   output$Individual_Conditional_Expectiation_plot  <- renderPlot({
     h2o.ice_plot(h2o_model, test_set(), column = input$all_column)
   })
-  
-  # Shap explain row plot:
+  # H2o Model performance
+  output$h2o_performance <- renderPrint({
+    h2o.performance(h2o_model,test_set())
+  })
+  # Model confusion matrix
+  output$confusionmatrix <- renderPrint({
+    test_pred <- h2o.predict(h2o_model, test_set()) 
+    predict <- as.data.frame(test_pred)$predict
+    reference <- as.data.frame(test_set())$Attrition
+    matrix <- confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
+    matrix
+  })
+  # Show all test set by data.table (add ID)
+  output$test_set_DT<-renderDataTable({
+    test_h2o_dt <- as.data.table(test_set())
+    test_h2o_dt$Id <- seq.int(nrow(test_h2o_dt))
+    setcolorder(test_h2o_dt, c("Id", setdiff(names(test_h2o_dt), "Id")))
+    
+    },options =list(pageLength = 5))
+  # Show test row choose all festures
   output$test_row_choose <- renderTable(test_set()[input$obs,])
-  
+  # Predict test set (remove class column - no different)
+  output$test_predict <- renderTable(test_pred <- h2o.predict(h2o_model, test_set()[input$obs,-c(33)]) )
+  # Shap explain row plot:
   output$Shap_Explain_Row_plot  <- renderPlot({
     h2o.shap_explain_row_plot(h2o_model, test_set(),row_index = input$obs)
   })
   
-  # Model performance
-  output$performance <- renderTable(h2o.performance(h2o_model,test_set())) 
+  
   
 }
 
