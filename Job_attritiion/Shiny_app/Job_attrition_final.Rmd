@@ -120,12 +120,110 @@ facet_plot(data,~Attrition,~MonthlyIncome,~Department)
 #facet_plot(data,~Attrition,~MonthlyIncome,~PerformanceRating)
 ```
 
+## Smart EDA
+https://cran.r-project.org/web/packages/SmartEDA/vignettes/SmartEDA.html#introduction
+```{r}
+#install.packages("SmartEDA")
+library("SmartEDA")
+```
 
 ```{r}
+# Overview of the data - Type = 1
+ExpData(data=data,type=1)
 ```
 
 
 ```{r}
+# Structure of the data - Type = 2
+ExpData(data=data,type=2)
+```
+3.1.1 Summary of numerical variables
+```{r}
+# Summary of all numerical variables
+ExpNumStat(data,by="A",gp=NULL,Qnt=seq(0,1,0.1),MesofShape=2,Outlier=TRUE,round=2,Nlim=10)
+```
+
+
+```{r}
+# Note: Variable excluded (if unique value of variable which is less than or eaual to 10 [nlim=10])
+#ExpNumViz(data,target=NULL,nlim=10,Page=c(2,2),sample=4)
+ExpNumViz(data, Page=c(3,3))
+```
+
+3.1.3. Summary of categorical variables
+```{r}
+ExpCTable(data,Target=NULL,margin=1,clim=10,nlim=3,round=2,bin=NULL,per=T)
+```
+
+
+```{r}
+plot2 <- ExpCatViz(data,target=NULL,col ="slateblue4",clim=10,margin=2,Page = c(2,1),sample=4)
+plot2[[1]]
+```
+3.2 Example for case 2: Target variable is continuous
+3.2.1. Target variable
+```{r}
+head(data)
+```
+```{r}
+ExpNumStat(data,by="A",gp="MonthlyIncome",Qnt=seq(0,1,0.1),MesofShape=1,Outlier=TRUE,round=2)
+```
+If Target variable is continuous, summary statistics will add the correlation column (Correlation between Target variable vs all independet variables)
+```{r}
+#Note: sample=8 means randomly selected 8 scatter plots
+#Note: nlim=4 means included numeric variable with unique value is more than 4
+plot3 <- ExpNumViz(data,target="MonthlyIncome",nlim=4,scatter=FALSE,fname=NULL,col="green",Page=c(2,2),sample=8)
+plot3[[1]]
+```
+
+
+```{r}
+#Note: sample=8 means randomly selected 8 scatter plots
+#Note: nlim=4 means included numeric variable with unique value is more than 4
+plot31 <- ExpNumViz(data,target="Attrition",nlim=4,scatter=TRUE,fname=NULL,Page=c(2,1),sample=4)
+plot31[[1]]
+```
+
+
+```{r}
+plot4 <- ExpNumViz(data,target="Attrition",type=1,nlim=3,fname=NULL,col=c("darkgreen","springgreen3","springgreen1"),Page=c(2,2),sample=8)
+plot4[[1]]
+```
+```{r}
+ ExpCatStat(data,Target="Attrition",result = "Stat",clim=10,nlim=5,bins=10,Pclass="Yes",plot=FALSE,top=20,Round=2)
+```
+
+
+```{r}
+ExpCatStat(data,Target="Attrition",result = "Stat",clim=10,nlim=5,bins=10,Pclass="Yes",plot=TRUE,top=10,Round=2)
+```
+
+
+```{r}
+plot5 <- ExpCatViz(data,target="Attrition",fname=NULL,clim=5,col=c("slateblue4","slateblue1"),margin=2,Page = c(2,2),sample=2)
+plot5[[1]]
+```
+
+
+```{r}
+qqp <- ExpOutQQ(data,nlim=10,fname=NULL,Page=c(2,2),sample=4)
+qqp[[1]]
+```
+
+## Data Explorer
+```{r}
+#install.packages("DataExplorer")
+library(DataExplorer)
+create_report(data)
+create_report(data,y = "Attrition")
+```
+
+## dlookr (FAIL)
+```{r}
+#devtools::install_github("choonghyunryu/dlookr")
+library(dlookr)
+data %>%
+  diagnose_report(output_format = "html", output_file = "dlookr_summary.html")
 ```
 
 # 3. Models
@@ -148,10 +246,11 @@ head(data)
 
 ```{r}
 set.seed(430)
-split = caret::createDataPartition(data$Attrition, p =0.8, list = FALSE)
+response <- "Attrition"
+split = caret::createDataPartition(data[[response]], p =0.8, list = FALSE)
 train = data[split, ]
 test = data[-split, ]
-write.csv(test,"test_sample1.csv",row.names = FALSE)
+#write.csv(test,"test_sample1.csv",row.names = FALSE)
 ```
 
 ```{r}
@@ -175,10 +274,10 @@ recipe_obj <- recipe(Attrition ~ ., data = train) %>%
   #step_num2factor(Education,EnvironmentSatisfaction,JobInvolvement,JobLevel,JobSatisfaction,PerformanceRating,RelationshipSatisfaction,StockOptionLevel,WorkLifeBalance) %>%  # convert number to factor
   step_nzv(all_numeric(), -all_outcomes())  %>% #Remove near-zero variance features like sex, yes/no...
   #step_knnimpute(all_predictors(), neighbors = 6) %>%  # Impute, very slow in large data in train, need step outside
-  step_YeoJohnson(all_numeric(),-all_outcomes()) %>% # Remove skewness
+  #step_YeoJohnson(all_numeric(),-all_outcomes()) %>% # Remove skewness
   
-  step_center(all_numeric(), -all_outcomes()) %>% # center 
-  step_scale(all_numeric(), -all_outcomes()) %>% # scale
+  #step_center(all_numeric(), -all_outcomes()) %>% # center, no need for tree method
+  #step_scale(all_numeric(), -all_outcomes()) %>% # scale, no need for tree method
   #step_dummy(all_nominal(), one_hot = TRUE) %>% 
   #step_pca(all_numeric(), -all_outcomes()) #Perform dimension reduction
   prep()
@@ -199,7 +298,7 @@ train_h2o <- as.h2o(baked_train)
 test_h2o <- as.h2o(baked_test)
 # set the response column to Sale_Price
 response <- "Attrition"
-n_features <- length(setdiff(names(baked_train), "Attrition"))
+#n_features <- length(setdiff(names(baked_train), response))
 # set the predictor names
 predictors <- setdiff(colnames(baked_train), response)
 ```
@@ -216,11 +315,17 @@ Method 2: No transform data
 
 ## Base model
 ```{r}
+train_h2o
+```
+
+```{r}
+assignment_type <- "Stratified"
 tic()
 h2o_model_gbm <- h2o.gbm(
     x = predictors, 
     y = response,
     training_frame = train_h2o, 
+    fold_assignment = assignment_type,
     nfolds=5,
     seed = 123
 )
@@ -234,6 +339,487 @@ predict <- as.data.frame(test_pred)$predict
 reference <- as.data.frame(test_h2o)$Attrition
 caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
 ```
+```{r}
+assignment_type <- "Stratified"
+tic()
+h2o_model_xgboost <- h2o.xgboost(
+    x = predictors, 
+    y = response,
+    training_frame = train_h2o, 
+    fold_assignment = assignment_type,
+    #ntrees = 1000,
+    #booster = "dart",
+    #normalize_type = "tree",
+    nfolds=5,
+    seed = 123
+)
+toc() # 7 s
+test_pred <-h2o.predict(h2o_model_xgboost, newdata = test_h2o)
+predict <- as.data.frame(test_pred)$predict
+reference <- as.data.frame(test_h2o)$Attrition
+caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
+```
+```{r}
+# Light gbm
+assignment_type <- "Stratified"
+tic()
+h2o_model_lightgbm <- h2o.xgboost(
+    x = predictors, 
+    y = response,
+    training_frame = train_h2o, 
+    fold_assignment = assignment_type,
+    tree_method="hist",
+    grow_policy="lossguide",
+    nfolds=5,
+    seed = 123
+)
+toc() # 7 s
+test_pred <-h2o.predict(h2o_model_lightgbm, newdata = test_h2o)
+predict <- as.data.frame(test_pred)$predict
+reference <- as.data.frame(test_h2o)$Attrition
+caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
+```
+
+```{r}
+assignment_type <- "Stratified"
+tic()
+h2o_model_rf <- h2o.randomForest(
+    x = predictors, 
+    y = response,
+    training_frame = train_h2o, 
+    fold_assignment = assignment_type,
+    nfolds=5,
+    seed = 123
+)
+toc() # 7 s
+test_pred <-h2o.predict(h2o_model_rf, newdata = test_h2o)
+predict <- as.data.frame(test_pred)$predict
+reference <- as.data.frame(test_h2o)$Attrition
+caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
+```
+## Base model with train, valid, test
+### Split data
+```{r}
+path <- "WA_Fn-UseC_-HR-Employee-Attrition.csv"
+data <- fread(path)
+set.seed(430)
+response="Attrition"
+set.seed(430)
+split = caret::createDataPartition(data[[response]], p =0.6, list = FALSE)
+train = data[split, ]
+
+valid_test = data[-split, ]
+split2 = caret::createDataPartition(valid_test[[response]], p =0.5, list = FALSE)
+valid = valid_test[split2, ]
+test = valid_test[-split2, ]
+
+dim(train)
+dim(valid)
+dim(test)
+prop.table(table(as.data.frame(train[[response]])))
+prop.table(table(as.data.frame(valid[[response]])))
+prop.table(table(as.data.frame(test[[response]])))
+```
+```{r}
+#splits <- h2o.splitFrame(
+#  data = as.h2o(data),
+#  ratios = c(0.6,0.2),   ## only need to specify 2 fractions, the 3rd is implied
+#  destination_frames = c("train.hex", "valid.hex", "test.hex"), seed = 1234
+#)
+#train <- splits[[1]]
+#valid <- splits[[2]]
+#test  <- splits[[3]]
+#prop.table(table(as.data.frame(train$Attrition)))
+#prop.table(table(as.data.frame(valid$Attrition)))
+#prop.table(table(as.data.frame(test$Attrition)))
+```
+
+
+```{r}
+recipe_obj <- recipe(Attrition ~ ., data = train) %>%
+  #step_rm(EmployeeNumber,StandardHours,Over18,EmployeeCount) %>% 
+  #step_string2factor(all_nominal()) %>% # convert character to factor
+  #step_integer(Education,EnvironmentSatisfaction) %>% # Ordinal encoder
+  #step_num2factor(Education,EnvironmentSatisfaction,JobInvolvement,JobLevel,JobSatisfaction,PerformanceRating,RelationshipSatisfaction,StockOptionLevel,WorkLifeBalance) %>%  # convert number to factor
+  step_nzv(all_numeric(), -all_outcomes())  %>% #Remove near-zero variance features like sex, yes/no...
+  #step_knnimpute(all_predictors(), neighbors = 6) %>%  # Impute, very slow in large data in train, need step outside
+  #step_YeoJohnson(all_numeric(),-all_outcomes()) %>% # Remove skewness
+  
+  #step_center(all_numeric(), -all_outcomes()) %>% # center, no need for tree method
+  #step_scale(all_numeric(), -all_outcomes()) %>% # scale, no need for tree method
+  #step_dummy(all_nominal(), one_hot = TRUE) %>% 
+  #step_pca(all_numeric(), -all_outcomes()) #Perform dimension reduction
+  prep()
+baked_train <- bake(recipe_obj, new_data = train)
+baked_valid <- bake(recipe_obj, new_data = valid)
+baked_test <- bake(recipe_obj, new_data = test)
+# convert training data to h2o object
+train_h2o <- as.h2o(baked_train)
+valid_h2o <- as.h2o(baked_valid)
+test_h2o <- as.h2o(baked_test)
+# set the response column to Sale_Price
+response <- "Attrition"
+#n_features <- length(setdiff(names(baked_train), response))
+# set the predictor names
+predictors <- setdiff(colnames(baked_train), response)
+```
+
+### GBM
+```{r}
+assignment_type <- "Stratified"
+tic()
+h2o.gbm <- h2o.gbm(
+    x = predictors, 
+    y = response,
+    training_frame = train_h2o, 
+    validation_frame = valid_h2o,
+    #fold_assignment = assignment_type,
+    #ntrees = 1000,
+    #booster = "dart",
+    #normalize_type = "tree",
+    #nfolds=5,
+    seed = 123
+)
+toc() # 7 s
+test_pred <-h2o.predict(h2o.gbm, newdata = test_h2o)
+predict <- as.data.frame(test_pred)$predict
+reference <- as.data.frame(test_h2o)[[response]]
+caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
+```
+```{r}
+assignment_type <- "Stratified"
+tic()
+h2o.gbm <- h2o.gbm(
+    x = predictors, 
+    y = response,
+    training_frame = train_h2o, 
+    validation_frame = valid_h2o,
+    balance_classes = TRUE,
+    #fold_assignment = assignment_type,
+    #ntrees = 1000,
+    #booster = "dart",
+    #normalize_type = "tree",
+    #nfolds=5,
+    seed = 123
+)
+toc() # 7 s
+test_pred <-h2o.predict(h2o.gbm, newdata = test_h2o)
+predict <- as.data.frame(test_pred)$predict
+reference <- as.data.frame(test_h2o)[[response]]
+caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
+```
+```{r}
+assignment_type <- "Stratified"
+# you can also try "Auto", "Modulo", and "Stratified"
+h2o_gbm <- h2o.gbm(
+  ## standard model parameters
+  x = predictors,
+  y = response,
+  training_frame = train_h2o,
+  #fold_assignment = assignment_type,
+  #nfolds=5,
+  validation_frame = valid_h2o,
+  ## more trees is better if the learning rate is small enough
+  ## here, use "more than enough" trees - we have early stopping
+  ntrees = 1000,
+  ## smaller learning rate is better (this is a good value for most datasets, but see below for annealing)
+  learn_rate=0.02,
+  ## early stopping once the validation AUC doesn't improve by at least 0.01% for 5 consecutive scoring events
+  stopping_rounds = 5, stopping_tolerance = 1e-4, stopping_metric = "AUC",
+  ## sample 80% of rows per tree
+  sample_rate = 0.8,
+  ## sample 80% of columns per split
+  col_sample_rate = 0.8,
+  ## fix a random number generator seed for reproducibility
+  seed = 1234,
+  ## score every 10 trees to make early stopping reproducible (it depends on the scoring interval)
+  #score_tree_interval = 10
+)
+test_pred <-h2o.predict(h2o_gbm, newdata = test_h2o)
+predict <- as.data.frame(test_pred)$predict
+reference <- as.data.frame(test_h2o)[[response]]
+caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
+```
+
+```{r}
+## Depth 10 is usually plenty of depth for most datasets, but you never know
+hyper_params = list( max_depth = seq(1,29,2) )
+#hyper_params = list( max_depth = c(4,6,8,12,16,20) ) ##faster for larger datasets
+grid <- h2o.grid(
+  ## hyper parameters
+  hyper_params = hyper_params,
+  ## full Cartesian hyper-parameter search
+  search_criteria = list(strategy = "Cartesian"),
+  ## which algorithm to run
+  algorithm="gbm",
+  ## identifier for the grid, to later retrieve it
+  grid_id="depth_grid",
+  ## standard model parameters
+  x = predictors,
+  y = response,
+  training_frame = train_h2o,
+  validation_frame = valid_h2o,
+  ## more trees is better if the learning rate is small enough
+  ## here, use "more than enough" trees - we have early stopping
+  ntrees = 10000,
+  ## smaller learning rate is better
+  ## since we have learning_rate_annealing, we can afford to start with a bigger learning rate
+  learn_rate = 0.05,
+  ## learning rate annealing: learning_rate shrinks by 1% after every tree
+  ## (use 1.00 to disable, but then lower the learning_rate)
+  learn_rate_annealing = 0.99,
+  ## sample 80% of rows per tree
+  sample_rate = 0.8,
+  ## sample 80% of columns per split
+  col_sample_rate = 0.8,
+  ## fix a random number generator seed for reproducibility
+  seed = 1234,
+  ## early stopping once the validation AUC doesn't improve by at least 0.01% for 5 consecutive scoring events
+  stopping_rounds = 5,
+  stopping_tolerance = 1e-4,
+  stopping_metric = "AUC",
+  ## score every 10 trees to make early stopping reproducible (it depends on the scoring interval)
+  score_tree_interval = 10
+)
+## by default, display the grid search results sorted by increasing logloss (since this is a classification task)
+grid
+```
+
+### XGBOOST
+```{r}
+assignment_type <- "Stratified"
+tic()
+h2o_model_xgboost <- h2o.xgboost(
+    x = predictors, 
+    y = response,
+    training_frame = train_h2o, 
+    validation_frame = valid_h2o,
+    #fold_assignment = assignment_type,
+    #ntrees = 1000,
+    #booster = "dart",
+    #normalize_type = "tree",
+    #nfolds=5,
+    seed = 123
+)
+toc() # 7 s
+test_pred <-h2o.predict(h2o_model_xgboost, newdata = test_h2o)
+predict <- as.data.frame(test_pred)$predict
+reference <- as.data.frame(test_h2o)[[response]]
+caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
+```
+```{r}
+assignment_type <- "Stratified"
+# you can also try "Auto", "Modulo", and "Stratified"
+h2o_model_xgboost <- h2o.xgboost(
+  ## standard model parameters
+  x = predictors,
+  y = response,
+  training_frame = train_h2o,
+  #fold_assignment = assignment_type,
+  #nfolds=5,
+  validation_frame = valid_h2o,
+  ## more trees is better if the learning rate is small enough
+  ## here, use "more than enough" trees - we have early stopping
+  ntrees = 1000,
+  ## smaller learning rate is better (this is a good value for most datasets, but see below for annealing)
+  learn_rate=0.02,
+  ## early stopping once the validation AUC doesn't improve by at least 0.01% for 5 consecutive scoring events
+  stopping_rounds = 5, stopping_tolerance = 1e-4, stopping_metric = "AUC",
+  ## sample 80% of rows per tree
+  sample_rate = 0.8,
+  ## sample 80% of columns per split
+  col_sample_rate = 0.8,
+  ## fix a random number generator seed for reproducibility
+  seed = 1234,
+  ## score every 10 trees to make early stopping reproducible (it depends on the scoring interval)
+  #score_tree_interval = 10
+)
+test_pred <-h2o.predict(h2o_model_xgboost, newdata = test_h2o)
+predict <- as.data.frame(test_pred)$predict
+reference <- as.data.frame(test_h2o)[[response]]
+caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
+```
+
+### Light GBM
+```{r}
+# Light gbm
+assignment_type <- "Stratified"
+tic()
+h2o_model_lightgbm <- h2o.xgboost(
+    x = predictors, 
+    y = response,
+    training_frame = train_h2o, 
+    validation_frame = valid_h2o,
+    #fold_assignment = assignment_type,
+    tree_method="hist",
+    grow_policy="lossguide",
+    #nfolds=5,
+    seed = 123
+)
+toc() # 7 s
+test_pred <-h2o.predict(h2o_model_lightgbm, newdata = test_h2o)
+predict <- as.data.frame(test_pred)$predict
+reference <- as.data.frame(test_h2o)[[response]]
+caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
+```
+```{r}
+# Light gbm
+assignment_type <- "Stratified"
+tic()
+h2o_model_lightgbm <- h2o.xgboost(
+    x = predictors, 
+    y = response,
+    training_frame = train_h2o, 
+    #validation_frame = valid_h2o,
+    fold_assignment = assignment_type,
+    tree_method="hist",
+    grow_policy="lossguide",
+    nfolds=5,
+    seed = 123
+)
+toc() # 7 s
+test_pred <-h2o.predict(h2o_model_lightgbm, newdata = test_h2o)
+predict <- as.data.frame(test_pred)$predict
+reference <- as.data.frame(test_h2o)[[response]]
+caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
+```
+### Random forest
+```{r}
+assignment_type <- "Stratified"
+tic()
+h2o_model_rf <- h2o.randomForest(
+    x = predictors, 
+    y = response,
+    training_frame = train_h2o, 
+    validation_frame = valid_h2o,
+    #balance_classes = TRUE,
+    #fold_assignment = assignment_type,
+    #nfolds=5,
+    seed = 123
+)
+toc() # 7 s
+test_pred <-h2o.predict(h2o_model_rf, newdata = test_h2o)
+predict <- as.data.frame(test_pred)$predict
+reference <- as.data.frame(test_h2o)[[response]]
+caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
+```
+
+```{r}
+assignment_type <- "Stratified"
+tic()
+h2o_model_rf <- h2o.randomForest(
+    x = predictors, 
+    y = response,
+    training_frame = train_h2o, 
+    validation_frame = valid_h2o,
+    balance_classes = TRUE,
+    #fold_assignment = assignment_type,
+    #nfolds=5,
+    seed = 123
+)
+toc() # 7 s
+test_pred <-h2o.predict(h2o_model_rf, newdata = test_h2o)
+predict <- as.data.frame(test_pred)$predict
+reference <- as.data.frame(test_h2o)[[response]]
+caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
+```
+
+```{r}
+assignment_type <- "Stratified"
+tic()
+h2o_model_rf <- h2o.randomForest(
+    x = predictors, 
+    y = response,
+    training_frame = train_h2o, 
+    validation_frame = valid_h2o,
+    balance_classes = TRUE,
+    ntrees = 1000,
+    #fold_assignment = assignment_type,
+    #nfolds=5,
+    seed = 123
+)
+toc() # 7 s
+test_pred <-h2o.predict(h2o_model_rf, newdata = test_h2o)
+predict <- as.data.frame(test_pred)$predict
+reference <- as.data.frame(test_h2o)[[response]]
+caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
+```
+
+## Try other models tunning
+
+```{r}
+assignment_type <- "Stratified"
+# you can also try "Auto", "Modulo", and "Stratified"
+gbm <- h2o.gbm(
+  ## standard model parameters
+  x = predictors,
+  y = response,
+  training_frame = train_h2o,
+  fold_assignment = assignment_type,
+  nfolds=5,
+  #validation_frame = valid,
+  ## more trees is better if the learning rate is small enough
+  ## here, use "more than enough" trees - we have early stopping
+  ntrees = 10000,
+  ## smaller learning rate is better (this is a good value for most datasets, but see below for annealing)
+  learn_rate=0.01,
+  ## early stopping once the validation AUC doesn't improve by at least 0.01% for 5 consecutive scoring events
+  stopping_rounds = 5, stopping_tolerance = 1e-4, stopping_metric = "logloss",
+  ## sample 80% of rows per tree
+  sample_rate = 0.8,
+  ## sample 80% of columns per split
+  col_sample_rate = 0.8,
+  ## fix a random number generator seed for reproducibility
+  seed = 1234,
+  ## score every 10 trees to make early stopping reproducible (it depends on the scoring interval)
+  score_tree_interval = 10
+)
+test_pred <-h2o.predict(gbm, newdata = test_h2o)
+predict <- as.data.frame(test_pred)$predict
+reference <- as.data.frame(test_h2o)[[response]]
+caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
+```
+
+```{r}
+test_pred <-h2o.predict(gbm, newdata = test_h2o)
+predict <- as.data.frame(test_pred)$predict
+reference <- as.data.frame(test_h2o)$Attrition
+caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
+```
+
+```{r}
+assignment_type <- "Stratified"
+# you can also try "Auto", "Modulo", and "Stratified"
+h2o_rf_tunning <- h2o.randomForest(
+  ## standard model parameters
+  x = predictors,
+  y = response,
+  training_frame = train_h2o,
+  fold_assignment = assignment_type,
+  nfolds=5,
+  #validation_frame = valid,
+  ## more trees is better if the learning rate is small enough
+  ## here, use "more than enough" trees - we have early stopping
+  ntrees = 1000,
+  ## smaller learning rate is better (this is a good value for most datasets, but see below for annealing)
+  #learn_rate=0.01,
+  ## early stopping once the validation AUC doesn't improve by at least 0.01% for 5 consecutive scoring events
+  #stopping_rounds = 5, stopping_tolerance = 1e-4, stopping_metric = "AUC",
+  ## sample 80% of rows per tree
+  #sample_rate = 0.8,
+  ## sample 80% of columns per split
+  #col_sample_rate = 0.8,
+  ## fix a random number generator seed for reproducibility
+  seed = 1234,
+  ## score every 10 trees to make early stopping reproducible (it depends on the scoring interval)
+  #score_tree_interval = 10
+)
+test_pred <-h2o.predict(h2o_rf_tunning, newdata = test_h2o)
+predict <- as.data.frame(test_pred)$predict
+reference <- as.data.frame(test_h2o)[[response]]
+caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
+```
+
 ## Auto ML H2O
 
 ```{r}
@@ -294,7 +880,7 @@ path <- "WA_Fn-UseC_-HR-Employee-Attrition.csv"
 # Load recipe
 recipe_load <- readr::read_rds("/home/dnn/Data_science/Git/R_project/Job_attritiion/Shiny_app/recipe.Rds")
 # Load model
-model_path <- "/home/dnn/Data_science/Git/R_project/Job_attritiion/Shiny_app/GBM_1_AutoML_20210204_095214"
+model_path <- "/home/dnn/Data_science/Git/R_project/Job_attritiion/Shiny_app/GBM_5_AutoML_20210211_204652"
 h2o_model_load <- h2o.loadModel(model_path)
 ```
 ```{r}
@@ -303,7 +889,9 @@ set.seed(430)
 split = caret::createDataPartition(data$Attrition, p =0.8, list = FALSE)
 train = data[split, ]
 test = data[-split, ]
+train <- bake(recipe_load,train)
 test <- bake(recipe_load, test)
+train_h2o <- as.h2o(train)
 test_h2o <- as.h2o(test)
 ```
 
@@ -360,6 +948,11 @@ h2o.pd_plot(h2o_model_load, test_h2o, column = "OverTime")
 #h2o.pd_plot(h2o_model_load, test_h2o, column = "EnvironmentSatisfaction")
 ```
 ```{r}
+# built-in PDP support in H2O
+h2o.partialPlot(h2o_model_load, data = test_h2o, cols = "MonthlyIncome")
+```
+
+```{r}
 h2o.ice_plot(h2o_model_load, test_h2o, column = "MonthlyIncome")
 ```
 ```{r}
@@ -373,6 +966,44 @@ h2o.shap_explain_row_plot(h2o_model_load, test_h2o,row_index = 4)
 # Class =Yes #2,17,20
 h2o.shap_explain_row_plot(h2o_model_load, test_h2o,row_index = 18)
 h2o.shap_explain_row_plot(h2o_model_load, test_h2o,row_index = 3)
+```
+LIME
+```{r}
+# not use h2o dataframe, must use normal data.frame r
+explainer_h2o  <- lime(train, h2o_model_load, #n_bins = 5
+                       )
+explanation_h2o  <- lime::explain(test[1:5,], 
+                                 explainer_h2o, 
+                                 n_features      = 5, 
+                                 labels          = "Yes", 
+                                 kernel_width    = .1, 
+                                 feature_select  = "highest_weights")
+plot_features(explanation_h2o,  ncol = 1) + ggtitle("rf")
+```
+```{r}
+train_h2o[,-1]
+```
+
+```{r}
+# Run lime() on training set
+explainer <- lime::lime(
+    as.data.frame(train_h2o[,-1]), 
+    model          = h2o_model_load, 
+    bin_continuous = FALSE)
+# Run explain() on explainer
+explanation <- lime::explain(
+    as.data.frame(test_h2o[1,-1]), 
+    explainer    = explainer, 
+    n_labels     = 1, 
+    n_features   = 5,
+    kernel_width = 0.5)
+explanation
+```
+
+```{r}
+lime::plot_features(explanation) +
+      labs(title = "HR Predictive Analytics: LIME Feature Importance Visualization",
+           subtitle = "Hold Out (Test) Set, First 10 Cases Shown")
 ```
 
 # 7. Create data for predict
@@ -420,7 +1051,7 @@ h2o.shap_explain_row_plot(h2o_model_load, employ.data_process,row_index = 2)
 # Run lime() on training set
 explainer <- lime::lime(
     as.data.frame(train_h2o[,-1]), 
-    model          = h2o_model, 
+    model          = h2o_model_load, 
     bin_continuous = FALSE)
 # Run explain() on explainer
 explanation <- lime::explain(
@@ -601,6 +1232,220 @@ density_plot <-function(data,categorical_col,quantitative_col ){
 }
 density_plot(data,~Attrition,~MonthlyIncome)
 
+```
+
+# 8. Business science explain model
+https://www.business-science.io/business/2018/06/25/lime-local-feature-interpretation.html
+```{r}
+# required packages
+#install.packages("pdp")
+#devtools::install_github("koalaverse/vip")
+# install vip from github repo: devtools::install_github("koalaverse/vip")
+library(lime)       # ML local interpretation
+library(vip)        # ML global interpretation
+library(pdp)        # ML global interpretation
+library(ggplot2)    # visualization pkg leveraged by above packages
+library(caret)      # ML model building
+library(h2o)        # ML model building
+
+# other useful packages
+library(tidyverse)  # Use tibble, dplyr
+library(modeldata)    # Get HR Data via data(attrition)
+library(gridExtra)  # Plot multiple lime plots on one graph
+
+# initialize h2o
+h2o.init()
+h2o.no_progress()
+```
+
+
+```{r}
+# create data sets
+data(attrition) # modeldata
+df <- attrition %>% 
+  mutate_if(is.ordered, factor, ordered = FALSE) %>%
+  mutate(Attrition = factor(Attrition, levels = c("Yes", "No")))
+head(df)
+```
+
+
+```{r}
+index <- 1:5
+train_obs <- df[-index, ]
+local_obs <- df[index, ]
+
+# create h2o objects for modeling
+y <- "Attrition"
+x <- setdiff(names(train_obs), y)
+train_obs.h2o <- as.h2o(train_obs)
+local_obs.h2o <- as.h2o(local_obs)
+```
+We will explore how to visualize a few of the more popular machine learning algorithms and packages in R. For brevity I train default models and do not emphasize hyperparameter tuning. The following produces:
+
+Random forest model using ranger via the caret package
+Random forest model using h2o
+Elastic net model using h2o
+GBM model using h2o
+Random forest model using ranger directly
+
+```{r}
+# Create Random Forest model with ranger via caret
+fit.caret <- train(
+  Attrition ~ ., 
+  data       = train_obs, 
+  method     = 'ranger',
+  trControl  = trainControl(method = "cv", number = 5, classProbs = TRUE),
+  tuneLength = 1,
+  importance = 'impurity'
+  )
+
+# create h2o models
+h2o_rf  <- h2o.randomForest(x, y, training_frame = train_obs.h2o)
+h2o_glm <- h2o.glm(x, y, training_frame = train_obs.h2o, family = "binomial")
+h2o_gbm <- h2o.gbm(x, y, training_frame = train_obs.h2o)
+
+# ranger model --> model type not built in to LIME
+fit.ranger <- ranger::ranger(
+  Attrition ~ ., 
+  data        = train_obs, 
+  importance  = 'impurity',
+  probability = TRUE
+)
+```
+# Global Interpretation
+
+```{r}
+vip(fit.ranger) + ggtitle("ranger: RF")
+```
+
+
+```{r}
+# built-in PDP support in H2O
+h2o.partialPlot(h2o_rf, data = train_obs.h2o, cols = "MonthlyIncome")
+```
+
+```{r}
+fit.ranger %>%
+  pdp::partial(pred.var = "MonthlyIncome", grid.resolution = 25, ice = TRUE) %>%
+  autoplot(rug = TRUE, train = train_obs, alpha = 0.1, center = TRUE)
+
+```
+
+# Local Interpretation
+```{r}
+explainer_caret <- lime::lime(train_obs, fit.caret, n_bins = 5)
+
+class(explainer_caret)
+```
+
+
+```{r}
+summary(explainer_caret)
+```
+
+
+```{r}
+explanation_caret <- lime::explain(
+  x               = local_obs, 
+  explainer       = explainer_caret, 
+  n_permutations  = 5000,
+  dist_fun        = "gower",
+  kernel_width    = .75,
+  n_features      = 5, 
+  feature_select  = "highest_weights",
+  labels          = "Yes"
+  )
+```
+
+
+```{r}
+tibble::glimpse(explanation_caret)
+```
+
+
+```{r}
+plot_features(explanation_caret)
+```
+
+
+```{r}
+plot_explanations(explanation_caret)
+```
+The other plot we can create is a heatmap showing how the different variables selected across all the observations influence each case. We use the plot_explanations() function. This plot becomes useful if you are trying to find common features that influence all observations or if you are performing this analysis across many observations which makes plot_features() difficult to discern.
+
+# Tuning LIME
+As you saw in the above plot_features() plot, the output provides the model fit. In this case the best simple model fit for the given local regions was R^2 = 0.59 for case 3. Considering there are several knobs we can turn when performing the LIME algorithm, we can treat these as tuning parameters to try find the best fit model for the local region. This helps to maximize the amount of trust we can have in the local region explanation.
+
+As an example, the following changes the distance function to use the manhattan distance algorithm, we increase the kernel width substantially to create a larger local region, and we change our feature selection approach to a LARS lasso model. The result is a fairly substantial increase in our explanation fits.
+
+```{r}
+# tune LIME algorithm
+explanation_caret <- lime::explain(
+  x               = local_obs, 
+  explainer       = explainer_caret, 
+  n_permutations  = 5000,
+  dist_fun        = "manhattan",
+  kernel_width    = 3,
+  n_features      = 5, 
+  feature_select  = "lasso_path",
+  labels          = "Yes"
+  )
+
+plot_features(explanation_caret)
+```
+
+#Supported vs Non-support models
+
+Currently, lime supports supervised models produced in caret, mlr, xgboost, h2o, keras, and MASS::lda. Consequently, any supervised models created with these packages will function just fine with lime.
+```{r}
+explainer_h2o_rf  <- lime(train_obs, h2o_rf, n_bins = 5)
+explainer_h2o_glm <- lime(train_obs, h2o_glm, n_bins = 5)
+explainer_h2o_gbm <- lime(train_obs, h2o_gbm, n_bins = 5)
+
+explanation_rf  <- lime::explain(local_obs, 
+                                 explainer_h2o_rf, 
+                                 n_features      = 5, 
+                                 labels          = "Yes", 
+                                 kernel_width    = .1, 
+                                 feature_select  = "highest_weights")
+explanation_glm <- lime::explain(local_obs, 
+                                 explainer_h2o_glm, 
+                                 n_features      = 5, 
+                                 labels          = "Yes", 
+                                 kernel_width    = .1, 
+                                 feature_select  = "highest_weights")
+explanation_gbm <- lime::explain(local_obs, 
+                                 explainer_h2o_gbm, 
+                                 n_features      = 5, 
+                                 labels          = "Yes", 
+                                 kernel_width    = .1, 
+                                 feature_select  = "highest_weights")
+
+p1 <- plot_features(explanation_rf,  ncol = 1) + ggtitle("rf")
+p2 <- plot_features(explanation_glm, ncol = 1) + ggtitle("glm")
+p3 <- plot_features(explanation_gbm, ncol = 1) + ggtitle("gbm")
+
+gridExtra::grid.arrange(p1, p2, p3, nrow = 1)
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
 ```
 
 

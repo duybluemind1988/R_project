@@ -1,0 +1,200 @@
+---
+title: "Untitled"
+output: html_document
+---
+# Get data
+```{r}
+#install.packages("tidymodels")
+library(modeldata)
+library(tidymodels)
+data(ames)
+ames
+```
+
+# Split data
+```{r}
+ames <- ames %>% mutate(Sale_Price = log10(Sale_Price))
+
+set.seed(123)
+ames_split <- initial_split(ames, prob = 0.80, strata = Sale_Price)
+ames_train <- training(ames_split)
+ames_test  <-  testing(ames_split)
+ames_train_select <- ames_train %>% select(Sale_Price, Neighborhood , Gr_Liv_Area , Year_Built , Bldg_Type , 
+                Latitude , Longitude)
+ames_train_select
+```
+```{r}
+summary(ames_train_select)
+```
+# Recipe:
+
+The call to recipe() with a formula tells the recipe the roles of the variables (e.g., predictor, outcome). It only uses the data to determine the data types for the columns.
+
+step_log() declares that Gr_Liv_Area should be log transformed.
+
+step_dummy() is used to specify which variables should be converted from a qualitative format to a quantitative format, in this case, using dummy or indicator variables. An indicator or dummy variable is a binary numeric variable (a column of ones and zeroes) that encodes qualitative information; we will dig deeper into these kinds of variables in Section 6.3.
+
+The function all_nominal() captures the names of any columns that are currently factor or character (i.e., nominal) in nature. This is a dplyr selector function similar to starts_with() or matches() but can only be used inside of a recipe.
+
+Other selectors specific to the recipes package are: all_numeric(), all_predictors(), and all_outcomes(). As with dplyr, one or more unquoted expressions, separated by commas, can be used to select which columns are affected by each step.
+```{r}
+ames_rec <- 
+  recipe(Sale_Price ~ Neighborhood + Gr_Liv_Area + Year_Built + Bldg_Type + 
+           Latitude + Longitude, data = ames_train) %>%
+  step_log(Gr_Liv_Area, base = 10) %>% # declares that Gr_Liv_Area should be log transformed.
+  step_other(Neighborhood, threshold = 0.01) %>% #  the bottom 1% of the neighborhoods will be lumped into a new level called “other”
+  step_dummy(all_nominal()) %>% 
+  step_interact( ~ Gr_Liv_Area:starts_with("Bldg_Type_") ) %>% 
+  step_ns(Latitude, Longitude, deg_free = 20) %>% 
+  prep()
+
+baked_train <- bake(ames_rec, new_data = ames_train)
+baked_test <- bake(ames_rec, new_data = ames_test)
+#str(baked_train)
+```
+
+# Fitting model with parsnip
+```{r}
+library(parsnip)
+```
+
+```{r}
+linear_reg() %>% set_engine("glmnet") %>% translate()
+```
+
+
+```{r}
+lm_model <- 
+  linear_reg() %>% 
+  set_engine("lm")
+```
+
+
+```{r}
+lm_form_fit <- 
+  lm_model %>% 
+  # Recall that Sale_Price has been pre-logged
+  fit(Sale_Price ~ Longitude + Latitude, data = ames_train)
+lm_form_fit
+```
+
+
+```{r}
+ames_test %>% 
+  select(Sale_Price) %>% 
+  bind_cols(predict(lm_form_fit, ames_test)) %>% 
+  # Add 95% prediction intervals to the results:
+  bind_cols(predict(lm_form_fit, ames_test, type = "pred_int")) 
+```
+
+# WORKFLOW BASICS
+
+```{r}
+lm_model <- linear_reg() %>% set_engine("lm")
+
+lm_wflow <- 
+  workflow() %>% 
+  add_model(lm_model) %>% 
+  add_recipe(ames_rec)
+
+lm_fit <- fit(lm_wflow, ames_train)
+```
+
+
+```{r}
+predict(lm_fit, ames_test %>% slice(1:3))
+```
+
+# Judging model effectiveness
+
+```{r}
+ames_test_res <- predict(lm_fit, new_data = ames_test %>% select(-Sale_Price))
+ames_test_res <- bind_cols(ames_test_res, ames_test %>% select(Sale_Price))
+ames_test_res
+```
+
+```{r}
+ames_metrics <- metric_set(rmse, rsq, mae)
+ames_metrics(ames_test_res, truth = Sale_Price, estimate = .pred)
+```
+BINARY CLASSIFICATION METRICS
+
+```{r}
+data(two_class_example)
+str(two_class_example)
+```
+
+
+```{r}
+# A confusion matrix: 
+yardstick::conf_mat(two_class_example, truth = truth, estimate = predicted)
+yardstick::accuracy(two_class_example, truth = truth, estimate = predicted)
+yardstick::mcc(two_class_example, truth, predicted)
+yardstick::f_meas(two_class_example, truth, predicted)
+```
+
+
+```{r}
+roc_auc(two_class_example, truth, Class1)
+```
+
+
+```{r}
+two_class_curve <- roc_curve(two_class_example, truth, Class1)
+autoplot(two_class_curve)
+```
+
+# Tidymodels: tidy machine learning in R
+http://www.rebeccabarter.com/blog/2020-03-25_machine_learning/
+```{r}
+# load the relevant tidymodels libraries
+library(tidymodels)
+library(tidyverse)
+library(workflows)
+library(tune)
+```
+
+
+```{r}
+# load the Pima Indians dataset from the mlbench dataset
+library(mlbench)
+data(PimaIndiansDiabetes)
+# rename dataset to have shorter name because lazy
+diabetes_orig <- PimaIndiansDiabetes
+diabetes_orig
+```
+
+
+```{r}
+ggplot(diabetes_orig) +
+  geom_histogram(aes(x = triceps))
+```
+
+
+```{r}
+diabetes_clean <- diabetes_orig %>%
+  mutate_at(vars(triceps, glucose, pressure, insulin, mass), 
+            function(.var) { 
+              if_else(condition = (.var == 0), # if true (i.e. the entry is 0)
+                      true = as.numeric(NA),  # replace the value with NA
+                      false = .var # otherwise leave it as it is
+                      )
+            })
+```
+
+
+```{r}
+set.seed(234589)
+# split the data into trainng (75%) and testing (25%)
+diabetes_split <- initial_split(diabetes_clean, 
+                                prop = 3/4)
+diabetes_split
+```
+
+```{r}
+```
+
+
+```{r}
+```
+

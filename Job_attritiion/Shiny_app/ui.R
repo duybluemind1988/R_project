@@ -56,6 +56,8 @@ ui <- fluidPage(
       tableOutput("test_predict"),
       "Explain each row on test set by shap h2o: ",
       plotOutput("Shap_Explain_Row_plot"),
+      "Explain each row on test set by LIME h2o: ",
+      plotOutput("Lime_Explain_Row_plot"),
       # Predict base on file input:
       fileInput("file",h3("Choose csv file"),accept = ".csv"),
       "Show test row choose",

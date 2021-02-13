@@ -5,6 +5,7 @@ library(shiny)
 library(scales)
 library(rsample) 
 library(caret)
+library(lime)
 library(h2o)
 h2o.init()
 h2o.no_progress() # diseable progress bar
@@ -12,7 +13,7 @@ h2o.no_progress() # diseable progress bar
 path <- "/home/dnn/Data_science/Git/R_project/Job_attritiion/Shiny_app/WA_Fn-UseC_-HR-Employee-Attrition.csv"
 #path <- "C:/Users/DNN/Data_science/Git/R_project/Job_attritiion/Shiny_app/WA_Fn-UseC_-HR-Employee-Attrition.csv"
 # load the model
-model_path <- "/home/dnn/Data_science/Git/R_project/Job_attritiion/Shiny_app/GBM_1_AutoML_20210204_095214"
+model_path <- "/home/dnn/Data_science/Git/R_project/Job_attritiion/Shiny_app/GBM_5_AutoML_20210211_204652"
 #model_path <- "C:/Users/DNN/Data_science/Git/R_project/Job_attritiion/Shiny_app/GBM_1_AutoML_20210204_095214"
 #recipe_path <- "Job_attritiion/Shiny_app/recipe.Rds"
 recipe_path <- "/home/dnn/Data_science/Git/R_project/Job_attritiion/Shiny_app/recipe.Rds"
@@ -118,12 +119,21 @@ server <- function(input, output, session) {
   test_set <- reactive({
     set.seed(430)
     split = caret::createDataPartition(data()$Attrition, p =0.8, list = FALSE)
-    train = data()[split, ]
+    #train = data()[split, ]
     test = data()[-split, ]
     test <- bake(recipe_load, test)
     test <- as.h2o(test)
     #test <- as.data.frame(test)
     test
+  })
+  train_set <- reactive({
+    set.seed(430)
+    split = caret::createDataPartition(data()$Attrition, p =0.8, list = FALSE)
+    train = data()[split, ]
+    train <- bake(recipe_load, train)
+    train <- as.h2o(train)
+    #test <- as.data.frame(test)
+    train
   })
   #output$table_test <- renderTable(head(test_set()))
     
@@ -162,15 +172,39 @@ server <- function(input, output, session) {
     test_h2o_dt <- as.data.table(test_set())
     test_h2o_dt$Id <- seq.int(nrow(test_h2o_dt))
     setcolorder(test_h2o_dt, c("Id", setdiff(names(test_h2o_dt), "Id")))
-    
     },options =list(pageLength = 5))
-  # Show test row choose all festures
+  
+  # Show test row choose all features
   output$test_row_choose <- renderTable(test_set()[input$obs,])
+  
   # Predict test set (remove class column - no different)
   output$test_predict <- renderTable(test_pred <- h2o.predict(h2o_model, test_set()[input$obs,-c(33)]) )
+  
   # Shap explain row plot:
   output$Shap_Explain_Row_plot  <- renderPlot({
     h2o.shap_explain_row_plot(h2o_model, test_set(),row_index = input$obs)
+  })
+  
+  # LIME explain row plot:
+  output$Lime_Explain_Row_plot  <- renderPlot({
+    # Run lime() on training set
+    explainer <- lime::lime(
+      as.data.frame(train_set()[,-1]), 
+      model          = h2o_model, 
+      bin_continuous = FALSE)
+    # Run explain() on explainer
+    explanation <- lime::explain(
+      as.data.frame(test_set()[input$obs,-1]), 
+      explainer    = explainer, 
+      n_labels     = 1, 
+      n_features   = 10,
+      kernel_width = 0.5)
+    p1 <- lime::plot_features(explanation) +
+      labs(title = "HR Predictive Analytics: LIME Feature Importance Visualization",
+           subtitle = "Hold Out (Test) Set, First 10 Cases Shown")
+    p1
+    
+    
   })
   # Read file from file input
   data_upload <- reactive({
