@@ -39,6 +39,13 @@ if(length(.packages[!.inst]) > 0) install.packages(.packages[!.inst])
 # Load packages into session
 suppressPackageStartupMessages(invisible(lapply(.packages, library, character.only = TRUE)))
 ```
+```{r}
+library(ggplot2)
+library(survival)
+library(GGally)
+library(scales)
+library(survminer)
+```
 
 ## Loading data
 
@@ -60,6 +67,7 @@ We will use Survival Analysis based on Kaplan-Meier estimators. Let's create a s
 
 ```{r}
 (df$SurvObj <- with(df, Surv(time, churned == 1)))
+df
 ```
 
 Let's create the Kaplan-Meier estimator. The "log" confidence interval is preferred.
@@ -152,7 +160,8 @@ ggsurvplot(km.by.gender, data = df,risk.table = TRUE, size = 1,
 ```{r, message=FALSE}
 # Cleaning the environment
 rm(list=ls())
-
+#install.packages("randomForest")
+library(randomForest)
 # List of packages for session
 .packages <- c("plyr","dplyr","stringr","ggplot2","reshape2","caret","randomForest","e1071","ranger")
 
@@ -176,12 +185,14 @@ set.seed(12)
 trainIndex <- caret::createDataPartition(churn$Churned, p = .70, list = FALSE, times = 1)
 churnTrain <- churn[ trainIndex,]
 churnTest <- churn[-trainIndex, ]
+churnTrain
 ```
 
 Let's have a look on our training data set at the balance: how many clients has an existing contract with our telecommunications company or they have cancelled it.
 
 ```{r}
 table(churnTrain$Churned)
+prop.table(table(churnTrain$Churned))
 ```
 
 So we can see: about ~15% of customers left our service. 

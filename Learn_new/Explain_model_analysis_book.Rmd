@@ -1,0 +1,97 @@
+# Explain model analysis books
+# 1. Aim of this book
+```{r}
+library(knitr)    # For knitting document and include_graphics function
+# ![abc](https://ema.drwhy.ai/figure/MDP_washmachine.png) #another way directly
+```
+```{r}
+include_graphics("https://ema.drwhy.ai/figure/UMEPImportance.png")
+```
+Figure 1.1: Shift in the relative importance and effort (symbolically represented by the shaded boxes) put in different phases of data-driven modelling. Arrows show feedback loops in the modelling process. (A) In classical statistics, modelling is often based on a deep understanding of the application domain combined with exploratory data analysis (EDA). Most often, (generalized) linear models are used. Model validation includes goodness-of-fit evaluation and hypothesis testing. (B) In machine learning (ML), domain knowledge and EDA are often limited. Instead, flexible models are fitted to large volumes of data to obtain a model offering a good predictive performance. Evaluation of the performance (applying strategies like cross-validation to deal with overfitting) gains in importance, as validation provides feedback to model construction. (C) In the (near?) future, auto-EDA and auto-ML will shift focus even further to model validation that will include the use of explainable artificial intelligence (XAI) techniques and evaluation of fairness, ethics, etc. The feedback loop is even longer now, as the results from model validation will also be helping in domain understanding.
+```{r}
+include_graphics("https://ema.drwhy.ai/figure/UMEPpiramide.png")
+```
+Figure 1.3: Model exploration methods presented in the book. The left-hand side (corresponding to the second part of the book) focuses on instance-level exploration, while the right-hand side (corresponding to the third part of the book) focuses on dataset-level exploration. Consecutive layers of the stack are linked with a deeper level of model exploration. The layers are linked with laws of model exploration introduced in Section 1.2.
+# 2. Model development
+
+```{r}
+include_graphics("https://ema.drwhy.ai/figure/MDP_washmachine.png")
+```
+
+
+```{r}
+include_graphics("https://ema.drwhy.ai/figure/mdp_general.png")
+```
+Figure 2.2: Overview of the model-development process. The process is split into five different phases (rows) and four stages (indicated at the top of the diagram). Horizontal axis presents the time from the problem formulation to putting the model into practice (decommissioning). For a particular phase, resources can be used in different amounts depending on the current stage of the process, as indicated by the height of the bars. There may be several iterations of different phases within each stage, as indicated at the bottom of the diagram.
+# 4 Datasets and Models
+```{r}
+#install.packages("titanic")
+library(titanic)
+knitr::kable(head(titanic))
+```
+
+```{r}
+#install.packages("rms")
+library("rms")
+titanic_lmr <- lrm(survived == "yes" ~ gender + rcs(age) + class +
+         sibsp + parch + fare + embarked, titanic)
+```
+
+
+```{r}
+library("randomForest")
+set.seed(1313)
+titanic_rf <- randomForest(survived ~ class + gender + age + 
+                sibsp + parch + fare + embarked, data = titanic)
+```
+
+
+```{r}
+library("gbm")
+set.seed(1313)
+titanic_gbm <- gbm(survived == "yes" ~ class + gender + age + 
+                 sibsp + parch + fare + embarked, data = titanic, 
+                 n.trees = 15000, distribution = "bernoulli")
+```
+
+
+```{r}
+library("e1071")
+titanic_svm <- svm(survived == "yes" ~ class + gender + age + 
+                 sibsp + parch + fare + embarked, data = titanic, 
+                 type = "C-classification", probability = TRUE)
+```
+
+```{r}
+johnny_d <- data.frame(
+          class = factor("1st", levels = c("1st", "2nd", "3rd", 
+                     "deck crew", "engineering crew", 
+                     "restaurant staff", "victualling crew")),
+          gender = factor("male", levels = c("female", "male")),
+          age = 8, sibsp = 0, parch = 0, fare = 72,
+          embarked = factor("Southampton", levels = c("Belfast",
+                      "Cherbourg","Queenstown","Southampton")))
+johnny_d
+```
+
+
+```{r}
+(pred_lmr <- predict(titanic_lmr, johnny_d, type = "fitted"))
+(pred_rf <- predict(titanic_rf, johnny_d, type = "prob"))
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+```{r}
+```
+

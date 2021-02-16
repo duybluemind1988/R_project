@@ -19,6 +19,21 @@ data <- fread(path)
 head(data)
 ```
 # 2. EDA
+## Correlation funnel
+```{r}
+library(correlationfunnel)
+data %>%
+    binarize()
+```
+
+```{r}
+data %>%
+    binarize() %>%
+    correlate(Attrition__Yes) %>% 
+    plot_correlation_funnel(interactive = TRUE, alpha = 0.7)
+# tenure = Time, Churn = Target, Everything Else = Possible Predictors
+```
+
 ## Plot categorical vs catagorical
 Compare Attrition percentage between business travel categorical
 ```{r}
@@ -44,6 +59,11 @@ Categorical_vs_categorical_plot(data,~Attrition,~BusinessTravel)
 Categorical_vs_categorical_plot(data,~Attrition,~Department)
 Categorical_vs_categorical_plot(data,~Attrition,~Education)
 Categorical_vs_categorical_plot(data,~Attrition,~WorkLifeBalance)
+
+Categorical_vs_categorical_plot(data,~BusinessTravel,~Attrition)
+Categorical_vs_categorical_plot(data,~Department,~Attrition)
+Categorical_vs_categorical_plot(data,~Education,~Attrition)
+Categorical_vs_categorical_plot(data,~WorkLifeBalance,~Attrition)
 ```
 
 ```{r}

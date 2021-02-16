@@ -204,6 +204,10 @@ plot_customer_loss(survfit_coxph)
 
 # 6.0 PREDICTION with Survial Models ----
 ```{r}
+model_coxph
+```
+
+```{r}
 # 6.1 Cox PH - Produces Theoretical Hazard Ratio ----
 predict(model_coxph, newdata = train_tbl, type = "expected") %>%
     tibble(.pred = .) %>%
@@ -458,7 +462,7 @@ reference <- as.data.frame(test_h2o)[[response]]
 caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
 ```
 
-## Save model
+# 8. Save model
 ```{r}
 
 # Save recipe
@@ -471,7 +475,7 @@ caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
 print(model_path)
 ```
 
-## Load model
+# 9. Load model
 ```{r}
 #path <- "WA_Fn-UseC_-HR-Employee-Attrition.csv"
 # Load recipe
@@ -481,7 +485,7 @@ model_path <- "/home/dnn/Data_science/Git/R_project/Churn/GBM_model_R_1613221099
 h2o_model_load <- h2o.loadModel(model_path)
 ```
 
-## Model explain
+# 10. Model explain
 ```{r}
 h2o.varimp(h2o_model_load)
 ```
@@ -495,14 +499,17 @@ h2o.varimp_plot(h2o_model_load)
 ```{r}
 h2o.shap_summary_plot(h2o_model_load,test_h2o)
 ```
-
-
 ```{r}
 h2o.pd_plot(h2o_model_load, test_h2o, column = "Contract")
 h2o.pd_plot(h2o_model_load, test_h2o, column = "tenure")
 h2o.pd_plot(h2o_model_load, test_h2o, column = "MonthlyCharges")
 h2o.pd_plot(h2o_model_load, test_h2o, column = "OnlineSecurity")
 h2o.pd_plot(h2o_model_load, test_h2o, column = "PaymentMethod")
+h2o.pd_plot(h2o_model_load, test_h2o, column = "MultipleLines")
+```
+```{r}
+str(baked_test)
+baked_test$Contract
 ```
 
 
@@ -550,7 +557,7 @@ lime::plot_features(explanation) +
 ```{r}
 ```
 
-## Auto ML:
+# 11. Auto ML:
 ```{r}
 h2o.init()
 # convert training data to h2o object
@@ -587,7 +594,344 @@ predict <- as.data.frame(test_pred)$predict
 caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
 ```
 
+# BS [Not good]- Customer Churn Modeling using Machine Learning with parsnip
+https://www.business-science.io/code-tools/2019/11/18/parsnip-churn-classification-machine-learning.html
 ```{r}
+#install.packages("skimr")
+library(tidyverse)   # Loads dplyr, ggplot2, purrr, and other useful packages
+library(tidymodels)  # Loads parsnip, rsample, recipes, yardstick
+library(skimr)       # Quickly get a sense of data
+library(knitr)       # Pretty HTML Tables
+library(caret)
+```
+
+```{r}
+telco <- read_csv("https://raw.githubusercontent.com/DiegoUsaiUK/Classification_Churn_with_Parsnip/master/00_Data/WA_Fn-UseC_-Telco-Customer-Churn.csv")
+
+telco %>% head()
+```
+
+
+```{r}
+telco %>% skim()
+```
+There are a couple of things to notice here:
+
+customerID is a unique identifier for each row. As such it has no descriptive or predictive power and it needs to be removed.
+
+Given the relative small number of missing values in TotalCharges (only 11 of them) I am dropping them from the dataset.
+```{r}
+telco <- telco %>%
+    select(-customerID) %>%
+    drop_na()
+```
+
+## Caret model
+```{r}
+response="Churn"
+set.seed(430)
+split = caret::createDataPartition(telco[[response]], p =0.6, list = FALSE)
+train = telco[split, ]
+
+valid_test = telco[-split, ]
+split2 = caret::createDataPartition(valid_test[[response]], p =0.5, list = FALSE)
+valid = valid_test[split2, ]
+test = valid_test[-split2, ]
+```
+
+
+```{r}
+recipe_obj <- recipe(Churn ~ ., data = train) %>%
+  #step_rm(customerID) %>% 
+  step_naomit(TotalCharges) %>% # Remove row contain NA / NaN value 
+  step_string2factor(all_nominal()) %>% # convert character to factor (auto convert char to factor with recipes)
+  #step_integer(Education,EnvironmentSatisfaction) %>% # Ordinal encoder
+  #step_num2factor(Education,EnvironmentSatisfaction,JobInvolvement,JobLevel,JobSatisfaction,PerformanceRating,RelationshipSatisfaction,StockOptionLevel,WorkLifeBalance) %>%  # convert number to factor
+  #step_nzv(all_numeric(), -all_outcomes())  %>% #Remove near-zero variance features like sex, yes/no...
+  #step_knnimpute(all_predictors(), neighbors = 6) %>%  # Impute, very slow in large data in train, need step outside
+  #step_YeoJohnson(all_numeric(),-all_outcomes()) %>% # Remove skewness
+  
+  #step_center(all_numeric(), -all_outcomes()) %>% # center 
+  #step_scale(all_numeric(), -all_outcomes()) %>% # scale
+  #step_dummy(all_nominal(), one_hot = TRUE) %>% 
+  #step_pca(all_numeric(), -all_outcomes()) #Perform dimension reduction
+  prep()
+baked_train <- bake(recipe_obj, new_data = train)
+baked_valid <- bake(recipe_obj, new_data = valid)
+baked_test <- bake(recipe_obj, new_data = test)
+```
+
+
+```{r}
+logistic_glm <- logistic_reg(mode = "classification") %>%
+    set_engine("glm") %>%
+    fit(Churn ~ ., data = baked_train)
+```
+
+
+```{r}
+predictions_glm <- logistic_glm %>%
+    predict(new_data = baked_test) %>%
+    bind_cols(baked_test %>% select(Churn))
+
+predictions_glm %>% head()
+```
+
+```{r}
+test_pred <-predict(logistic_glm, baked_test)
+predict <- test_pred$.pred_class
+reference <- baked_test[[response]]
+caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
+```
+
+```{r}
+#yardstick::metrics(predictions_glm, Churn, .pred_class)
+#yardstick::precision(predictions_glm, Churn, .pred_class)
+#yardstick::recall(predictions_glm, Churn, .pred_class)
+#yardstick::f_meas(predictions_glm, Churn, .pred_class)
+```
+```{r}
+predictions_glm %>%
+    yardstick::conf_mat(Churn, .pred_class)
+```
+PLEASE NOTE: SERIOUS PROBLEM WITH YARDSTICK PERFORMANCE METRIC
+```{r}
+predictions_glm %>%
+    yardstick::conf_mat(Churn, .pred_class) %>%
+    summary() %>%
+    select(-.estimator) %>%
+    filter(.metric %in% c("accuracy", "precision", "recall", "f_meas"))
+```
+```{r}
+```
+
+# BS - Customer Analytics: Using Deep Learning With Keras To Predict Customer Churn
+https://www.business-science.io/business/2017/11/28/customer_churn_analysis_keras.html
+```{r}
+#install.packages("corrr")
+# Load libraries
+library(tidyverse)
+library(keras)
+library(lime)
+library(tidyquant)
+library(rsample)
+library(recipes)
+library(yardstick)
+library(corrr)
+```
+Problem with deep learning keras / LIME, must use H2o deep learning and DALEX explaination
+```{r}
+# Install Keras if you have not installed before
+#install_keras() #also tensorflow install
+#mnist <- dataset_mnist()
+#library(reticulate)
+#py_discover_config("tensorflow")
+#library(tensorflow)
+#tf$Session()
+```
+
+
+```{r}
+churn_data_raw <- read_csv("~/Data_science/Git/R_project/Churn/lab_14_customer_churn_survival_h2o/WA_Fn-UseC_-Telco-Customer-Churn.csv")
+glimpse(churn_data_raw)
+```
+
+
+```{r}
+response="Churn"
+set.seed(430)
+split = caret::createDataPartition(churn_data_raw[[response]], p =0.6, list = FALSE)
+train = churn_data_raw[split, ]
+
+valid_test = churn_data_raw[-split, ]
+split2 = caret::createDataPartition(valid_test[[response]], p =0.5, list = FALSE)
+valid = valid_test[split2, ]
+test = valid_test[-split2, ]
+```
+
+```{r}
+dim(train)
+train
+```
+
+```{r}
+
+# Create recipe
+rec_obj <- recipe(Churn ~ ., data = train) %>%
+    step_rm(customerID) %>% 
+    step_naomit(TotalCharges) %>% # Remove row contain NA / NaN value 
+    #step_string2factor(all_nominal()) %>% # convert character to factor (auto convert char to
+    step_discretize(tenure, options = list(cuts = 6)) %>%
+    step_log(TotalCharges) %>%
+    step_dummy(all_nominal(), -all_outcomes()) %>%
+    step_center(all_predictors(), -all_outcomes()) %>%
+    step_scale(all_predictors(), -all_outcomes()) %>%
+    #step_pca(all_numeric(), -all_outcomes()) #Perform dimension reduction
+    prep()
+
+baked_train <- bake(rec_obj, new_data = train)
+baked_valid <- bake(rec_obj, new_data = valid)
+baked_test <- bake(rec_obj, new_data = test)
+
+predictors <- setdiff(names(baked_train), response)
+sum(is.na(baked_train))
+head(baked_train)
+```
+
+```{r}
+# Response variables for training and testing sets
+y_train_vec <- ifelse(pull(train, Churn) == "Yes", 1, 0)
+y_test_vec  <- ifelse(pull(test, Churn) == "Yes", 1, 0)
+```
+
+## Deep learning H2O
+```{r}
+library(h2o)
+h2o.init()
+# convert training data to h2o object
+train_h2o <- as.h2o(baked_train)
+valid_h2o <- as.h2o(baked_valid)
+test_h2o <- as.h2o(baked_test)
+```
+
+```{r}
+model_dnn <- h2o.deeplearning(x = predictors, 
+                              y = response, 
+                              training_frame = train_h2o,
+                              validation_frame=valid_h2o,
+                              hidden = c(200,200), # c(200,200)
+                              epoch = 100, # 10
+                              model_id = "baseline_dnn", 
+                              #nfolds = 5, 
+                              stopping_metric="AUC", ## could be "MSE","logloss","r2","AUC", "AUCPR", "mean_per_class_error","custom"
+                              stopping_tolerance=0.01,  ## stop when misclassification does not improve by >=1% for 2 scoring events
+                              seed = 1234)
+```
+
+
+```{r}
+summary(model_dnn)
+#as.data.frame(h2o.varimp(model_dnn))
+```
+
+```{r}
+test_pred <-h2o.predict(model_dnn, newdata = test_h2o)
+predict <- as.data.frame(test_pred)$predict
+reference <- as.data.frame(test_h2o)[[response]]
+caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
+```
+  32,32
+              Precision : 0.5700         
+                 Recall : 0.7855         
+                     F1 : 0.6607         
+             Prevalence : 0.2655         
+         Detection Rate : 0.2085         
+   Detection Prevalence : 0.3658         
+      Balanced Accuracy : 0.7857   
+ 200,200     
+              Precision : 0.5626          
+                 Recall : 0.6381          
+                     F1 : 0.5980          
+             Prevalence : 0.2655          
+         Detection Rate : 0.1694          
+   Detection Prevalence : 0.3011          
+      Balanced Accuracy : 0.7294   
+## Explain Deep learning model:
+```{r}
+as.data.frame(h2o.varimp(model_dnn))
+```
+
+
+```{r}
+h2o.varimp_plot(model_dnn)
+```
+
+```{r}
+#h2o.shap_summary_plot(model_dnn,test_h2o)
+```
+Error in h2o.shap_summary_plot(model_dnn, test_h2o) : SHAP summary plot requires a tree-based model!
+
+```{r}
+h2o.pd_plot(model_dnn, test_h2o, column = "Contract_Two.year")
+#h2o.pd_plot(h2o_model_load, test_h2o, column = "tenure")
+#h2o.pd_plot(h2o_model_load, test_h2o, column = "MonthlyCharges")
+#h2o.pd_plot(h2o_model_load, test_h2o, column = "OnlineSecurity")
+#h2o.pd_plot(h2o_model_load, test_h2o, column = "PaymentMethod")
+```
+```{r}
+test_h2o
+```
+
+
+```{r}
+# built-in PDP support in H2O
+h2o.partialPlot(model_dnn, data = test_h2o, cols = "Contract_Two.year")
+```
+```{r}
+h2o.ice_plot(model_dnn, test_h2o, column = "Contract_Two.year")
+```
+
+```{r}
+# Class = No
+h2o.shap_explain_row_plot(model_dnn, test_h2o,row_index = 10)
+h2o.shap_explain_row_plot(model_dnn, test_h2o,row_index = 3)
+# Class =Yes #2,17,20
+h2o.shap_explain_row_plot(model_dnn, test_h2o,row_index = 18)
+h2o.shap_explain_row_plot(model_dnn, test_h2o,row_index = 4)
+```
+
+
+```{r}
+
+# Custom Predict Function
+custom_predict <- function(model, newdata) {
+  newdata_h2o <- as.h2o(newdata)
+  res <- as.data.frame(h2o.predict(model, newdata_h2o))
+  return(round(res$Yes)) # round the probabil
+  }
+```
+
+```{r}
+res <- as.data.frame(h2o.predict(model_dnn, test_h2o))
+res$Yes
+res$p1
+round(res$Yes)
+
+```
+
+```{r}
+library(DALEX)
+explainer_dnn <- DALEX::explain(model = model_dnn, 
+                                data = as.data.frame(test_h2o)[, predictors],
+                                y = as.data.frame(test_h2o)[, response],
+                                predict_function = custom_predict,
+                                label = "Deep Neural Networks")
+explainer_dnn
+```
+```{r}
+vi_dnn <- variable_importance(explainer_dnn, type="difference")
+vi_dnn
+```
+
+
+```{r}
+plot(vi_dnn)
+```
+```{r}
+test_h2o
+```
+
+
+```{r}
+pdp_dnn_rm <- DALEX::variable_response(explainer_dnn, variable = "MonthlyCharges")
+plot(pdp_dnn_rm)
+```
+
+
+```{r}
+library(breakDown)
+pb_dnn <- prediction_breakdown(explainer_dnn, observation = as.data.frame(test_h2o)[1, ])
+plot(pb_dnn)
 ```
 
 

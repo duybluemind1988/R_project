@@ -1,0 +1,678 @@
+# I. LIME - Business science explain model
+https://www.business-science.io/business/2018/06/25/lime-local-feature-interpretation.html
+```{r}
+# required packages
+#install.packages("pdp")
+#devtools::install_github("koalaverse/vip")
+# install vip from github repo: devtools::install_github("koalaverse/vip")
+library(lime)       # ML local interpretation
+library(vip)        # ML global interpretation
+library(pdp)        # ML global interpretation
+library(ggplot2)    # visualization pkg leveraged by above packages
+library(caret)      # ML model building
+library(h2o)        # ML model building
+
+# other useful packages
+library(tidyverse)  # Use tibble, dplyr
+library(modeldata)    # Get HR Data via data(attrition)
+library(gridExtra)  # Plot multiple lime plots on one graph
+
+# initialize h2o
+h2o.init()
+h2o.no_progress()
+```
+
+
+```{r}
+# create data sets
+data(attrition) # modeldata
+df <- attrition %>% 
+  mutate_if(is.ordered, factor, ordered = FALSE) %>%
+  mutate(Attrition = factor(Attrition, levels = c("Yes", "No")))
+head(df)
+```
+
+
+```{r}
+index <- 1:5
+train_obs <- df[-index, ]
+local_obs <- df[index, ]
+
+# create h2o objects for modeling
+y <- "Attrition"
+x <- setdiff(names(train_obs), y)
+train_obs.h2o <- as.h2o(train_obs)
+local_obs.h2o <- as.h2o(local_obs)
+```
+We will explore how to visualize a few of the more popular machine learning algorithms and packages in R. For brevity I train default models and do not emphasize hyperparameter tuning. The following produces:
+
+Random forest model using ranger via the caret package
+Random forest model using h2o
+Elastic net model using h2o
+GBM model using h2o
+Random forest model using ranger directly
+
+```{r}
+# Create Random Forest model with ranger via caret
+fit.caret <- train(
+  Attrition ~ ., 
+  data       = train_obs, 
+  method     = 'ranger',
+  trControl  = trainControl(method = "cv", number = 5, classProbs = TRUE),
+  tuneLength = 1,
+  importance = 'impurity'
+  )
+
+# create h2o models
+h2o_rf  <- h2o.randomForest(x, y, training_frame = train_obs.h2o)
+h2o_glm <- h2o.glm(x, y, training_frame = train_obs.h2o, family = "binomial")
+h2o_gbm <- h2o.gbm(x, y, training_frame = train_obs.h2o)
+
+# ranger model --> model type not built in to LIME
+fit.ranger <- ranger::ranger(
+  Attrition ~ ., 
+  data        = train_obs, 
+  importance  = 'impurity',
+  probability = TRUE
+)
+```
+# 1. Global Interpretation
+
+```{r}
+vip(fit.ranger) + ggtitle("ranger: RF")
+```
+
+
+```{r}
+# built-in PDP support in H2O
+h2o.partialPlot(h2o_rf, data = train_obs.h2o, cols = "MonthlyIncome")
+```
+
+```{r}
+fit.ranger %>%
+  pdp::partial(pred.var = "MonthlyIncome", grid.resolution = 25, ice = TRUE) %>%
+  autoplot(rug = TRUE, train = train_obs, alpha = 0.1, center = TRUE)
+
+```
+
+# 2. Local Interpretation
+```{r}
+explainer_caret <- lime::lime(train_obs, fit.caret, n_bins = 5)
+
+class(explainer_caret)
+```
+
+
+```{r}
+summary(explainer_caret)
+```
+
+
+```{r}
+explanation_caret <- lime::explain(
+  x               = local_obs, 
+  explainer       = explainer_caret, 
+  n_permutations  = 5000,
+  dist_fun        = "gower",
+  kernel_width    = .75,
+  n_features      = 5, 
+  feature_select  = "highest_weights",
+  labels          = "Yes"
+  )
+```
+
+
+```{r}
+tibble::glimpse(explanation_caret)
+```
+
+
+```{r}
+plot_features(explanation_caret)
+```
+
+
+```{r}
+plot_explanations(explanation_caret)
+```
+The other plot we can create is a heatmap showing how the different variables selected across all the observations influence each case. We use the plot_explanations() function. This plot becomes useful if you are trying to find common features that influence all observations or if you are performing this analysis across many observations which makes plot_features() difficult to discern.
+
+# 3. Tuning LIME
+As you saw in the above plot_features() plot, the output provides the model fit. In this case the best simple model fit for the given local regions was R^2 = 0.59 for case 3. Considering there are several knobs we can turn when performing the LIME algorithm, we can treat these as tuning parameters to try find the best fit model for the local region. This helps to maximize the amount of trust we can have in the local region explanation.
+
+As an example, the following changes the distance function to use the manhattan distance algorithm, we increase the kernel width substantially to create a larger local region, and we change our feature selection approach to a LARS lasso model. The result is a fairly substantial increase in our explanation fits.
+
+```{r}
+# tune LIME algorithm
+explanation_caret <- lime::explain(
+  x               = local_obs, 
+  explainer       = explainer_caret, 
+  n_permutations  = 5000,
+  dist_fun        = "manhattan",
+  kernel_width    = 3,
+  n_features      = 5, 
+  feature_select  = "lasso_path",
+  labels          = "Yes"
+  )
+
+plot_features(explanation_caret)
+```
+
+# 4. Supported vs Non-support models
+
+Currently, lime supports supervised models produced in caret, mlr, xgboost, h2o, keras, and MASS::lda. Consequently, any supervised models created with these packages will function just fine with lime.
+```{r}
+explainer_h2o_rf  <- lime(train_obs, h2o_rf, n_bins = 5)
+explainer_h2o_glm <- lime(train_obs, h2o_glm, n_bins = 5)
+explainer_h2o_gbm <- lime(train_obs, h2o_gbm, n_bins = 5)
+
+explanation_rf  <- lime::explain(local_obs, 
+                                 explainer_h2o_rf, 
+                                 n_features      = 5, 
+                                 labels          = "Yes", 
+                                 kernel_width    = .1, 
+                                 feature_select  = "highest_weights")
+explanation_glm <- lime::explain(local_obs, 
+                                 explainer_h2o_glm, 
+                                 n_features      = 5, 
+                                 labels          = "Yes", 
+                                 kernel_width    = .1, 
+                                 feature_select  = "highest_weights")
+explanation_gbm <- lime::explain(local_obs, 
+                                 explainer_h2o_gbm, 
+                                 n_features      = 5, 
+                                 labels          = "Yes", 
+                                 kernel_width    = .1, 
+                                 feature_select  = "highest_weights")
+
+p1 <- plot_features(explanation_rf,  ncol = 1) + ggtitle("rf")
+p2 <- plot_features(explanation_glm, ncol = 1) + ggtitle("glm")
+p3 <- plot_features(explanation_gbm, ncol = 1) + ggtitle("gbm")
+
+gridExtra::grid.arrange(p1, p2, p3, nrow = 1)
+```
+
+# II.  DALEX and H2O: Machine Learning Model Interpretability And Feature Explanation
+https://www.r-bloggers.com/2018/07/dalex-and-h2o-machine-learning-model-interpretability-and-feature-explanation/
+# 2.0 Replication requirements
+```{r}
+install.packages("DALEX")
+# load required packages
+library(rsample)
+library(dplyr)
+library(purrr)
+library(ggplot2)
+library(h2o)
+library(DALEX)
+```
+
+
+```{r}
+# initialize h2o session
+h2o.no_progress()
+h2o.init()
+```
+NOTE: To use some of DALEX’s functions, categorical predictor variables need to be converted to factors. Also, I force ordered factors to be unordered as h2o does not support ordered categorical variables.
+
+```{r}
+library(modeldata)
+data("attrition")
+# classification data
+df <- attrition %>% 
+  mutate_if(is.ordered, factor, ordered = FALSE) %>%
+  mutate(Attrition = recode(Attrition, "Yes" = "1", "No" = "0") %>% factor(levels = c("1", "0")))
+# convert to h2o object
+df.h2o <- as.h2o(df)
+# create train, validation, and test splits
+set.seed(123)
+splits <- h2o.splitFrame(df.h2o, ratios = c(.7, .15), destination_frames = c("train","valid","test"))
+names(splits) <- c("train","valid","test")
+# variable names for resonse & features
+y <- "Attrition"
+x <- setdiff(names(df), y) 
+```
+
+```{r}
+# elastic net model 
+glm <- h2o.glm(
+  x = x, 
+  y = y, 
+  training_frame = splits$train,
+  validation_frame = splits$valid,
+  family = "binomial",
+  seed = 123
+  )
+# random forest model
+rf <- h2o.randomForest(
+  x = x, 
+  y = y,
+  training_frame = splits$train,
+  validation_frame = splits$valid,
+  ntrees = 1000,
+  stopping_metric = "AUC",    
+  stopping_rounds = 10,         
+  stopping_tolerance = 0.005,
+  seed = 123
+  )
+# gradient boosting machine model
+gbm <-  h2o.gbm(
+  x = x, 
+  y = y,
+  training_frame = splits$train,
+  validation_frame = splits$valid,
+  ntrees = 1000,
+  stopping_metric = "AUC",    
+  stopping_rounds = 10,         
+  stopping_tolerance = 0.005,
+  seed = 123
+  )
+```
+
+
+```{r}
+# model performance
+h2o.auc(glm, valid = TRUE)
+h2o.auc(rf, valid = TRUE)
+h2o.auc(gbm, valid = TRUE)
+```
+# 3.0 DALEX procedures
+
+%he DALEX architecture can be split into three primary operations:
+
+1. Any supervised regression or binary classification model with defined input (X) and output (Y) where the output can be customized to a defined format can be used.
+2. The machine learning model is converted to an “explainer” object via DALEX::explain(), which is just a list that contains the training data and meta data on the machine learning model.
+3. The explainer object can be passed onto multiple functions that explain different components of the given model.
+
+
+Although DALEX does have native support for some ML model objects (i.e. lm, randomForest), it does not have native many of the preferred ML packages produced more recently (i.e. h2o, xgboost, ranger). To make DALEX compatible with these objects, we need three things:
+
+- x_valid: Our feature set needs to be in its original form not as an h2o object.
+- y_valid: Our response variable needs to be a numeric vector. For regression problems this is simple, as it will already be in this format. For binary classification this requires you to convert the responses to 0/1.
+- pred: a custom predict function that returns a vector of numeric values. For binary classification problems, this means extracting the probability of the response.
+
+```{r}
+# convert feature data to non-h2o objects
+x_valid <- as.data.frame(splits$valid)[, x]
+# make response variable numeric binary vector
+y_valid <- as.vector(as.numeric(as.character(splits$valid$Attrition)))
+head(y_valid)
+head(x_valid)
+splits$valid$Attrition
+```
+
+```{r}
+as.data.frame(h2o.predict(rf, as.h2o(x_valid)))
+as.data.frame(h2o.predict(rf, as.h2o(x_valid)))[[3L]] # column 3
+```
+
+```{r}
+# create custom predict function
+pred <- function(model, newdata)  {
+  results <- as.data.frame(h2o.predict(model, as.h2o(newdata)))
+  return(results[[3L]])
+  }
+pred(rf, x_valid) %>% head()
+```
+
+Once you have these three components, you can now create your explainer objects for each ML model. Considering I used a validation set to compute the AUC, we want to use that same validation set for ML interpretability.
+```{r}
+# elastic net explainer
+explainer_glm <- explain(
+  model = glm,
+  data = x_valid,
+  y = y_valid,
+  predict_function = pred,
+  label = "h2o glm"
+  )
+
+# random forest explainer
+explainer_rf <- explain(
+  model = rf,
+  data = x_valid,
+  y = y_valid,
+  predict_function = pred,
+  label = "h2o rf"
+  )
+
+# GBM explainer
+explainer_gbm <- explain(
+  model = gbm,
+  data = x_valid,
+  y = y_valid,
+  predict_function = pred,
+  label = "h2o gbm"
+  )
+
+# example of explainer object
+class(explainer_glm)
+```
+
+
+```{r}
+explainer_glm
+#explainer_rf
+#explainer_gbm
+summary(explainer_glm)
+#summary(explainer_rf)
+#summary(explainer_gbm)
+```
+# 4.0 Residual diagnostics
+As we saw earlier, the GLM model had the highest AUC followed by the random forest model then GBM. However, a single accuracy metric can be a poor indicator of performance. Assessing residuals of predicted versus actuals can allow you to identify where models deviate in their predictive accuracy. We can use DALEX::model_performance to compute the predictions and residuals. Printing the output returns residual quantiles and plotting the output allows for easy comparison of absolute residual values across models.
+
+In this example, the residuals are comparing the probability of attrition to the binary attrition value (1-yes, 0-no). Looking at the quantiles you can see that the median residuals are lowest for the GBM model. And looking at the boxplots you can see that the GBM model also had the lowest median absolute residual value. Thus, although the GBM model had the lowest AUC score, it actually performs best when considering the median absoluate residuals. However, you can also see a higher number of residuals in the tail of the GBM residual distribution (left plot) suggesting that there may be a higher number of large residuals compared to the GLM model. This helps to illustrate how your residuals behave similarly and differently across models.
+```{r}
+# compute predictions & residuals
+resids_glm <- model_performance(explainer_glm)
+resids_rf  <- model_performance(explainer_rf)
+resids_gbm <- model_performance(explainer_gbm)
+# assess quantiles for residuals
+resids_glm
+resids_rf
+resids_gbm
+```
+
+
+```{r}
+# create comparison plot of residuals for each model
+p1 <- plot(resids_glm, resids_rf, resids_gbm)
+p2 <- plot(resids_glm, resids_rf, resids_gbm, geom = "boxplot")
+
+gridExtra::grid.arrange(p1, p2, nrow = 1)
+```
+# 5.0 Variable importance
+An important task in ML interpretation is to understand which predictor variables are relatively influential on the predicted outcome. Many ML algorithms have their own unique ways to quantify the importance or relative influence of each feature (i.e. coefficients for linear models, impurity for tree-based models). However, other algorithms like naive Bayes classifiers and support vector machines do not. This makes it difficult to compare variable importance across multiple models.
+
+```{r}
+# compute permutation-based variable importance
+vip_glm <- DALEX::variable_importance(explainer_glm, n_sample = -1, loss_function = loss_root_mean_square) 
+vip_rf  <- DALEX::variable_importance(explainer_rf, n_sample = -1, loss_function = loss_root_mean_square)
+vip_gbm <- DALEX::variable_importance(explainer_gbm, n_sample = -1, loss_function = loss_root_mean_square)
+
+plot(vip_glm, vip_rf, vip_gbm, max_vars = 10)
+```
+The results provide some interesting insights. First, the shifted x-axis left edge helps to illustrate the difference in the RMSE loss between the three models (i.e. GLM model has the lowest RMSE suggesting that the greater number of tail residuals in the GBM model is likely penalizing the RMSE score. Second, we can see which variables are consistently influential across all models (i.e. OverTime, EnvironmentSatisfaction, Age), variables that are influential in two but not all three (i.e. BusinessTravel, WorkLifeBalance), and variables which are only influential in one model but not others (i.e. DailyRate, YearsInCurrentRole). This helps you to see if models are picking up unique structure in the data or if they are using common logic.
+
+In this example, all three models appear to be largely influenced by the OverTime, EnvironmentSatisfaction, Age, TotalWorkingYears, and JobLevel variables. This gives us confidences that these features have strong predictive signals.
+
+#6.0 Predictor-response relationship
+Once we’ve identified influential variables across all three models, next we likely want to understand how the relationship between these influential variables and the predicted response differ between the models. This helps to indicate if each model is responding to the predictor signal similarly or if one or more models respond differently. For example, we saw that the Age variable was one of the most influential variables across all three models. The below partial dependence plot illustrates that the GBM and random forest models are using the Age signal in a similar non-linear manner; however, the GLM model is not able to capture this same non-linear relationship. So although the GLM model may perform better (re: AUC score), it may be using features in biased or misleading ways.
+```{r}
+library(DALEX)
+# compute PDP for a given variable --> uses the pdp package
+pdp_glm  <- DALEX::variable_response(explainer_glm, variable =  "Age", type = "pdp")
+pdp_rf   <- variable_response(explainer_rf,  variable =  "Age", type = "pdp")
+pdp_gbm  <- variable_response(explainer_gbm, variable =  "Age", type = "pdp")
+
+plot(pdp_glm, pdp_rf, pdp_gbm)
+```
+
+
+```{r}
+cat_glm  <- variable_response(explainer_glm, variable = "EnvironmentSatisfaction", type = "factor")
+cat_rf   <- variable_response(explainer_rf,  variable = "EnvironmentSatisfaction", type = "factor")
+cat_gbm  <- variable_response(explainer_gbm, variable = "EnvironmentSatisfaction", type = "factor")
+
+plot(cat_glm, cat_rf, cat_gbm)
+```
+# 7.0 Local interpretation
+
+```{r}
+# create a single observation
+new_cust <- splits$valid[1, ] %>% as.data.frame()
+
+# compute breakdown distances
+new_cust_glm <- prediction_breakdown(explainer_glm, observation = new_cust)
+new_cust_rf  <- prediction_breakdown(explainer_rf, observation = new_cust)
+new_cust_gbm <- prediction_breakdown(explainer_gbm, observation = new_cust)
+```
+
+```{r}
+# class of prediction_breakdown output
+class(new_cust_gbm)
+# check out the top 10 influential variables for this observation
+new_cust_gbm[1:10, 1:5] %>%
+    knitr::kable()
+```
+
+
+```{r}
+plot(new_cust_gbm)
+```
+
+```{r}
+library(ggplot2)
+
+# filter for top 10 influential variables for each model and plot
+list(new_cust_glm, new_cust_rf, new_cust_gbm) %>%
+  purrr::map(~ top_n(., 11, wt = abs(contribution))) %>%
+  do.call(rbind, .) %>%
+  mutate(variable = paste0(variable, " (", label, ")")) %>%
+  ggplot(aes(contribution, reorder(variable, contribution))) +
+  geom_point() +
+  geom_vline(xintercept = 0, size = 3, color = "white") +
+  facet_wrap(~ label, scales = "free_y", ncol = 1) +
+  ylab(NULL)
+```
+
+
+```{r}
+# ames data
+data("ames")
+#ames.h2o <- as.h2o(AmesHousing::make_ames())
+ames.h2o <- as.h2o(ames)
+# create local observation
+local_ob <- as.data.frame(ames.h2o[1, ])
+
+# variable names for resonse & features
+y <- "Sale_Price"
+x <- setdiff(names(ames.h2o), y)
+
+# random forest model
+rf <- h2o.randomForest(
+  x = x, 
+  y = y,
+  training_frame = ames.h2o,
+  ntrees = 1000
+  )
+
+# get features for explainer
+x_valid <- as.data.frame(ames.h2o)[, x]
+y_valid <- as.vector(ames.h2o[y])
+
+# create custom predict function
+pred <- function(model, newdata)  {
+  results <- as.vector(predict(model, as.h2o(newdata)))
+  return(results)
+}
+
+# create explainer
+ames_rf <- explain(
+  model = rf,
+  data = x_valid,
+  y = y_valid,
+  predict_function = pred,
+  label = "ames"
+  )
+
+# time to compute prediction break down
+system.time({
+  ames_example  <- prediction_breakdown(ames_rf, observation = local_ob)
+})
+```
+
+# III. IML and H2O: Machine Learning Model Interpretability And Feature Explanation
+https://www.r-bloggers.com/2018/08/iml-and-h2o-machine-learning-model-interpretability-and-feature-explanation/
+
+The iml package is probably the most robust ML interpretability package available. It provides both global and local model-agnostic interpretation methods. Although the interaction functions are notably slow, the other functions are faster or comparable to existing packages we use or have tested. I definitely recommend adding iml to your preferred ML toolkit. The following provides a quick list of some of its pros and cons:
+
+```{r}
+#install.packages("iml")
+# load required packages
+library(rsample)   # data splitting
+library(ggplot2)   # allows extension of visualizations
+library(dplyr)     # basic data transformation
+library(h2o)       # machine learning modeling
+library(iml)       # ML interprtation
+
+# initialize h2o session
+h2o.no_progress()
+h2o.init()
+```
+
+
+```{r}
+library(modeldata)
+data("attrition")
+# classification data
+df <- attrition %>% 
+  mutate_if(is.ordered, factor, ordered = FALSE) %>%
+  mutate(Attrition = recode(Attrition, "Yes" = "1", "No" = "0") %>% factor(levels = c("1", "0")))
+
+# convert to h2o object
+df.h2o <- as.h2o(df)
+
+# create train, validation, and test splits
+set.seed(123)
+splits <- h2o.splitFrame(df.h2o, ratios = c(.7, .15), destination_frames = c("train","valid","test"))
+names(splits) <- c("train","valid","test")
+
+# variable names for resonse & features
+y <- "Attrition"
+x <- setdiff(names(df), y) 
+```
+
+
+```{r}
+# elastic net model 
+glm <- h2o.glm(
+  x = x, 
+  y = y, 
+  training_frame = splits$train,
+  validation_frame = splits$valid,
+  family = "binomial",
+  seed = 123
+  )
+
+# random forest model
+rf <- h2o.randomForest(
+  x = x, 
+  y = y,
+  training_frame = splits$train,
+  validation_frame = splits$valid,
+  ntrees = 1000,
+  stopping_metric = "AUC",    
+  stopping_rounds = 10,         
+  stopping_tolerance = 0.005,
+  seed = 123
+  )
+
+# gradient boosting machine model
+gbm <-  h2o.gbm(
+  x = x, 
+  y = y,
+  training_frame = splits$train,
+  validation_frame = splits$valid,
+  ntrees = 1000,
+  stopping_metric = "AUC",    
+  stopping_rounds = 10,         
+  stopping_tolerance = 0.005,
+  seed = 123
+  )
+```
+
+
+```{r}
+# model performance
+h2o.auc(glm, valid = TRUE)
+h2o.auc(rf, valid = TRUE)
+h2o.auc(gbm, valid = TRUE)
+```
+Although these models have distinct AUC scores, our objective is to understand how these models come to this conclusion in similar or different ways based on underlying logic and data structure.
+
+```{r}
+# 1. create a data frame with just the features
+features <- as.data.frame(splits$valid) %>% select(-Attrition)
+
+# 2. Create a vector with the actual responses
+response <- as.numeric(as.vector(splits$valid$Attrition))
+
+# 3. Create custom predict function that returns the predicted values as a
+#    vector (probability of purchasing in our example)
+pred <- function(model, newdata)  {
+  results <- as.data.frame(h2o.predict(model, as.h2o(newdata)))
+  return(results[[3L]])
+}
+
+# example of prediction output
+pred(rf, features) %>% head()
+```
+
+```{r}
+# create predictor object to pass to explainer functions
+predictor.glm <- Predictor$new(
+  model = glm, 
+  data = features, 
+  y = response, 
+  predict.fun = pred,
+  class = "classification"
+  )
+
+predictor.rf <- Predictor$new(
+  model = rf, 
+  data = features, 
+  y = response, 
+  predict.fun = pred,
+  class = "classification"
+  )
+
+predictor.gbm <- Predictor$new(
+  model = gbm, 
+  data = features, 
+  y = response, 
+  predict.fun = pred,
+  class = "classification"
+  )
+```
+
+
+```{r}
+# structure of predictor object
+str(predictor.gbm)
+```
+
+# Global interpretation
+## 1. Feature importance
+```{r}
+predictor.glm
+```
+
+```{r}
+# compute feature importance with specified loss metric
+imp.glm <- FeatureImp$new(predictor.glm, loss = "mse")
+imp.rf <- FeatureImp$new(predictor.rf, loss = "mse")
+imp.gbm <- FeatureImp$new(predictor.gbm, loss = "mse")
+
+# plot output
+p1 <- plot(imp.glm) + ggtitle("GLM")
+p2 <- plot(imp.rf) + ggtitle("RF")
+p3 <- plot(imp.gbm) + ggtitle("GBM")
+
+gridExtra::grid.arrange(p1, p2, p3, nrow = 1)
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+

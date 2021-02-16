@@ -1,0 +1,148 @@
+---
+title: "Untitled"
+output: html_document
+---
+#I. Survival Analysis Basics
+
+http://www.sthda.com/english/wiki/survival-analysis-basics
+
+Survival analysis is used in a variety of field such as:
+
+Cancer studies for patients survival time analyses,
+Sociology for “event-history analysis”,
+and in engineering for “failure-time analysis”.
+In cancer studies, typical research questions are like:
+
+What is the impact of certain clinical characteristics on patient’s survival
+What is the probability that an individual survives 3 years?
+Are there differences in survival between groups of patients?
+```{r}
+library("survival")
+library("survminer")
+```
+
+
+```{r}
+data("lung")
+head(lung)
+```
+inst: Institution code
+time: Survival time in days
+status: censoring status 1=censored, 2=dead
+age: Age in years
+sex: Male=1 Female=2
+ph.ecog: ECOG performance score (0=good 5=dead)
+ph.karno: Karnofsky performance score (bad=0-good=100) rated by physician
+pat.karno: Karnofsky performance score as rated by patient
+meal.cal: Calories consumed at meals
+wt.loss: Weight loss in last six months
+## Compute survival curves: survfit()
+We want to compute the survival probability by sex.
+
+The function survfit() [in survival package] can be used to compute kaplan-Meier survival estimate. Its main arguments include:
+
+a survival object created using the function Surv()
+and the data set containing the variables.
+To compute survival curves, type this:
+```{r}
+fit <- survfit(Surv(time, status) ~ sex, data = lung)
+print(fit)
+```
+By default, the function print() shows a short summary of the survival curves. It prints the number of observations, number of events, the median survival and the confidence limits for the median.
+
+```{r}
+table(lung$status)
+# 165 death, 63 censor
+# in 165 death: 112 man, 53 woman
+```
+
+
+```{r}
+library(tidyverse)
+lung %>% 
+  group_by(sex) %>% 
+  #select(sex,status) %>% 
+  filter(status == 2) %>% 
+  count(status)
+```
+
+
+```{r}
+# Summary of survival curves
+#summary(fit)
+# Access to the sort summary table
+summary(fit)$table
+```
+```{r}
+library(broom)
+tidy(fit)
+```
+
+
+```{r}
+d <- data.frame(time = fit$time,
+                  n.risk = fit$n.risk,
+                  n.event = fit$n.event,
+                  n.censor = fit$n.censor,
+                  surv = fit$surv,
+                  upper = fit$upper,
+                  lower = fit$lower
+                  )
+head(d)
+```
+n: total number of subjects in each curve.
+time: the time points on the curve.
+n.risk: the number of subjects at risk at time t
+n.event: the number of events that occurred at time t.
+n.censor: the number of censored subjects, who exit the risk set, without an event, at time t.
+lower,upper: lower and upper confidence limits for the curve, respectively.
+strata: indicates stratification of curve estimation. If strata is not NULL, there are multiple curves in the result. The levels of strata (a factor) are the labels for the curves.
+
+## Visualize survival curves
+We’ll use the function ggsurvplot() [in Survminer R package] to produce the survival curves for the two groups of subjects.
+
+It’s also possible to show:
+
+the 95% confidence limits of the survivor function using the argument conf.int = TRUE.
+the number and/or the percentage of individuals at risk by time using the option risk.table. Allowed values for risk.table include:
+TRUE or FALSE specifying whether to show or not the risk table. Default is FALSE.
+“absolute” or “percentage”: to show the absolute number and the percentage of subjects at risk by time, respectively. Use “abs_pct” to show both absolute number and percentage.
+the p-value of the Log-Rank test comparing the groups using pval = TRUE.
+horizontal/vertical line at median survival using the argument surv.median.line. Allowed values include one of c(“none”, “hv”, “h”, “v”). v: vertical, h:horizontal.
+```{r}
+# Change color, linetype by strata, risk.table color by strata
+ggsurvplot(fit,
+          pval = TRUE, conf.int = TRUE,
+          risk.table = TRUE, # Add risk table
+          risk.table.col = "strata", # Change risk table color by groups
+          linetype = "strata", # Change line type by groups
+          surv.median.line = "hv", # Specify median survival
+          ggtheme = theme_bw(), # Change ggplot2 theme
+          palette = c("#E7B800", "#2E9FDF"))
+
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
