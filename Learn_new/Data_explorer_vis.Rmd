@@ -1,0 +1,256 @@
+---
+title: "Untitled"
+output: html_document
+---
+# High charter
+```{r}
+library("highcharter")
+library("dplyr")
+library(readr)
+packageVersion("highcharter")
+```
+
+
+```{r}
+#Load the data
+df <-
+  read_csv(
+    "https://raw.githubusercontent.com/mekhatria/demo_highcharts/master/Olympics2012CapitalLetter.csv"
+  )
+#Remove the unnecessary data such as nationality, date of birth, name, and age
+df = subset(df, select = -c(nationality, date_of_birth, name, age))
+# Compare the data set using the descipine name and sex
+my_data <- df %>% filter((sport == "Gymnastics" &
+                   sex == "male")  |
+                  (sport == "Canoe" &
+                     sex == "male") |
+                  (sport == "Hockey" &
+                     sex == "male") |
+                  (sport == "Modern Pentathlon" & sex == "male")
+  )
+#Remove the redundant data
+my_data = subset(my_data, select = -c(sex))
+my_data
+```
+
+
+```{r}
+#Create the chart
+hcboxplot(
+  outliers = FALSE,
+  x = my_data$height,
+  var = my_data$sport,
+  name = "Length"
+) %>%
+  hc_title(text = "Male height by descipline (Olympic 2012)") %>%
+  hc_yAxis(title = list(text = "Height in metre")) %>%
+  hc_chart(type = "column")
+```
+
+
+```{r}
+#Create the chart
+hcboxplot(
+  x = my_data$height,
+  var = my_data$sport,
+  name = "Length",
+  color = "#2980b9",
+  outliers = TRUE
+) %>%
+  hc_chart(type = "column") %>%
+  hc_title(text = "Male height by descipline (Olympic 2012)") %>%
+  hc_yAxis(title = list(text = "Height in metre")) %>%
+  hc_add_series(
+    data = my_data,
+    type = "scatter",
+    hcaes(x = "sport", y = "my_data$height", group = "sport")
+  ) %>%
+  hc_plotOptions(scatter = list(
+    color = "red",
+    marker = list(
+      radius = 2,
+      symbol = "circle",
+      lineWidth = 1
+    )
+  ))  %>%
+  hc_plotOptions(scatter = list(jitter = list(x = .1, y = 0)))
+```
+
+```{r}
+library(highcharter)
+#> Highcharts (www.highcharts.com) is a Highsoft software product which is
+#> not free for commercial and Governmental use
+data(diamonds, package = "ggplot2")
+
+plotline <- list(
+  color = "red", value = mean(diamonds$x), width = 2, zIndex = 5
+)
+plotline
+```
+
+```{r}
+diamonds
+```
+
+```{r}
+hcboxplot(
+  x = diamonds$x, var = diamonds$color,
+  name = "Length", color = "#2980b9"
+) %>%
+  hc_yAxis(plotLines = list(plotline))
+```
+
+
+```{r}
+hcboxplot(
+  x = diamonds$x, var = diamonds$color,
+  name = "Length", color = "#2980b9"
+) %>%
+  hc_chart(type = "column") %>% 
+  hc_yAxis(plotLines = list(plotline))
+```
+```{r}
+data(pokemon) 
+pokemon
+```
+
+```{r}
+dat <- data_to_boxplot(pokemon, height)
+dat
+```
+```{r}
+
+dat <- data_to_boxplot(pokemon, height)
+highchart() %>%
+  hc_xAxis(type = "category") %>%
+  hc_add_series_list(dat)
+  
+dat <- data_to_boxplot(pokemon, height, type_1, name = "height in meters")
+
+highchart() %>%
+  hc_xAxis(type = "category") %>%
+  hc_add_series_list(dat)
+```
+
+
+```{r}
+highchart() %>%
+  hc_yAxis_multiples(create_yaxis(naxis = 4, title = list(text = NULL))) %>%
+  hc_add_series(data = c(1,3,2)) %>%
+  hc_add_series(data = c(20, 40, 10), yAxis = 1) %>%
+  hc_add_series(data = c(200, 400, 500), type = "column", yAxis = 2) %>%
+  hc_add_series(data = c(500, 300, 400), type = "column", yAxis = 2) %>% 
+  hc_add_series(data = c(5,4,7), type = "spline", yAxis = 3)
+```
+```{r}
+data(edhec)
+```
+
+```{r}
+data(edhec)
+R <- edhec[, 1:3]
+hc <- highchart(type = "stock")
+hc <- hc_yAxis_multiples(hc, create_yaxis(naxis = 3, heights = c(2,1,1)))
+
+for(i in 1:ncol(R)) {
+  hc <- hc_add_series_xts(hc, R[, i], yAxis = i - 1, name = names(R)[i])
+}
+
+hc <- hc_scrollbar(hc, enabled = TRUE) %>%
+  hc_add_theme(hc_theme_flat())
+
+hc
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+# Plotly
+```{r}
+#install.packages("tidyverse")
+library(plotly)
+library(data.table)
+library(tidyverse)
+```
+
+```{r}
+# Seeding the pseudo-random number generator for reproducible results
+set.seed(1234)
+# Create three varaible
+income <- round(rnorm(500,  # 500 random data point values
+                      mean = 10000,  # mean of 100
+                      sd = 1000),  # standard deviation of 1000
+                digits = 2)  # round the random values to two decimal points
+stage <- sample(c("Early",  
+                  "Mid",
+                  "Late"),  # sample space of the stage variable
+                500,  # 500 random data point values
+                replace = TRUE)  # replace values for reselection
+country <- sample(c("USA",
+                    "Canada"),  # sample space of the country variabe
+                  500,  # 500 random data point values
+                  replace = TRUE)  # replace values for reselection
+# Create tibble
+df <- tibble(Income = income,  # create an Income variable for the income data point values
+             Stage = stage,  # create a Stage variable for the stage data point values
+             Country = country)  # create a Country variable for the country data point values
+# Print a data table
+df
+```
+```{r}
+p5 <- plot_ly(df,
+              y = ~Income,
+              color = ~Stage,
+              type = "box") %>% 
+  layout(title = "Income by career stage",
+         xaxis = list(title = "Stage",
+                      zeroline = FALSE),
+         yaxis = list(title = "Income",
+                      zeroline = FALSE))
+p5
+```
+```{r}
+p6 <- plot_ly(df,
+              x = ~Country,
+              y = ~Income,
+              color = ~Stage,
+              type = "box") %>% 
+  layout(boxmode = "group",
+         title = "Income by career stage",
+         xaxis = list(title = "Country",
+                      zeroline = FALSE),
+         yaxis = list(title = "Income",
+                      zeroline = FALSE))
+p6
+```
+
+
+# r2d3
+
+```{r}
+#devtools::install_github("rstudio/r2d3")
+```
+
+
+```{r}
+library(r2d3)
+r2d3(data=c(0.3, 0.6, 0.8, 0.95, 0.40, 0.20), script = "barchart.js")
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+

@@ -77,7 +77,13 @@ summary(fit)$table
 library(broom)
 tidy(fit)
 ```
-
+n: total number of subjects in each curve.
+time: the time points on the curve.
+n.risk: the number of subjects at risk at time t
+n.event: the number of events that occurred at time t.
+n.censor: the number of censored subjects, who exit the risk set, without an event, at time t.
+lower,upper: lower and upper confidence limits for the curve, respectively.
+strata: indicates stratification of curve estimation. If strata is not NULL, there are multiple curves in the result. The levels of strata (a factor) are the labels for the curves.
 
 ```{r}
 d <- data.frame(time = fit$time,
@@ -90,13 +96,6 @@ d <- data.frame(time = fit$time,
                   )
 head(d)
 ```
-n: total number of subjects in each curve.
-time: the time points on the curve.
-n.risk: the number of subjects at risk at time t
-n.event: the number of events that occurred at time t.
-n.censor: the number of censored subjects, who exit the risk set, without an event, at time t.
-lower,upper: lower and upper confidence limits for the curve, respectively.
-strata: indicates stratification of curve estimation. If strata is not NULL, there are multiple curves in the result. The levels of strata (a factor) are the labels for the curves.
 
 ## Visualize survival curves
 We’ll use the function ggsurvplot() [in Survminer R package] to produce the survival curves for the two groups of subjects.
@@ -121,21 +120,84 @@ ggsurvplot(fit,
           palette = c("#E7B800", "#2E9FDF"))
 
 ```
+The plot can be further customized using the following arguments:
 
+conf.int.style = “step” to change the style of confidence interval bands.
+xlab to change the x axis label.
+break.time.by = 200 break x axis in time intervals by 200.
+risk.table = “abs_pct”to show both absolute number and percentage of individuals at risk.
+risk.table.y.text.col = TRUE and risk.table.y.text = FALSE to provide bars instead of names in text annotations of the legend of risk table.
+ncensor.plot = TRUE to plot the number of censored subjects at time t. As suggested by Marcin Kosinski, This is a good additional feedback to survival curves, so that one could realize: how do survival curves look like, what is the number of risk set AND what is the cause that the risk set become smaller: is it caused by events or by censored events?
+legend.labs to change the legend labels.
 
 ```{r}
+ggsurvplot(
+   fit,                     # survfit object with calculated statistics.
+   pval = TRUE,             # show p-value of log-rank test.
+   conf.int = TRUE,         # show confidence intervals for 
+                            # point estimaes of survival curves.
+   conf.int.style = "step",  # customize style of confidence intervals
+   xlab = "Time in days",   # customize X axis label.
+   break.time.by = 200,     # break X axis in time intervals by 200.
+   ggtheme = theme_light(), # customize plot and risk table with a theme.
+   risk.table = "abs_pct",  # absolute number and percentage at risk.
+  risk.table.y.text.col = T,# colour risk table text annotations.
+  risk.table.y.text = FALSE,# show bars instead of names in text annotations
+                            # in legend of risk table.
+  ncensor.plot = TRUE,      # plot the number of censored subjects at time t
+  surv.median.line = "hv",  # add the median survival pointer.
+  legend.labs = 
+    c("Male", "Female"),    # change legend labels.
+  palette = 
+    c("#E7B800", "#2E9FDF") # custom color palettes.
+)
 ```
+The Kaplan-Meier plot can be interpreted as follow:
 
+
+The horizontal axis (x-axis) represents time in days, and the vertical axis (y-axis) shows the probability of surviving or the proportion of people surviving. The lines represent survival curves of the two groups. A vertical drop in the curves indicates an event. The vertical tick mark on the curves means that a patient was censored at this time.
+
+At time zero, the survival probability is 1.0 (or 100% of the participants are alive).
+At time 250, the probability of survival is approximately 0.55 (or 55%) for sex=1 and 0.75 (or 75%) for sex=2.
+The median survival is approximately 270 days for sex=1 and 426 days for sex=2, suggesting a good survival for sex=2 compared to sex=1
+
+
+The median survival times for each group can be obtained using the code below:
 
 ```{r}
+summary(fit)$table
 ```
+The median survival times for each group represent the time at which the survival probability, S(t), is 0.5.
 
+The median survival time for sex=1 (Male group) is 270 days, as opposed to 426 days for sex=2 (Female). There appears to be a survival advantage for female with lung cancer compare to male. However, to evaluate whether this difference is statistically significant requires a formal statistical test, a subject that is discussed in the next sections.
 
+Note that, the confidence limits are wide at the tail of the curves, making meaningful interpretations difficult. This can be explained by the fact that, in practice, there are usually patients who are lost to follow-up or alive at the end of follow-up. Thus, it may be sensible to shorten plots before the end of follow-up on the x-axis (Pocock et al, 2002).
+
+The survival curves can be shorten using the argument xlim as follow:
 ```{r}
+ggsurvplot(fit,
+          conf.int = TRUE,
+          risk.table.col = "strata", # Change risk table color by groups
+          ggtheme = theme_bw(), # Change ggplot2 theme
+          palette = c("#E7B800", "#2E9FDF"),
+          xlim = c(0, 600))
 ```
+Note that, three often used transformations can be specified using the argument fun:
 
+“log”: log transformation of the survivor function,
+“event”: plots cumulative events (f(y) = 1-y). It’s also known as the cumulative incidence,
+“cumhaz” plots the cumulative hazard function (f(y) = -log(y))
+
+
+For example, to plot cumulative events, type this:
 
 ```{r}
+ggsurvplot(fit,
+          conf.int = TRUE,
+          risk.table.col = "strata", # Change risk table color by groups
+          ggtheme = theme_bw(), # Change ggplot2 theme
+          palette = c("#E7B800", "#2E9FDF"),
+          fun = "event")
 ```
 
 
