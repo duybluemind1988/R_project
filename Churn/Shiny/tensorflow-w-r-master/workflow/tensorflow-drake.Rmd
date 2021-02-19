@@ -1,0 +1,355 @@
+---
+title: "Automated workflow"
+output: html_notebook
+---
+
+```{r setup, include = FALSE}
+library(drake)
+library(keras)
+library(tidyverse)
+library(rsample)
+library(recipes)
+library(yardstick)
+options(
+  drake_make_menu = FALSE,
+  drake_clean_menu = FALSE,
+  warnPartialMatchArgs = FALSE,
+  crayon.enabled = FALSE,
+  readr.show_progress = FALSE
+)
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+clean(destroy = TRUE)
+unlink(".drake_history", recursive = TRUE)
+```
+
+Let's use [`drake`](https://github.com/ropensci/drake) to train and compare multiple models in a unified automated workflow.
+
+## Packages
+
+First, we load our packages into a fresh R session.
+
+```{r}
+library(drake)
+library(keras)
+library(tidyverse)
+library(rsample)
+library(recipes)
+library(yardstick)
+```
+
+## Functions
+
+[`drake`](https://github.com/ropensci/drake) is R-focused and function-oriented. We create functions to [preprocess the data](https://github.com/tidymodels/recipes),
+
+```{r}
+prepare_recipe <- function(data) {
+  data %>%
+    training() %>%
+    recipe(Churn ~ .) %>%
+    step_rm(customerID) %>%
+    step_naomit(all_outcomes(), all_predictors()) %>%
+    step_discretize(tenure, options = list(cuts = 6)) %>%
+    step_log(TotalCharges) %>%
+    step_mutate(Churn = ifelse(Churn == "Yes", 1, 0)) %>%
+    step_dummy(all_nominal(), -all_outcomes()) %>%
+    step_center(all_predictors(), -all_outcomes()) %>%
+    step_scale(all_predictors(), -all_outcomes()) %>%
+    prep()
+}
+```
+
+define a [`keras`](https://github.com/rstudio/keras) model, exposing arguments to set the dimensionality and activation functions of the layers,
+
+```{r}
+define_model <- function(rec, units1, units2, act1, act2, act3) {
+  input_shape <- ncol(
+    juice(rec, all_predictors(), composition = "matrix")
+  )
+  keras_model_sequential() %>%
+    layer_dense(
+      units = units1,
+      kernel_initializer = "uniform",
+      activation = act1,
+      input_shape = input_shape
+    ) %>%
+    layer_dropout(rate = 0.1) %>%
+    layer_dense(
+      units = units2,
+      kernel_initializer = "uniform",
+      activation = act2
+    ) %>%
+    layer_dropout(rate = 0.1) %>%
+    layer_dense(
+      units = 1,
+      kernel_initializer = "uniform",
+      activation = act3
+    )
+}
+```
+
+train a model,
+
+
+```{r}
+train_model <- function(
+  data,
+  rec,
+  units1 = 16,
+  units2 = 16,
+  act1 = "relu",
+  act2 = "relu",
+  act3 = "sigmoid"
+) {
+  model <- define_model(
+    rec = rec,
+    units1 = units1,
+    units2 = units2,
+    act1 = act1,
+    act2 = act2,
+    act3 = act3
+  )
+  compile(
+    model,
+    optimizer = "adam",
+    loss = "binary_crossentropy",
+    metrics = c("accuracy")
+  )
+  x_train_tbl <- juice(
+    rec,
+    all_predictors(),
+    composition = "matrix"
+  )
+  y_train_vec <- juice(rec, all_outcomes()) %>%
+    pull()
+  fit(
+    object = model,
+    x = x_train_tbl,
+    y = y_train_vec,
+    batch_size = 32,
+    epochs = 32,
+    validation_split = 0.3,
+    verbose = 0
+  )
+  model
+}
+```
+
+compare predictions against reality,
+
+```{r}
+confusion_matrix <- function(data, rec, model) {
+  testing_data <- bake(rec, testing(data))
+  x_test_tbl <- testing_data %>%
+    select(-Churn) %>%
+    as.matrix()
+  y_test_vec <- testing_data %>%
+    select(Churn) %>%
+    pull()
+  yhat_keras_class_vec <- model %>%
+    predict_classes(x_test_tbl) %>%
+    as.factor() %>%
+    fct_recode(yes = "1", no = "0")
+  yhat_keras_prob_vec <-
+    model %>%
+    predict_proba(x_test_tbl) %>%
+    as.vector()
+  test_truth <- y_test_vec %>%
+    as.factor() %>%
+    fct_recode(yes = "1", no = "0")
+  estimates_keras_tbl <- tibble(
+    truth = test_truth,
+    estimate = yhat_keras_class_vec,
+    class_prob = yhat_keras_prob_vec
+  )
+  estimates_keras_tbl %>%
+    conf_mat(truth, estimate)
+}
+```
+
+and compare the performance of multiple models. 
+
+```{r}
+compare_models <- function(...) {
+  name <- match.call()[-1] %>%
+    as.character()
+  df <- map_df(list(...), summary) %>%
+    filter(.metric %in% c("accuracy", "sens", "spec")) %>%
+    mutate(name = rep(name, each = n() / length(name))) %>%
+    rename(metric = .metric, estimate = .estimate)
+  ggplot(df) +
+    geom_line(aes(x = metric, y = estimate, color = name, group = name)) +
+    theme_gray(24)
+}
+```
+
+## Plan
+
+Next, we define our workflow in a [`drake` plan](https://ropenscilabs.github.io/drake-manual/plans.html). We will prepare the data, train different models with different activation functions, and compare the models in terms of performance. 
+
+```{r}
+activations <- c("relu", "sigmoid")
+
+plan <- drake_plan(
+  data = read_csv(file_in("customer_churn.csv"), col_types = cols()) %>%
+    initial_split(prop = 0.3),
+  rec = prepare_recipe(data),
+  model = target(
+    train_model(data, rec, act1 = act),
+    format = "keras", # Supported in drake > 7.5.2 to store models properly.
+    transform = map(act = !!activations)
+  ),
+  conf = target(
+    confusion_matrix(data, rec, model),
+    transform = map(model, .id = act)
+  ),
+  metrics = target(
+    compare_models(conf),
+    transform = combine(conf)
+  )
+)
+```
+
+The plan is a data frame with the steps we are going to do.
+
+```{r, paged.print = FALSE, warning = FALSE}
+plan
+```
+
+## Dependency graph
+
+The graph visualizes the dependency relationships among the steps of the workflow.
+
+```{r, message = FALSE}
+config <- drake_config(plan)
+vis_drake_graph(config)
+```
+
+## Run the models
+
+Call [`make()`](https://ropensci.github.io/drake/reference/make.html) to actually run the workflow.
+
+```{r}
+make(plan)
+```
+
+## Inspect the results
+
+The two models performed about the same.
+
+```{r}
+readd(metrics) # see also loadd()
+```
+
+## Add models
+
+Let's try another activation function.
+
+```{r}
+activations <- c("relu", "sigmoid", "softmax")
+
+plan <- drake_plan(
+  data = read_csv(file_in("customer_churn.csv"), col_types = cols()) %>%
+    initial_split(prop = 0.3),
+  rec = prepare_recipe(data),
+  model = target(
+    train_model(data, rec, act1 = act),
+    format = "keras", # Supported in drake > 7.5.2 to store models properly.
+    transform = map(act = !!activations)
+  ),
+  conf = target(
+    confusion_matrix(data, rec, model),
+    transform = map(model, .id = act)
+  ),
+  metrics = target(
+    compare_models(conf),
+    transform = combine(conf)
+  )
+)
+```
+
+We already trained models with batch sizes 16 and 32, and their dependencies have not changed, so some of our work is already up to date.
+
+```{r, message = FALSE}
+config <- drake_config(plan)
+vis_drake_graph(config) # see also outdated() and predict_runtime()
+```
+
+[`make()`](https://ropensci.github.io/drake/reference/make.html) only trains the outdated or missing models and refreshes the post-processing. It skips the targets that are already up to date.
+
+
+```{r}
+make(plan)
+```
+
+## Inspect the results again
+
+```{r}
+readd(metrics) # see also loadd()
+```
+
+## Update your code
+
+If you change upstream functions in your environment, even nested ones, `drake` automatically refits the affected models. Let's increase dropout in both layers.
+
+```{r}
+define_model <- function(rec, units1, units2, act1, act2, act3) {
+  input_shape <- ncol(
+    juice(rec, all_predictors(), composition = "matrix")
+  )
+  keras_model_sequential() %>%
+    layer_dense(
+      units = units1,
+      kernel_initializer = "uniform",
+      activation = act1,
+      input_shape = input_shape
+    ) %>%
+    layer_dropout(rate = 0.15) %>% # Changed from 0.1 to 0.15.
+    layer_dense(
+      units = units2,
+      kernel_initializer = "uniform",
+      activation = act2
+    ) %>%
+    layer_dropout(rate = 0.15) %>% # Changed from 0.1 to 0.15.
+    layer_dense(
+      units = 1,
+      kernel_initializer = "uniform",
+      activation = act3
+    )
+}
+```
+
+```{r}
+make(plan)
+```
+
+## History and provenance
+
+`drake` version 7.5.0 and above tracks history and provenance. You can see which models you ran, when you ran them, how long they took, and which settings you tried (i.e. named arguments to function calls in your commands).
+
+```{r}
+history <- drake_history()
+history
+```
+
+And as long as you did not run `clean(garbage_collection = TRUE)`, you can get the old data back. Let's find the oldest run of the relu model.
+
+```{r}
+hash <- history %>%
+  filter(act1 == "relu") %>%
+  pull(hash) %>%
+  head(n = 1)
+drake_cache()$get_value(hash)
+```
+
+## Tips
+
+- To see this workflow [organized as a collection of modular  scripts](https://ropenscilabs.github.io/drake-manual/projects.html), see the customer churn examples in [this repository](https://github.com/wlandau/drake-examples). You can download the code with `drake_example("customer-churn")`.
+- [`drake`](https://github.com/ropensci/drake) has [built-in distributed computing support](https://ropenscilabs.github.io/drake-manual/hpc.html) that lets you fit multiple models in parallel.
+
+```{r, echo = FALSE}
+clean(destroy = TRUE)
+unlink(".drake_history", recursive = TRUE)
+```
