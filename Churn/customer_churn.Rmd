@@ -25,7 +25,7 @@ library(tidyquant)
 
 ```{r}
 # Check H2O Version to match Model Version
-source("scripts/check_h2o_version.R")
+#source("scripts/check_h2o_version.R")
 ```
 
 # 2.0 DATA ----
@@ -114,9 +114,12 @@ train_tbl <- customer_churn_prep_tbl %>%
 train_tbl
 ```
 
+```{r}
+survfit(Surv(tenure, Churn_Yes) ~ Contract, data = train_tbl)
+```
+# 4.1 Survival Tables (Kaplan-Meier Method) ----
 
 ```{r}
-# 4.1 Survival Tables (Kaplan-Meier Method) ----
 survfit_simple <- survfit(Surv(tenure, Churn_Yes) ~ strata(Contract), data = train_tbl)
 survfit_simple
 ```
@@ -126,9 +129,19 @@ survfit_simple
 # Mortality Table
 tidy(survfit_simple)
 ```
-
+n: total number of subjects in each curve.
+time: the time points on the curve.
+n.risk: the number of subjects at risk at time t
+n.event: the number of events that occurred at time t.
+n.censor: the number of censored subjects, who exit the risk set, without an event, at time t.
+lower,upper: lower and upper confidence limits for the curve, respectively.
+strata: indicates stratification of curve estimation. If strata is not NULL, there are multiple curves in the result. The levels of strata (a factor) are the labels for the curves.
 ```{r}
+# Trial
+coxph(Surv(tenure, Churn_Yes) ~ . - Contract , data = train_tbl)
+```
 # 4.2 Cox Regression Model (Multivariate) ----
+```{r}
 model_coxph <- coxph(Surv(tenure, Churn_Yes) ~ . - Contract + strata(Contract), data = train_tbl)
 model_coxph
 ```
@@ -169,6 +182,10 @@ plot_customer_survival <- function(object_survfit) {
 }
 
 plot_customer_survival(survfit_simple)
+```
+```{r}
+model_coxph
+survfit(model_coxph)
 ```
 
 
