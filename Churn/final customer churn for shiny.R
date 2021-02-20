@@ -22,7 +22,7 @@ library(tidyquant)
 #2. Get data ----
 
 getwd()
-data_raw <- fread("Churn/lab_14_customer_churn_survival_h2o/WA_Fn-UseC_-Telco-Customer-Churn.csv")
+data_raw <- fread("Churn/WA_Fn-UseC_-Telco-Customer-Churn.csv")
 
 #Remove unnecessary data
 data <- data_raw %>%
@@ -91,8 +91,8 @@ facet_plot <- function(data,categorical_col,quantitative_col,facet_col){
 
 facet_plot(data,~Churn,~tenure,~Contract)
 
-#4. Survival analysis
-## Select only (not convert contract)
+#4. Survival analysis ----
+## Process data (not convert contract) ----
 train_tbl <- data %>%
   mutate(
     Churn_Yes                     = Churn == "Yes",
@@ -109,12 +109,12 @@ train_tbl <- data %>%
   ) 
 train_tbl
 
-## Survival Tables (Kaplan-Meier Method) 
+## Survival Tables (Kaplan-Meier Method) ----
 survfit_simple <- survfit(Surv(tenure, Churn_Yes) ~ strata(Contract), data = train_tbl)
 survfit_simple
 tidy(survfit_simple)
 
-## Cox Regression Model (Multivariate)
+## Cox Regression Model (Multivariate) ----
 model_coxph <- coxph(Surv(tenure, Churn_Yes) ~ . - Contract + strata(Contract), data = train_tbl)
 model_coxph
 tidy(model_coxph) ## Regression Estimates
@@ -124,7 +124,7 @@ model_coxph %>% # Mortality Table
   survfit() %>%
   tidy()
 
-## Survival curve
+## Survival curve ----
 
 plot_customer_survival <- function(object_survfit) {
   
@@ -162,10 +162,21 @@ plot_customer_loss(survfit_simple)
 plot_customer_loss(survfit_coxph)
 
 #5. Predict with survival model ----
-## Cox PH - Produces Theoretical Hazard Ratio
-predict(model_coxph, newdata = train_tbl, type = "expected") %>%
-  tibble(.pred = .) %>%
-  bind_cols(train_tbl)
+## Cox PH - Produces Theoretical Hazard Ratio ----
+table_predict <- predict(model_coxph, newdata = train_tbl, type = "expected") %>%
+          tibble(.pred = .) %>%
+          bind_cols(train_tbl) # predict Yes/No churn with propability
+table_predict<-table_predict  %>%
+            mutate(prediction=ifelse(.pred>0.5,"TRUE","FALSE"))
+
+str(table_predict)
+predict <- factor(table_predict$prediction)
+reference <- factor(table_predict$Churn_Yes)
+caret::confusionMatrix(predict,reference,positive="TRUE",mode="prec_recall")
+# Precision : 0.38389
+# Recall : 0.26271
+# F1 : 0.31194
+# Balanced Accuracy : 0.55504
 
 ## Survival Regression w/ Parsnip ----
 model_survreg <- parsnip::surv_reg(mode = "regression", dist = "weibull") %>%
@@ -176,11 +187,9 @@ model_survreg <- parsnip::surv_reg(mode = "regression", dist = "weibull") %>%
 model_survreg$fit %>% tidy()
 
 predict(model_survreg, new_data = train_tbl) %>%
-  bind_cols(train_tbl %>% select(Churn_Yes, everything()))
+  bind_cols(train_tbl %>% select(Churn_Yes, everything())) # predict day churn
 
 #6. Prepare data for build ML model ----
-
-
 response="Churn"
 set.seed(430)
 split = caret::createDataPartition(data[[response]], p =0.6, list = FALSE)
@@ -217,7 +226,7 @@ predictors <- setdiff(colnames(baked_train), response)
 
 #7. ML model ----
 
-#  GBM BEST
+##  GBM BEST ----
 assignment_type <- "Stratified"
 tic()
 h2o.gbm <- h2o.gbm(
@@ -244,7 +253,7 @@ caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
 #Recall : 0.8204          
 #F1 : 0.6518
 
-## Random forest
+## Random forest ----
 assignment_type <- "Stratified"
 tic()
 h2o_model_rf <- h2o.randomForest(
@@ -267,7 +276,7 @@ caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
 #Recall : 0.7641          
 #F1 : 0.6448   
 
-## Deep learning
+## Deep learning ----
 model_dnn <- h2o.deeplearning(x = predictors, 
                               y = response, 
                               training_frame = train_h2o,
@@ -284,10 +293,112 @@ test_pred <-h2o.predict(model_dnn, newdata = test_h2o)
 predict <- as.data.frame(test_pred)$predict
 reference <- as.data.frame(test_h2o)[[response]]
 caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
-#Precision : 0.4918          
-#Recall : 0.8043          
-#F1 : 0.6104
+#Precision : 0.5418          
+#Recall : 0.7641         
+#F1 : 0.6340
 
+# 8. Save model ----
+# Save recipe
+write_rds(recipe_obj,"Churn/recipe.Rds")
 
-#8. Explain model ----
+#Save model
+slect_model=h2o.gbm
+getwd()
+model_path <- h2o.saveModel(object = slect_model, path = "Churn/", force = TRUE)
+print(model_path)
+# /home/dnn/Data_science/Git/R_project/Churn/GBM_model_R_1613740880034_453
 
+# 9. Load model ----
+# Load recipe
+recipe_load <- readr::read_rds("Churn/recipe.Rds")
+# Load model
+model_path <- "Churn/GBM_model_R_1613740880034_453"
+h2o_model_load <- h2o.loadModel(model_path)
+
+#10. Explain model ----
+dev.off() # clear all plot to avoid call graphics error
+## Explain GBM model ----
+h2o.varimp(h2o_model_load)
+h2o.varimp_plot(h2o_model_load)
+h2o.shap_summary_plot(h2o_model_load,test_h2o)
+h2o.pd_plot(h2o_model_load, test_h2o, column = "Contract")
+h2o.pd_plot(h2o_model_load, test_h2o, column = "tenure")
+h2o.pd_plot(h2o_model_load, test_h2o, column = "MonthlyCharges")
+h2o.pd_plot(h2o_model_load, test_h2o, column = "OnlineSecurity")
+h2o.pd_plot(h2o_model_load, test_h2o, column = "PaymentMethod")
+h2o.pd_plot(h2o_model_load, test_h2o, column = "MultipleLines")
+h2o.partialPlot(h2o_model_load, data = test_h2o, cols = "MonthlyCharges")
+h2o.ice_plot(h2o_model_load, test_h2o, column = "MonthlyCharges")
+
+# Class = No
+h2o.shap_explain_row_plot(h2o_model_load, test_h2o,row_index = 10)
+h2o.shap_explain_row_plot(h2o_model_load, test_h2o,row_index = 3)
+# Class =Yes #2,17,20
+h2o.shap_explain_row_plot(h2o_model_load, test_h2o,row_index = 18)
+h2o.shap_explain_row_plot(h2o_model_load, test_h2o,row_index = 4)
+
+# Run lime() on training set
+explainer <- lime::lime(
+  as.data.frame(train_h2o), 
+  model          = h2o_model_load, 
+  bin_continuous = FALSE)
+# Run explain() on explainer
+explanation <- lime::explain(
+  as.data.frame(test_h2o[1,]), 
+  explainer    = explainer, 
+  n_labels     = 1, 
+  n_features   = 10,
+  kernel_width = 0.5)
+
+lime::plot_features(explanation) +
+  labs(title = "HR Predictive Analytics: LIME Feature Importance Visualization",
+       subtitle = "Hold Out (Test) Set, First 10 Cases Shown")
+plot_explanations(explanation)
+
+explanation_caret <- explain(
+  x = as.data.frame(test_h2o[1:5,]), 
+  explainer = explainer, 
+  n_permutations = 5000,
+  dist_fun = "gower",
+  kernel_width = .75,
+  n_features = 10, 
+  #feature_select = "highest_weights",
+  labels = "Yes"
+)
+plot_features(explanation_caret)
+plot_explanations(explanation_caret)
+
+## Explain combine model ----
+explainer_h2o_rf  <- lime(as.data.frame(train_h2o), h2o_model_rf, n_bins = 5)
+explainer_h2o_gbm <- lime(as.data.frame(train_h2o), h2o.gbm, n_bins = 5)
+
+explanation_rf  <- lime::explain(as.data.frame(test_h2o[1:5,]), 
+                                 explainer_h2o_rf, 
+                                 n_features      = 5, 
+                                 labels          = "Yes", 
+                                 kernel_width    = .1, 
+                                 feature_select  = "highest_weights")
+explanation_gbm <- lime::explain(as.data.frame(test_h2o[1:5,]), 
+                                 explainer_h2o_gbm, 
+                                 n_features      = 5, 
+                                 labels          = "Yes", 
+                                 kernel_width    = .1, 
+                                 feature_select  = "highest_weights")
+p1 <- plot_features(explanation_rf,  ncol = 1) + ggtitle("rf")
+p2 <- plot_features(explanation_gbm, ncol = 1) + ggtitle("gbm")
+gridExtra::grid.arrange(p1, p2, nrow = 1)
+
+## Explain DL model ----
+h2o.varimp_plot(model_dnn)
+h2o.pd_plot(model_dnn, test_h2o, column = "Contract")
+h2o.pd_plot(h2o_model_load, test_h2o, column = "tenure")
+h2o.partialPlot(model_dnn, data = test_h2o, cols = "Contract")
+h2o.ice_plot(model_dnn, test_h2o, column = "Contract")
+
+# Problem: 
+# Class = No
+h2o.shap_explain_row_plot(model_dnn, test_h2o,row_index = 10)
+h2o.shap_explain_row_plot(model_dnn, test_h2o,row_index = 3)
+# Class =Yes #2,17,20
+h2o.shap_explain_row_plot(model_dnn, test_h2o,row_index = 18)
+h2o.shap_explain_row_plot(model_dnn, test_h2o,row_index = 4)
