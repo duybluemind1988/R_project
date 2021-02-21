@@ -1,0 +1,478 @@
+
+
+# 1.0 LIBRARIES ----
+```{r}
+# Core & Viz
+library(vroom)
+library(tidyverse)
+library(tidyquant)
+library(plotly)
+
+# Modeling
+library(recommenderlab)
+library(arules)
+library(arulesViz)
+library(SmartEDA)
+```
+
+# 2.0 DATA ----
+```{r}
+# 2.0 DATA ----
+orders_products_tbl <- vroom("/home/dnn/Data_science/Git/Business science/Marketing analytics/lab_11_market_basket_analysis/learning_lab_11_market_basket_analysis/00_Data/order_products__train.csv", delim = ",") # 24 MB
+orders_products_tbl
+
+orders_tbl <- vroom("/home/dnn/Data_science/Git/Business science/Marketing analytics/lab_11_market_basket_analysis/learning_lab_11_market_basket_analysis/00_Data/orders.csv", delim = ",") # 109 MB
+orders_tbl
+
+products_tbl <- vroom("/home/dnn/Data_science/Git/Business science/Marketing analytics/lab_11_market_basket_analysis/learning_lab_11_market_basket_analysis/00_Data/products.csv", delim = ",") # 2 MB
+products_tbl
+
+aisles_tbl <- vroom("/home/dnn/Data_science/Git/Business science/Marketing analytics/lab_11_market_basket_analysis/learning_lab_11_market_basket_analysis/00_Data/aisles.csv", delim = ",")
+aisles_tbl
+
+departments_tbl <- vroom("/home/dnn/Data_science/Git/Business science/Marketing analytics/lab_11_market_basket_analysis/learning_lab_11_market_basket_analysis/00_Data/departments.csv", delim = ",")
+departments_tbl
+
+dim(orders_products_tbl) # 1,384,617       4
+dim(orders_tbl) # 3,421,083       7
+```
+
+# 3.0 DATA UNDERSTANDING ----
+```{r}
+orders_combined_tbl <- orders_products_tbl %>% 
+    left_join(orders_tbl) %>% # join by order_id
+    left_join(products_tbl) %>% # join by product_id
+    left_join(aisles_tbl) %>% # join by aisle_id
+    left_join(departments_tbl) %>% # join by department_id
+    select(eval_set, user_id, 
+           contains("order"), contains("product"), 
+           contains("aisle"), contains("department"), everything()) 
+orders_combined_tbl %>% glimpse()
+```
+
+
+```{r}
+ExpData(data=orders_combined_tbl,type=1)
+```
+
+
+```{r}
+ExpData(data=orders_combined_tbl,type=2)
+```
+# General EDA
+
+```{r}
+#ExpNumStat(orders_combined_tbl,by="A",gp=NULL,Qnt=seq(0,1,0.1),MesofShape=2,Outlier=TRUE,round=2,Nlim=10)
+```
+
+
+```{r}
+ExpNumViz(orders_combined_tbl,target=NULL,nlim=10,Page=c(2,2),sample=4)
+```
+
+
+```{r}
+plot2 <- ExpCatViz(orders_combined_tbl,target=NULL,col ="slateblue4",clim=10,margin=2,Page = c(2,1),#sample=4
+                   )
+plot2
+```
+
+
+```{r}
+```
+
+# 3.1 Which products are purchased most frequently? ----
+```{r}
+head(orders_combined_tbl)
+```
+Rows: 1,384,617
+Columns: 15
+```{r}
+# product name = product id
+orders_combined_tbl %>%
+    count(product_name, product_id, aisle, department) %>%
+    arrange(desc(n))
+# Tu 1tr384 row giam xuong con 39,123 rows: nhung product_id (name) nao hay dung se duoc gop chung lai va count luon
+```
+```{r}
+ orders_combined_tbl %>%
+    count(product_name, product_id, aisle, department) %>%
+    arrange(desc(n)) %>%
+    mutate(
+        pct = n / sum(n),
+        cumulative_pct = cumsum(pct), # Cong tat ca pct tu 1 --> n giong nhu pareto chart
+        popular_product = ifelse(cumulative_pct <= 0.5, "Yes", "No")
+    ) %>%
+    rowid_to_column(var = "rank") 
+```
+
+```{r}
+item_frequency_tbl <- orders_combined_tbl %>%
+    count(product_name, product_id, aisle, department) %>%
+    arrange(desc(n)) %>%
+    mutate(
+        pct = n / sum(n),
+        cumulative_pct = cumsum(pct),
+        popular_product = ifelse(cumulative_pct <= 0.5, "Yes", "No")
+    ) %>%
+    rowid_to_column(var = "rank") %>%
+    mutate(label_text = str_glue("Rank: {rank}
+                                 Product: {product_name}
+                                 ProductID: {product_id}
+                                 Aisle: {aisle}
+                                 Department: {department}
+                                 Count: {n}
+                                 Pct: {scales::percent(pct)}
+                                 Cumulative Pct: {scales::percent(cumulative_pct)}")) 
+    
+
+item_frequency_tbl
+```
+
+```{r}
+ item_frequency_tbl %>%
+    slice(1:5000) %>% # Chi lay 5000 sp nhieu nhat thoi
+    ggplot(aes(rank, n)) + # name la rank id, khong phai product_name, theo n
+    geom_point(aes(size = n, color = popular_product, text = label_text), alpha = 0.2)
+```
+```{r}
+summary(item_frequency_tbl %>% select(n))
+```
+
+Popular product: banana (buy 18726 times)
+Normally all product was buy 5 times
+```{r}
+# g <- item_frequency_tbl %>%
+#     slice(1:5000) %>%
+#     ggplot(aes(rank, n)) +
+#     geom_point(aes(size = n, color = popular_product, text = label_text), alpha = 0.2) +
+#     theme_tq() +
+#     scale_color_tq() +
+#     theme(legend.direction = "vertical", 
+#           legend.position  = "right") +
+#     labs(title = "Item Frequency", 
+#          subtitle = "Top Items Account For Majority Of Purchases")
+# 
+# ggplotly(g, tooltip = "text")
+```
+# 3.2 Do Customers Purchase More Frequently? ----
+# 3.3 Do Certain Customers Buy More Products? ----
+```{r}
+user_frequency_tbl <- orders_combined_tbl %>% 
+                        select(user_id) %>% 
+                        count(user_id) %>% 
+                        arrange(desc(n)) %>% 
+                        mutate(
+                                pct = n / sum(n),
+                                cumulative_pct = cumsum(pct),
+                                popular_customer = ifelse(cumulative_pct <= 0.5, "Yes", "No")
+                            ) %>%
+                            rowid_to_column(var = "rank") 
+user_frequency_tbl
+```
+```{r}
+user_frequency_tbl %>%
+    slice(1:5000) %>%
+    ggplot(aes(rank, n)) +
+    geom_point(aes(size = n, color = popular_customer), alpha = 0.2)
+```
+```{r}
+summary(user_frequency_tbl %>% select(n))
+```
+Customer usually order 9 times (max: 80 times)
+
+
+```{r}
+# g <- user_frequency_tbl %>%
+#     slice(1:5000) %>%
+#     ggplot(aes(rank, n)) +
+#     geom_point(aes(size = n, color = popular_customer), alpha = 0.2) +
+#     theme_tq() +
+#     scale_color_tq() +
+#     theme(legend.direction = "vertical", 
+#           legend.position  = "right") +
+#     labs(title = "User Frequency", 
+#          subtitle = "How Often Do You Shop? - No Frequency! Everyone is 1st time.")
+# 
+# ggplotly(g)
+```
+
+# 4.0 CONDENSE USER-ITEM / TRANSACTION-ITEM MATRIX FOR EVALUATION ----
+```{r}
+# 4.1 Popular Products ----
+top_products_vec <- item_frequency_tbl %>%
+    filter(popular_product == "Yes") %>%
+    pull(product_name)
+head(top_products_vec)
+```
+
+
+```{r}
+# Use names to filter 
+top_products_basket_tbl <- orders_combined_tbl %>%
+    filter(product_name %in% top_products_vec) 
+head(top_products_basket_tbl)
+```
+```{r}
+top_products_basket_tbl %>% glimpse()
+```
+
+
+```{r}
+# 4.2 Large Baskets ----
+top_users_vec <- user_item_frequency_tbl %>%
+    filter(rank < 2500) %>%
+    pull(user_id)
+head(top_users_vec)
+```
+
+
+```{r}
+market_basket_condensed_tbl <- top_products_basket_tbl %>%
+    filter(user_id %in% top_users_vec) 
+
+head(market_basket_condensed_tbl)
+```
+
+# 5.0 MARKET BASKET ANALYSIS ----
+```{r}
+# 5.1.1 "Binary Ratings Matrix"
+# - Did basket contain an item (Yes/No encoded as 1-0)
+# - See also "Real Ratings Matrix" for "Amazon"-style ratings 1-5
+
+user_item_tbl <- market_basket_condensed_tbl %>%
+    select(user_id, product_name) %>%
+    mutate(value = 1) %>%
+    spread(product_name, value, fill = 0)
+dim(user_item_tbl) #  2498  847
+head(user_item_tbl)
+```
+
+
+```{r}
+user_item_rlab <- user_item_tbl %>%
+    select(-user_id) %>%
+    as.matrix() %>%
+    as("binaryRatingMatrix")
+
+user_item_rlab
+```
+
+
+```{r}
+# 5.1.2 Relationship with arules package
+
+user_item_rlab@data
+
+user_item_rlab@data %>% summary()
+
+user_item_rlab@data %>% glimpse()
+```
+
+
+```{r}
+# dev.off()
+itemFrequencyPlot(user_item_rlab@data, topN=30, type="absolute",
+                  xlab = "Items", ylab = "Frequency (absolute)",
+                  col = "steelblue",
+                  main = "Absolute Frequency Plot")
+```
+```{r}
+# 5.2 CREATE EVALUATE SHEME(S) (RECIPES) ----
+recommenderRegistry$get_entries()
+
+eval_recipe <- user_item_rlab %>%
+    evaluationScheme(method = "cross-validation", k = 5, given = -1)
+
+eval_recipe
+```
+evaluationScheme:
+Creates an evaluationScheme object from a data set. The scheme can be a simple split into training and test data, k-fold cross-evaluation or using k independent bootstrap samples.
+
+```{r}
+# 5.2.1 Association Rules
+
+algorithms_list <- list(
+    "association rules1"   = list(name  = "AR", 
+                                  param = list(supp = 0.01, conf = 0.01)),
+    "association rules2"  = list(name  = "AR", 
+                                 param = list(supp = 0.01, conf = 0.1)), # Best in this example
+    "association rules3"  = list(name  = "AR", 
+                                 param = list(supp = 0.01, conf = 0.5)),
+    "association rules4"  = list(name  = "AR", 
+                                 param = list(supp = 0.1, conf = 0.5))
+)
+```
+
+
+```{r}
+# !!! WARNING - Long Running Script !!!
+library(tictoc)
+tic()
+results_rlab_arules <- eval_recipe %>%
+    recommenderlab::evaluate(
+        method    = algorithms_list, 
+        type      = "topNList", 
+        n         = 1:10)
+toc() # 126.897 sec elapsed
+```
+
+
+```{r}
+# Load from save rds file
+results_rlab_arules <- read_rds("~/Data_science/Git/Business science/Marketing analytics/lab_11_market_basket_analysis/learning_lab_11_market_basket_analysis/00_Modeling_Results/results_arules.rds")
+plot(results_rlab_arules, annotate = TRUE)
+```
+
+
+```{r}
+# 5.2.2 All Algorithms ----
+
+algorithms_list <- list(
+    "random items"        = list(name  = "RANDOM", # base line, just guest random item
+                                 param = NULL),
+    "popular items"       = list(name  = "POPULAR", # just throw popular items over the time (top 10 ?)
+                                 param = NULL),
+    "user-based CF"       = list(name  = "UBCF", # nn : nearest neighbord , Best in this model
+                                 param = list(method = "Cosine", nn = 500)),
+    "item-based CF"       = list(name  = "IBCF", # k :  , second best in this model
+                                 param = list(k = 5)),
+    "association rules2"  = list(name  = "AR",  # association rule : detail how people purchase sth
+                                 param = list(supp = 0.01, conf = 0.1))
+)
+```
+
+
+```{r}
+# !!! WARNING - Long Running Script !!!
+tic()
+results_rlab <- eval_recipe %>%
+    recommenderlab::evaluate(
+        method    = algorithms_list, 
+        type      = "topNList", 
+        n         = 1:10)
+toc() # 76.632 sec elapsed
+```
+
+
+```{r}
+# Read form save model
+results_rlab <- read_rds("~//Data_science/Git/Business science/Marketing analytics/lab_11_market_basket_analysis/learning_lab_11_market_basket_analysis/00_Modeling_Results/results_all_models.rds")
+
+plot(results_rlab, annotate = TRUE)
+```
+# 6.0 BUILD MODELS ----
+
+```{r}
+# 6.1 ASSOCIATION RULES ----
+model_ar <- recommenderlab::Recommender(
+    data = user_item_rlab, 
+    method = "AR", 
+    param = list(supp = 0.01, conf = 0.10))
+model_ar
+```
+
+
+```{r}
+# 6.2 UBCF ----
+model_ucbf <- recommenderlab::Recommender(
+    data = user_item_rlab, 
+    method = "UBCF", 
+    param  = list(method = "Cosine", nn = 500))
+model_ucbf
+```
+
+# 7.0 INVESTIGATE RELATIONSHIPS ----
+```{r}
+# 7.1 INTERACTIVE ----
+rules <- model_ar@model$rule_base
+inspectDT(rules)
+```
+
+Sort by lift (high is more association)
+3,278 association rule
+LHS: sparkling lemon water --> recommend Lime sparkling water
+
+```{r}
+plotly_arules(rules, method = "scatterplot", 
+              marker = list(opacity = .7, size = ~lift), 
+              colors = c("blue", "green"))
+```
+
+Inspect rule: a lot of rule for recommendation in this plot (high lift, better recommendation)
+```{r}
+# 7.2 STATIC ----
+sort(rules, by = "lift", decreasing = TRUE)[1:20] %>%
+    inspect() 
+
+plot(rules, method = "graph")
+```
+Strawberries with buy Banana, Organic Baby will buy organic strawberries, lot of things will buy Bag of Organic Bananas
+
+```{r}
+plot(model_ar@model$rule_base, method = "graph", 
+     control=list(layout=igraph::in_circle()))
+```
+
+# 8.0 PREDICTION ----
+```{r}
+new_user_basket <- c("Banana", "Organic Whole Milk")
+tibble(items = user_item_rlab@data %>% colnames()) %>% # 846 items
+    mutate(value = as.numeric(items %in% new_user_basket)) %>% # 0 if items not in new_user_basket, 1 if items in new_user_basket
+    spread(key = items, value = value)
+```
+
+```{r}
+# 8.1 PREPARE NEW DATA ----
+new_user_basket <- c("Banana", "Organic Whole Milk")
+
+new_user_basket_rlab <- tibble(items = user_item_rlab@data %>% colnames()) %>% # 846 items
+    mutate(value = as.numeric(items %in% new_user_basket)) %>%
+    spread(key = items, value = value) %>%
+    as.matrix() %>%
+    as("binaryRatingMatrix")
+
+new_user_basket_rlab
+
+
+```
+
+
+```{r}
+# 8.2 ASSOCIATION RULES ----
+
+prediction_ar <- predict(model_ar, newdata = new_user_basket_rlab, n = 3) # recommen 3 items
+
+tibble(items = prediction_ar@itemLabels) %>%
+    slice(prediction_ar@items[[1]])
+```
+
+
+```{r}
+# 8.3 UBCF ----
+
+prediction_ucbf <- predict(model_ucbf, newdata = new_user_basket_rlab, n = 3)
+
+tibble(items = prediction_ucbf@itemLabels) %>%
+    slice(prediction_ucbf@items[[1]])
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
