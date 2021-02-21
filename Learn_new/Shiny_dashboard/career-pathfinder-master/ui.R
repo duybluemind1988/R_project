@@ -4,7 +4,9 @@
 # http://shiny.rstudio.com
 #
 # Developed with R version 3.3.2 (64-bit)
-library(dplyr)
+#install.packages("tidyverse")
+library(tidyverse)
+#library(dplyr)
 library(stringr)
 library(png)
 library(shinyjs)

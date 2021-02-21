@@ -16,7 +16,7 @@ ui <- fluidPage(
     ), #endsidebarpanel
     
     mainPanel(
-      ### EDA
+      ### EDA ----
       "First some rows of data:",
       dataTableOutput("data_head_DT"),
       selectInput("category_column", "Choose category column to compare", choices=NULL, selected=NULL),
@@ -30,7 +30,7 @@ ui <- fluidPage(
       selectInput("numeric_column2", "Choose numeric column to compare", choices=NULL, selected=NULL),
       plotOutput("complex_chart"),
       
-      ### MODEL INFORMATION
+      ### MODEL INFORMATION ----
       "Variable important H2O model:",
       plotOutput("variable_important"),
       "Shap summary plot via test set:",
@@ -45,7 +45,7 @@ ui <- fluidPage(
       "Model confusion matrix:",
       verbatimTextOutput("confusionmatrix"),
       
-      ### PREDICTION
+      ### PREDICTION ----
       "Show all test set:",
       dataTableOutput("test_set_DT"),
       "Predict test set",

@@ -2,8 +2,8 @@
 
 # Modeling
 library(survival)
-library(parsnip)
 library(broom)
+library(parsnip)
 library(recipes)
 library(tictoc)
 # Advanced ML
@@ -23,6 +23,27 @@ library(tidyquant)
 
 getwd()
 data_raw <- fread("Churn/WA_Fn-UseC_-Telco-Customer-Churn.csv")
+#id <- "9237-HQITU" #5
+id <- "3668-QPYBK" #3
+# get rownames data base ID
+rownames(data_raw) <- data_raw$customerID
+# find id rownames base on customer ID
+which(rownames(data_raw)== id)
+
+class(rownames(data_raw))
+as.data.table((rownames(data_raw)))
+
+set.seed(430)
+data_test <- data_raw%>% drop_na()
+split = caret::createDataPartition(data_test$Churn, p =0.8, list = FALSE)
+#train = data()[split, ]
+test = data_test[-split, ]
+class(test)
+
+id <- "6713-OKOMC" #3
+rownames(test) <- test$customerID
+# find id rownames base on customer ID
+which(rownames(test)== id)
 
 #Remove unnecessary data
 data <- data_raw %>%
@@ -31,6 +52,12 @@ data <- data_raw %>%
 
 
 #3. EDA -----
+##  Correlation funnel
+
+data %>%
+  binarize() %>%
+  correlate(Churn__Yes) %>% 
+  plot_correlation_funnel(interactive = TRUE, alpha = 0.7)
 
 ## Plot categorical vs catagorical
 Categorical_vs_categorical_plot <- function(data,group_col,fill_col){
@@ -49,9 +76,49 @@ Categorical_vs_categorical_plot <- function(data,group_col,fill_col){
     #scale_fill_brewer(palette = "Set2") +
     labs(y = "Percent",x = "Attrition",title = "Compare attrition accross category")+
     theme_minimal()  
-  
 }
-Categorical_vs_categorical_plot(data,~Churn,~TotalCharges)
+Categorical_vs_categorical_plot(data,~Churn,~Contract)
+
+## Faceted Bar Charts
+
+data %>%
+  group_by(Contract,gender,Churn) %>%
+  summarize(n = n()) %>% 
+  mutate(pct = n/sum(n),lbl = scales::percent(pct))
+
+p1 <- ggplot( data %>%
+                group_by(Contract,gender,Churn) %>%
+                summarize(n = n()) %>% 
+                mutate(pct = n/sum(n),lbl = scales::percent(pct)),
+              aes( x = Contract, y = pct ,
+                   fill = Churn) ) + 
+  geom_bar( stat = "identity" ) + 
+  facet_wrap( ~ gender ) + 
+  xlab("Hours spent per week") + 
+  geom_text(aes(label = lbl), 
+            size = 3, 
+            position = position_stack(vjust = 0.5))
+p1
+
+Categorical_facet_plot <- function(data,group_col,facet_col,target_col){
+  data %>%
+    group_by_(group_col, facet_col,target_col) %>%
+    summarize(n = n()) %>% 
+    mutate(pct = n/sum(n),lbl = scales::percent(pct))%>% 
+    ggplot(aes_(x = group_col,y = ~pct,
+                fill = target_col)) +
+    geom_bar(stat = "identity",
+             position = "fill") +
+    facet_wrap( facet_col ) + 
+    scale_y_continuous(breaks = seq(0, 1, .2),label =scales::percent) +
+    geom_text(aes(label = lbl), 
+              size = 3, 
+              position = position_stack(vjust = 0.5)) +
+    #scale_fill_brewer(palette = "Set2") +
+    labs(y = "Percent",x = "Attrition",title = "Compare attrition accross category")+
+    theme_minimal()  
+}
+Categorical_facet_plot(data,~Contract,~gender,~Churn)
 
 ## Plot Categorical vs. Quantitative
 Categorical_vs_quantitative_plot <- function(data,categorical_col,quantitative_col){
@@ -107,24 +174,17 @@ train_tbl <- data %>%
     tenure, Churn_Yes, Contract, OnlineSecurity_No, TechSupport_No, InternetService_FiberOptic,
     PaymentMethod_ElectronicCheck, OnlineSecurity_No, DeviceProtection_No
   ) 
-train_tbl
+
+train_tbl2 <- data %>%
+  mutate(
+    Churn_Yes                     = Churn == "Yes",
+  ) %>% 
+  select(
+    tenure, Churn_Yes, Contract, OnlineSecurity, TechSupport, InternetService,
+    PaymentMethod, DeviceProtection
+  ) 
 
 ## Survival Tables (Kaplan-Meier Method) ----
-survfit_simple <- survfit(Surv(tenure, Churn_Yes) ~ strata(Contract), data = train_tbl)
-survfit_simple
-tidy(survfit_simple)
-
-## Cox Regression Model (Multivariate) ----
-model_coxph <- coxph(Surv(tenure, Churn_Yes) ~ . - Contract + strata(Contract), data = train_tbl)
-model_coxph
-tidy(model_coxph) ## Regression Estimates
-survfit_coxph <- survfit(model_coxph)
-
-model_coxph %>% # Mortality Table
-  survfit() %>%
-  tidy()
-
-## Survival curve ----
 
 plot_customer_survival <- function(object_survfit) {
   
@@ -140,10 +200,6 @@ plot_customer_survival <- function(object_survfit) {
   
   ggplotly(g)
 }
-
-plot_customer_survival(survfit_simple)
-plot_customer_survival(survfit_coxph)
-
 plot_customer_loss <- function(object_survfit) {
   
   g <- tidy(object_survfit) %>%
@@ -158,8 +214,78 @@ plot_customer_loss <- function(object_survfit) {
   
   ggplotly(g)
 }
+survfit_simple <- survfit(Surv(tenure, Churn_Yes) ~ strata(Contract), data = train_tbl)
+tidy(survfit_simple)
+plot_customer_survival(survfit_simple)
 plot_customer_loss(survfit_simple)
+
+survfit_simple <- survfit(Surv(tenure, Churn_Yes) ~ strata(Contract), data = train_tbl2)
+plot_customer_survival(survfit_simple)
+
+# Convert to function
+
+model_Kaplan_Meier_func <- function(data,time,event,group){
+  lhs <- paste("Surv(",time,",",event,")")
+  rhs <- paste("strata(",group,")")
+  form = as.formula(paste(lhs, "~", rhs))
+  model <- survfit(form, data)
+  model
+}
+survfit_simple <- model_Kaplan_Meier_func(train_tbl2,"tenure","Churn_Yes","Contract")
+as.data.table(tidy(survfit_simple))
+plot_customer_survival(survfit_simple)
+plot_customer_loss(survfit_simple)
+
+# Explain
+time <- "tenure"
+event <- "Churn_Yes"
+group <- "Contract"
+lhs <- paste("Surv(",time,",",event,")")
+rhs <- paste("-",group,"+strata(",group,")")
+form = as.formula(paste(lhs, "~ .", rhs))
+coxph(form, train_tbl)
+
+
+## Cox Regression Model (Multivariate) ----
+model_coxph <- coxph(Surv(tenure, Churn_Yes) ~ . - Contract + strata(Contract), data = train_tbl)
+tidy(model_coxph) ## Regression Estimates
+survfit_coxph <- survfit(model_coxph)
+
+model_coxph %>% # Mortality Table
+  survfit() %>%
+  tidy()
+plot_customer_survival(survfit_coxph)
 plot_customer_loss(survfit_coxph)
+
+# Use train_tbl2 as DNN modified
+model_coxph2 <- coxph(Surv(tenure, Churn_Yes) ~ . - Contract + strata(Contract), data = train_tbl2)
+survfit_coxph2 <- survfit(model_coxph2)
+plot_customer_survival(survfit_coxph2)
+plot_customer_loss(survfit_coxph2)
+
+class(model_coxph2)
+# Convert to function
+
+model_coxph_func <- function(data,time,event,group){
+  lhs <- paste("Surv(",time,",",event,")")
+  rhs <- paste("-",group,"+strata(",group,")")
+  form = as.formula(paste(lhs, "~ .", rhs))
+  model_coxph <- coxph(form, data)
+  model_coxph
+}
+coxph_model <- model_coxph_func(train_tbl2,"tenure","Churn_Yes","Contract")
+survfit_coxph <- survfit(coxph_model)
+plot_customer_survival(survfit_coxph)
+
+# Explain
+time <- "tenure"
+event <- "Churn_Yes"
+group <- "Contract"
+lhs <- paste("Surv(",time,",",event,")")
+rhs <- paste("-",group,"+strata(",group,")")
+form = as.formula(paste(lhs, "~ .", rhs))
+coxph(form, train_tbl)
+
 
 #5. Predict with survival model ----
 ## Cox PH - Produces Theoretical Hazard Ratio ----

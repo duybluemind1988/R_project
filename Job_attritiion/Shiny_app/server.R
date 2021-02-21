@@ -1,3 +1,4 @@
+#1. Library ----
 library(data.table)
 library(tidyverse)
 library(recipes)
@@ -22,7 +23,7 @@ h2o_model <- h2o.loadModel(model_path)
 recipe_load <- readr::read_rds(recipe_path)
 
 server <- function(input, output, session) {
-  
+  #2 Load data ----
   data <- reactive({fread(path)})
   
   output$data_head_DT<-renderDataTable(data(),
@@ -31,9 +32,7 @@ server <- function(input, output, session) {
   observeEvent(data(),updateSelectInput(session, "category_column", 
                                                 choices=names(data() %>% select_if(is.character)),selected="BusinessTravel"))
   
-  observeEvent(data(),updateSelectInput(session, "numeric_column", 
-                                        choices=names(data() %>% select_if(is.numeric)),selected="Age"))
-  
+  #3 EDA ----
   # Plot categorical vs categorical
   output$cat_vs_cat_chart<-renderPlot({
     #Categorical_vs_categorical_plot(data(),~Attrition,input$cat_compare)
@@ -51,8 +50,8 @@ server <- function(input, output, session) {
       scale_fill_brewer(palette = "Set2") +
       #labs(y = "Percent",fill = "Drive Train",x = "Class",title = "Automobile Drive by Class") +
       theme_minimal() 
-  # Plot categorical vs categorical 2 (Problem)  
   })
+  
   output$cat_vs_cat_chart2 <- renderPlot({
     data() %>%
       ggplot(aes_string(x = input$category_column, group = "Attrition")) + 
@@ -71,6 +70,9 @@ server <- function(input, output, session) {
     
   })
   # Plot Categorical vs. Quantitative
+  observeEvent(data(),updateSelectInput(session, "numeric_column", 
+                                        choices=names(data() %>% select_if(is.numeric)),selected="Age"))
+  
   output$cat_vs_num_chart<-renderPlot({
     #Categorical_vs_quantitative_plot(data(),~Attrition,input$num_compare)
     # plot the distribution using violin and boxplots
@@ -110,11 +112,7 @@ server <- function(input, output, session) {
       facet_wrap(input$category_column2) +
       labs(title=input$category_column2)
   })
-  
-  # Variable important
-  output$variable_important<-renderPlot({
-    h2o.varimp_plot(h2o_model)
-  })
+  #4 Explain model ----
   
   test_set <- reactive({
     set.seed(430)
@@ -136,7 +134,12 @@ server <- function(input, output, session) {
     train
   })
   #output$table_test <- renderTable(head(test_set()))
-    
+  
+  # Variable important
+  output$variable_important<-renderPlot({
+    h2o.varimp_plot(h2o_model)
+  })
+  
   # Shap summary plot
   output$shap_summary_plot<-renderPlot({
     h2o.shap_summary_plot(h2o_model,test_set())
@@ -167,6 +170,7 @@ server <- function(input, output, session) {
     matrix <- confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
     matrix
   })
+  # 5. Predict test set ----
   # Show all test set by data.table (add ID)
   output$test_set_DT<-renderDataTable({
     test_h2o_dt <- as.data.table(test_set())
