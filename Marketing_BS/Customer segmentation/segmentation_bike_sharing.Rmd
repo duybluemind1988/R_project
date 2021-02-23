@@ -5,7 +5,7 @@ output: html_document
 https://www.business-science.io/business/2016/08/07/CustomerSegmentationPt1.html
 https://www.business-science.io/business/2016/09/04/CustomerSegmentationPt2.html
 https://www.business-science.io/business/2016/10/01/CustomerSegmentationPt3.html
-
+#1. Customer Segmentation Part 1: K Means Clustering
 # Getting Started
 ```{r}
 # Read Cannondale orders data --------------------------------------------------
@@ -200,13 +200,28 @@ Next, we plot the silhouette average widths for the choice of clusters. The best
 # Which Customers are in Each Segment?
 Now that we have clustered the data, we can inspect the groups find out which customers are grouped together. The code below groups the customer names by cluster X1 through X5.
 ```{r}
+# x[i] = centr  # value of k
+# y[i] = summary(sil.out[[i]])[[4]]  # Silhouette average width
+x
+y
+```
+
+```{r}
 # Get customer names that are in each segment ----------------------------------
 
 # Get attributes of optimal k-means output
 maxSilRow <- which.max(y)          # Row number of max silhouette value
 optimalClusters <- x[maxSilRow]    # Number of clusters
 km.out.best <- km.out[[maxSilRow]] # k-means output of best cluster
+maxSilRow # 2
+optimalClusters # 5
+#km.out.best # (all list of kmeans, choose kmeans with n cluster =5 )
+```
+```{r}
+km.out.best$cluster
+```
 
+```{r}
 # Create list of customer names for each cluster
 clusterNames <- list()
 clusterList <- list()
@@ -226,14 +241,19 @@ print(clusterList)
 
 The easiest way to determine the customer preferences is by inspection of factors related to the model (e.g. price point, category of bike, etc). Advanced algorithms to classify the groups can be used if there are many factors, but typically this is not necessary as the trends tend to jump out. The code below attaches the k-means centroids to the bike models and categories for trend inspection.
 ```{r}
+km.out.best$centers
+```
+
+```{r}
 # Combine cluster centroids with bike models for feature inspection ------------
 custSegmentCntrs <- t(km.out.best$centers)  # Get centroids for groups
+dim(custSegmentCntrs)# 97 x 5
 colnames(custSegmentCntrs) <- make.names(colnames(custSegmentCntrs))
 customerTrends.clustered <- bind_cols(customerTrends[,1:5], as.data.frame(custSegmentCntrs))
 ```
 
 ## Cluster 1
-We’ll order by cluster 1’s top ten bike models in descending order. We can quickly see that the top 10 models purchased are predominantly high-end and mountain. The all but one model has a carbon frame.
+Next, we’ll inspect cluster 2. We can see that the top models are all low-end/affordable models. There’s a mix of road and mountain for the primariy category and a mix of frame material as well.
 ```{r}
 # Arrange top 10 bike models by cluster in descending order --------------------
 attach(customerTrends.clustered)  # Allows ordering by column name
@@ -241,15 +261,13 @@ head(customerTrends.clustered[order(-X1), c(1:5, 6)], 10)
 ```
 
 ## Cluster 2
-
-Next, we’ll inspect cluster 2. We can see that the top models are all low-end/affordable models. There’s a mix of road and mountain for the primariy category and a mix of frame material as well.
-
+Cluster 5: Tends to refer road bikes that are high-end.
 ```{r}
 head(customerTrends.clustered[order(-X2), c(1:5, 7)], 10)
 ```
 
 ## Cluster 3
-Cluster 3: Tends to prefer road bikes that are low-end.
+We’ll order by cluster 1’s top ten bike models in descending order. We can quickly see that the top 10 models purchased are predominantly high-end and mountain. The all but one model has a carbon frame.
 ```{r}
 head(customerTrends.clustered[order(-X3), c(1:5, 8)], 10)
 ```
@@ -261,7 +279,7 @@ head(customerTrends.clustered[order(-X4), c(1:5, 9)], 10)
 ```
 
 ## Cluster 5
-Cluster 5: Tends to refer road bikes that are high-end.
+Cluster 3: Tends to prefer road bikes that are low-end.
 ```{r}
 head(customerTrends.clustered[order(-X5), c(1:5,10)], 10)
 ```
@@ -273,7 +291,316 @@ Reviewing Results
 Once the clustering is finished, it’s a good idea to take a step back and review what the algorithm is saying. For our analysis, we got clear trends for four of five groups, but two groups (clusters 2 and 4) are very similar. Because of this, it may make sense to combine these two groups or to switch from 
 k  = 5 to k = 4 results.
 
+#2. Customer Segmentation Part 2: PCA for Segment Visualization
+
+How does this help in customer segmentation / community detection? Unlike k-means, PCA is not a direct solution. What PCA helps with is visualizing the essence of a data set. Because PCA selects PC’s based on the maximum linear variance, we can use the first few PC’s to describe a vast majority of the data set without needing to compare and contrast every single feature. By using PC1 and PC2, we can then visualize in 2D and inspect for clusters. We can also combine the results with the k-means groups to see what k-means detected as compared to the clusters in the PCA visualization.
+
+Before we jump into PCA, it’s a good idea to review where we left off in the previous customer segmentation post.
 ```{r}
+# Read Cannondale orders data --------------------------------------------------
+library(readxl)   # Used to read bikes data set
+customers <- read_excel("./data/bikeshops.xlsx")
+products <- read_excel("./data/bikes.xlsx") 
+orders <- read_excel("./data/orders.xlsx") 
+```
+# Manipulating the Data
+
+```{r}
+# Combine orders, customers, and products data frames --------------------------
+library(dplyr)
+orders.extended <- merge(orders, customers, by.x = "customer.id", by.y="bikeshop.id")
+orders.extended <- merge(orders.extended, products, by.x = "product.id", by.y = "bike.id")
+orders.extended <- orders.extended %>%
+  mutate(price.extended = price * quantity) %>%
+  select(order.date, order.id, order.line, bikeshop.name, model,
+         quantity, price, price.extended, category1, category2, frame) %>%
+  arrange(order.id, order.line)
+
+# Group by model & model features, summarize by quantity purchased -------------
+library(tidyr)  # For spread function
+customerTrends <- orders.extended %>%
+  group_by(bikeshop.name, model, category1, category2, frame, price) %>%
+  summarise(total.qty = sum(quantity)) %>%
+  spread(bikeshop.name, total.qty)
+customerTrends[is.na(customerTrends)] <- 0  # Remove NA's
+
+# Convert price to binary high/low category ------------------------------------
+library(Hmisc)  # Needed for cut2 function
+customerTrends$price <- cut2(customerTrends$price, g=2)
+
+# Convert customer purchase quantity to percentage of total quantity -----------
+customerTrends.mat <- as.matrix(customerTrends[,-(1:5)])  # Drop first five columns
+customerTrends.mat <- prop.table(customerTrends.mat, margin = 2)  # column-wise pct
+customerTrends <- bind_cols(customerTrends[,1:5], as.data.frame(customerTrends.mat))
+customerTrends
+```
+# K-Means Clustering
+We used the kmeans() function to perform k-means clustering. The k-means post goes into great detail on how to select the right number of clusters, which I skipped for brevity. We’ll use the groups for \(k = 4\) and \(k = 5\) clusters with the PCA analysis. Five clusters was the theoretical best solution, and four clusters was the best solution upon inspection of the data.
+```{r}
+dim(t(customerTrends[,-(1:5)]))
+head(t(customerTrends[,-(1:5)]),2) # 30 x 97
+```
+
+```{r}
+# K-Means Clustering (used later) ----------------------------------------------
+set.seed(11) # For reproducibility
+km4.out <- kmeans(t(customerTrends[,-(1:5)]), centers = 4, nstart = 50) # 4 cluster in 97 customer (4x97)
+
+set.seed(11) # For reproducibility
+km5.out <- kmeans(t(customerTrends[,-(1:5)]), centers = 5, nstart = 50) # 5 cluster in 97 customer (5x97)
+```
+
+# Applying PCA
+Now, back to our main focus: PCA. Applying PCA is very simple once the data is formatted. We use the prcomp() function available in base R. It’s strongly recommended to scale and center the data (for some reason this is not the default). Further reading on PCA in R can be found here.
+
+```{r}
+# PCA using prcomp() -----------------------------------------------------------
+pca <- prcomp(t(customerTrends[,-(1:5)]), scale. = T, center = T) # Perform PCA
+pca # 97 bike model in 30 PCA (from PC1, PC2....)
+```
+
+
+```{r}
+summary(pca)
+```
+# Visualizing the Results from sthda
+http://www.sthda.com/english/articles/31-principal-component-methods-in-r-practical-guide/118-principal-component-analysis-in-r-prcomp-vs-princomp/
+
+```{r}
+library(factoextra)
+library(plotly)
+ggplotly(factoextra::fviz_eig(pca))
+```
+
+
+```{r}
+fviz_pca_ind_plot <-  fviz_pca_ind(pca,
+                     col.ind = "cos2", # Color by the quality of representation
+                     gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+                     repel = TRUE     # Avoid text overlapping
+                     )
+fviz_pca_ind_plot
+```
+
+```{r}
+fviz_pca_var(pca,
+             col.var = "contrib", # Color by contributions to the PC
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             repel = TRUE     # Avoid text overlapping
+             )
+```
+
+
+```{r}
+fviz_pca_biplot(pca, repel = TRUE,
+                col.var = "#2E9FDF", # Variables color
+                col.ind = "#696969"  # Individuals color
+                )
+```
+
+# Visualizing the Results from BS
+```{r}
+km4.out$cluster
+```
+```{r}
+#pca
+dim(pca$rotation) # 97 bike model x 30 PCA (customer-shop bike)
+```
+
+```{r}
+# Manipulate data for PCA Analyis ----------------------------------------------
+library(ggfortify) # For fortify()
+pca.fortify <- fortify(pca) # fortify() gets pca into usable format (column id: shopbike 30)
+dim(pca.fortify) # 30x127: 30 customer shop x (97 V and 30 PCA). What is 97 V ?
+pca.fortify
+```
+
+```{r}
+# Add group (short for color) column using k=4 and k=5 groups
+pca4.dat <- cbind(pca.fortify, group=km4.out$cluster)
+pca5.dat <- cbind(pca.fortify, group=km5.out$cluster)
+dim(pca4.dat) # 30x128
+dim(pca5.dat) # 30x128
+pca5.dat
+```
+```{r}
+pca4.dat[128]
+```
+
+
+```{r}
+# Plotting PC1 and PC2 using ggplot and plotly ---------------------------------
+library(ggplot2)
+library(plotly)
+# Script for plotting k=4
+gg2 <- ggplot(pca4.dat) +
+  geom_point(aes(x=PC1, y=PC2, col=factor(group), text=rownames(pca4.dat)), size=2) +
+  labs(title = "Visualizing K-Means Clusters Against First Two Principal Components") +
+  scale_color_brewer(name="", palette = "Set1")
+# Use plotly for inteactivity
+plotly2 <- ggplotly(gg2, tooltip = c("text", "x", "y")) %>%
+  layout(legend = list(x=.9, y=.99))
+plotly2
+```
+Note: may be new group ? two small dot
+```{r}
+gg2 <- ggplot(pca5.dat) +
+  geom_point(aes(x=PC1, y=PC2, col=factor(group), text=rownames(pca5.dat)), size=2) +
+  labs(title = "Visualizing K-Means Clusters Against First Two Principal Components") +
+  scale_color_brewer(name="", palette = "Set1")
+# Use plotly for inteactivity
+plotly2 <- ggplotly(gg2, tooltip = c("text", "x", "y")) %>%
+  layout(legend = list(x=.9, y=.99))
+plotly2
+```
+Note: red color: wrong assignment group
+
+PCA Viz: Visual Inspection Grouping
+From the PCA visualization, we can see there are two bike shops that do not belong to Group 4. Based on our visual inspection, we can modify the groups (column 128) by switching Group 2 (San Antonio Bike Shop & Philadelphia Bike Shop) with the incorrectly classified Group 4 shops (Denver Bike Shop & Kansas City 29ers).
+```{r}
+# Switch Group 2 Bike Shops with misclassified Bike Shops in Group 4 -----------
+pca.final.dat <- pca5.dat
+pca.final.dat[rownames(pca.final.dat) %in% 
+                c("San Antonio Bike Shop", "Philadelphia Bike Shop"), 128] <- 4
+pca.final.dat[rownames(pca.final.dat) %in% 
+                c("Denver Bike Shop", "Kansas City 29ers"), 128] <- 1 #2
+gg2 <- ggplot(pca.final.dat) +
+  geom_point(aes(x=PC1, y=PC2, col=factor(group), text=rownames(pca.final.dat)), size=2) +
+  labs(title = "Visualizing K-Means Clusters Against First Two Principal Components") +
+  scale_color_brewer(name="", palette = "Set1")
+# Use plotly for inteactivity
+plotly2 <- ggplotly(gg2, tooltip = c("text", "x", "y")) %>%
+  layout(legend = list(x=.9, y=.99))
+plotly2
+```
+
+# Group 2 Inspection
+The script below modifies the customerTrends data frame to select only customer columns that are in the group we want to inspect. The script then takes the average of the customer’s percent of quantity purchased vs total quantity purchased (the values in the customer columns). The data frame is sorted by most frequently purchased so we can see the group’s central tendency. For Group 2, the central tendency is a preference for low-end mountain bikes.
+```{r}
+# Inspect Group 2 Preferences --------------------------------------------------
+# Select only groups in group num and perform row-wise average of bike prefs
+library(dplyr)
+group.num <- 1 # Set group number
+group.names <- rownames(pca.final.dat[pca.final.dat$group == group.num, ])
+groupTrends <- customerTrends %>%
+  select(model:price, match(group.names, names(.))) # Use match() to select column names
+group.avg <- apply(groupTrends[6:ncol(groupTrends)], 1, mean) # Take average of values
+groupTrends <- bind_cols(groupTrends, as_data_frame(group.avg)) %>%
+  arrange(-group.avg) 
+
+head(groupTrends, 10)# Top ten products by group avg. pct. purchased
+```
+# Group 4 Inspection
+Let’s compare to Group 4. Rerun the previous script changing group.num from 2 to 4. We can see that Group 4’s preference is similar to Group 2 in that both groups prefer low-end/affordable bikes. However, Group 4’s top purchases contain a mixture of Mountain and Road, while Group 2’s top purchases are exclusively Mountain. It appears there is a difference!
+
+
+```{r}
+group.num <- 4 # Set group number
+group.names <- rownames(pca.final.dat[pca.final.dat$group == group.num, ])
+groupTrends <- customerTrends %>%
+  select(model:price, match(group.names, names(.))) # Use match() to select column names
+group.avg <- apply(groupTrends[6:ncol(groupTrends)], 1, mean) # Take average of values
+groupTrends <- bind_cols(groupTrends, as_data_frame(group.avg)) %>%
+  arrange(-group.avg) 
+
+head(groupTrends, 10)# Top ten products by group avg. pct. purchased
+```
+# 3. Customer Segmentation Part 3: Network Visualization
+https://www.business-science.io/business/2016/10/01/CustomerSegmentationPt3.html
+# Reading the Data
+```{r}
+# Read Cannondale orders data --------------------------------------------------
+library(readxl)   # Used to read bikes data set
+customers <- read_excel("./data/bikeshops.xlsx")
+products <- read_excel("./data/bikes.xlsx") 
+orders <- read_excel("./data/orders.xlsx") 
+```
+
+# Manipulating the Data
+```{r}
+# Step 1: Combine orders, customers, and products data frames ------------------
+library(dplyr)
+orders.extended <- merge(orders, customers, by.x = "customer.id", by.y="bikeshop.id")
+orders.extended <- merge(orders.extended, products, by.x = "product.id", by.y = "bike.id")
+orders.extended <- orders.extended %>%
+  mutate(price.extended = price * quantity) %>%
+  select(order.date, order.id, order.line, bikeshop.name, model,
+         quantity, price, price.extended, category1, category2, frame) %>%
+  arrange(order.id, order.line)
+
+# Step 2: Group by model & model features, summarize by quantity purchased -----
+library(tidyr)  # For spread function
+customerTrends <- orders.extended %>%
+  group_by(bikeshop.name, model, category1, category2, frame, price) %>%
+  summarise(total.qty = sum(quantity)) %>%
+  spread(bikeshop.name, total.qty)
+customerTrends[is.na(customerTrends)] <- 0  # Remove NA's
+
+# Step 3: Convert price to binary high/low category ----------------------------
+library(Hmisc)  # Needed for cut2 function
+customerTrends$price <- cut2(customerTrends$price, g=2)
+
+# Step 4: Convert customer purchase quantity to percentage of total quantity ---
+customerTrends.mat <- as.matrix(customerTrends[,-(1:5)])  # Drop first five columns # 97x30
+customerTrends.mat <- prop.table(customerTrends.mat, margin = 2)  # column-wise pct
+customerTrends <- bind_cols(customerTrends[,(1:5)], as.data.frame(customerTrends.mat))
+customerTrends %>% head() # 97x35
+```
+# Developing the Network Visualization
+## Step 1: Create a Cosine Similarity Matrix
+
+```{r}
+# Create adjacency matrix using cosine similarity ------------------------------
+#install.packages("lsa")
+library(lsa) # for cosine similarity matrix
+# customerTrends.mat # 97x30
+simMatrix <- cosine(customerTrends.mat) # convert 97x30 to 30x30 similarity value
+dim(simMatrix) # 30x30
+diag(simMatrix) <- 0 # Remove relationship with self
+simMatrix %>% head() 
+```
+## Step 2: Prune the Tree
+It’s a good idea to prune the tree before we move to graphing. The network graphs can become quite messy if we do not limit the number of edges. We do this by reviewing the cosine similarity matrix and selecting an edgeLimit, a number below which the cosine similarities will be replaced with zero. This keeps the highest ranking relationships while reducing the noise. We select 0.70 as the limit, but typically this is a trial and error process. If the limit is too high, the network graph will not show enough detail. Try testing different edge limits to see what looks best in Step 3.
+```{r}
+# Prune edges of the tree
+edgeLimit <- .70
+simMatrix[(simMatrix < edgeLimit)] <- 0
+```
+
+## Step 3: Create the iGraph
+```{r}
+library(igraph)
+simIgraph <- graph_from_adjacency_matrix(simMatrix, 
+                                         mode = 'undirected', 
+                                         weighted = T)
+ceb <- cluster_edge_betweenness(simIgraph) # For community detection
+```
+Let’s pause to take a look as the cluster edge betweenness (ceb). We can view a plot of the clusters by passing ceb to the dendPlot() function. Set the mode to “hclust” to view as a hierarchical clustered dendrogram (it uses hclust from the stats library). We can see that the cluster edge betweenness has detected three distinct clusters.
+
+```{r}
+dendPlot(ceb, mode="hclust")
+```
+
+Now we can plot the network graph by passing ceb and simIgraph to the plot() function. See plot.igraph for additional documentation.
+```{r}
+plot(x=ceb, y=simIgraph)
+```
+Yikes. This is a little difficult to read. With that said, the graph did a nice job of showing the major customer segments. Also notice how the color of the node clusters match the dendrogram groupings. For readability sake, we’ll take a look at what the networkD3 package has to offer.
+# Visualizing the Results with NetworkD3
+```{r}
+library(networkD3)
+# Use igraph ceb to find membership
+members <- membership(ceb)
+
+# Convert to object suitable for networkD3
+simIgraph_d3 <- igraph_to_networkD3(simIgraph, group = members)
+
+# Create force directed network plot
+forceNetwork(Links = simIgraph_d3$links, Nodes = simIgraph_d3$nodes, 
+             Source = 'source', Target = 'target', 
+             NodeID = 'name', Group = 'group', 
+             fontSize = 16, fontFamily = 'Arial', linkDistance = 100,
+             zoom = TRUE)
 ```
 
 
@@ -296,6 +623,13 @@ k  = 5 to k = 4 results.
 ```{r}
 ```
 
+
+```{r}
+```
+
+
+```{r}
+```
 
 ```{r}
 ```

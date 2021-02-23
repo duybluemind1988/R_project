@@ -1,0 +1,540 @@
+---
+title: "Untitled"
+output: html_document
+---
+# Handson marketing chap 10
+#### 1. Load Data ####
+```{r}
+df <- read_excel(
+  path="./Online Retail.xlsx", 
+  sheet="Online Retail"
+)
+df
+```
+
+#### 2. Date Clean-Up ####
+. Dropping canceled orders: We are going to drop records with negative
+Quantity, using the following code
+```{r}
+# ignore negative quantity
+dim(df)
+df <- df[which(df$Quantity > 0),]
+dim(df)
+```
+Dropping records with no CustomerID: There are 133,361 records with
+no CustomerID and we are going to drop those records with the following code:
+
+```{r}
+# remove records with NA
+df <- na.omit(df)
+dim(df)
+```
+
+Excluding an incomplete month: As you might recall from previous chapters,
+the data in the month of December, 2011, is incomplete. You can exclude this
+data with the following code:
+```{r}
+# excluding incomplete month
+sprintf("Date Range: %s ~ %s", min(df$InvoiceDate), max(df$InvoiceDate))
+dim(df)
+df <- df[which(df$InvoiceDate < '2011-12-01'),]
+dim(df)
+```
+Computing total sales from the Quantity and UnitPrice columns: For our
+analyses, we need the total sales value, so we are going to multiply the
+Quantity and UnitPrice columns, to get the total sales, as shown in the
+following code:
+
+```{r}
+# total sales
+df$Sales <- df$Quantity * df$UnitPrice
+```
+ Per-customer data: In order to analyze customer segments, we need to transform
+our data, so that each record represents the purchase history of individual
+customers. Take a look at the following code:
+```{r}
+# per customer data
+customerDF <- df %>% 
+  group_by(CustomerID) %>% 
+  dplyr::summarize(TotalSales=sum(Sales), OrderCount=length(unique(InvoiceDate))) %>%
+  mutate(AvgOrderValue=TotalSales/OrderCount)
+customerDF
+```
+
+Now, as you can see from this data, the TotalSales, OrderCount, and AvgOrderValue
+columns, have different scales. TotalSales can take any values from 0 to 26,848,
+while OrderCount takes values between 1 and 201. Clustering algorithms are highly
+affected by the scales of the data, so we need to normalize this data to be on the same scale.
+We are going to take two steps to normalize this data. First, we are going to rank the data,
+so that the values of each column range from 1 to 4298, which is the total number of
+records. Take a look at the following code:
+```{r}
+rankDF <- customerDF %>%
+  mutate(TotalSales=rank(TotalSales), OrderCount=rank(OrderCount, ties.method="first"), AvgOrderValue=rank(AvgOrderValue))
+rankDF
+```
+
+Next, we are going to normalize this data to center around the mean, and have a mean
+of 0 and a standard deviation of 1, using the scale function in R. Take a look at the
+following code:
+```{r}
+normalizedDF <- rankDF %>%
+                mutate(TotalSales=scale(TotalSales), OrderCount=scale(OrderCount),
+                AvgOrderValue=scale(AvgOrderValue))
+normalizedDF
+```
+
+
+```{r}
+# check for normalization - mean of 0 & std of 1
+summary(normalizedDF)
+```
+You can see that the values are centered around at 0 and have a standard deviation of 1.
+We are going to use this data for the following clustering analyses.
+
+```{r}
+sapply(normalizedDF, sd)
+```
+#### 3. Customer Segmentation via K-Means Clustering ####
+The k-means clustering algorithm is a frequently used algorithm to draw insights on the
+formations and separations within the data. In marketing, it is often used to build customer
+segments and understand the behaviors of these different segments. Let's dive into building
+clustering models in R.
+```{r}
+cluster <- kmeans(normalizedDF[c("TotalSales", "OrderCount", "AvgOrderValue")], 4)
+cluster
+```
+
+As you can see from this code, we are building a clustering model that splits the data into 4
+segments. The first parameter of the kmeans function is for the data to be used for k-means
+clustering and the second parameter is to define the desired number of clusters. In this
+code, we are building 4 clusters, based on the TotalSales, OrderCount,
+and AvgOrderValue values. The trained k-means clustering model object, cluster, stores
+the labels and centers of the clusters in the cluster and centers variables of the model
+object. You can retrieve these values, as shown in the following code:
+```{r}
+# cluster centers
+cluster$cluster
+cluster$centers
+```
+
+Now that we have built our first clustering model, let's visualize this data. First, we are
+going to store the cluster labels as a separate column, named Cluster, in the
+normalizedDF variable, as shown in the following
+```{r}
+# cluster labels
+normalizedDF$Cluster <- cluster$cluster
+normalizedDF
+```
+
+
+```{r}
+normalizedDF %>% group_by(Cluster) %>% summarise(Count=n())
+```
+
+Then, we can visualize the clusters, using the following code:
+```{r}
+ggplot(normalizedDF, aes(x=AvgOrderValue, y=OrderCount, color=Cluster)) +
+  geom_point()
+```
+Let's take a closer look at this plot. The cluster in the bottom left is the group of low-value
+customers, who have not purchased our products so much. On the other hand, the cluster
+in the top right with the darkest color is the group of high-value customers, who have
+purchased the greatest amount and who have purchased products frequently. We can also
+visualize the clusters with different angles, using the rest of the variables. Take a look at the
+following plots:
+
+```{r}
+ggplot(normalizedDF, aes(x=TotalSales, y=OrderCount, color=Cluster)) +
+  geom_point()
+```
+
+
+```{r}
+ggplot(normalizedDF, aes(x=TotalSales, y=AvgOrderValue, color=Cluster)) +
+  geom_point()
+```
+The first plot shows the clusters visualized based on AvgOrderValue and OrderCount. On
+the other hand, the second plot the clusters visualized based on
+AvgOrderValue and TotalSales. As you can see from these plots, the cluster in the
+bottom left with the second-lightest color has the lowest average per-order value and the
+lowest number of orders. However, the cluster in the top right with the darkest color has
+the highest average per-order value and the greatest number of orders. Visualizing clusters
+helps you understand the characteristics of different clusters much more easily and clearly.
+
+```{r}
+# Selecting the best number of cluster
+library(cluster)
+```
+
+
+```{r}
+for(n_cluster in 4:8){
+  cluster <- kmeans(normalizedDF[c("TotalSales", "OrderCount", "AvgOrderValue")], n_cluster)
+  
+  silhouetteScore <- mean(
+    silhouette(
+      cluster$cluster, 
+      dist(normalizedDF[c("TotalSales", "OrderCount", "AvgOrderValue")], method = "euclidean")
+    )[,3]
+  )
+  print(sprintf('Silhouette Score for %i Clusters: %0.4f', n_cluster, silhouetteScore))
+}
+```
+In our case, of the five different numbers of clusters we have experimented with, the best
+number of clusters with the highest silhouette score was 4. In the following section, we will
+use 4 for the number of clusters to show how we can interpret the results of clustering
+analysis.
+
+```{r}
+# Interpreting customer segments
+cluster <- kmeans(normalizedDF[c("TotalSales", "OrderCount", "AvgOrderValue")], 4)
+normalizedDF$Cluster <- cluster$cluster
+```
+
+```{r}
+# count per cluster
+normalizedDF %>% group_by(Cluster) %>% summarise(Count=n())
+```
+
+
+```{r}
+# cluster centers
+cluster$centers
+```
+Let's take a closer look at this. The third cluster has the lowest numbers for all three
+attributes. This suggests that the third cluster contains customers with the lowest amount of
+sales, lowest number of orders, and lowest average per-order value. This group of
+customers is a group of low-value customers. On the other hand, the fourth cluster has the
+highest numbers for all three attributes. The customers in the fourth cluster have the
+highest amount of sales, highest number of orders, and highest average per-order value.
+This suggests that these customers in the fourth cluster purchase expensive items and give
+the business the highest revenue. You would typically want to focus your marketing efforts
+on this segment of customers, as it will result in the highest return.
+
+The customers in the first cluster are interesting. They make purchases relatively
+frequently, as they have a medium to high cluster center value for OrderCount, but their
+average per-order value is low, as the cluster center for AvgOrderValue is low. These are
+the type of customers who make frequent purchases of low-value items. So, it would be
+perfect to market items with low per-item prices to this segment of customers. The
+customers in the second cluster are also interesting. Their contributions to the revenue and
+number of orders are low, looking at the centers of this cluster. However, their average perorder value is high. These are the type of customers who buy expensive items infrequently.
+Thus, it would be perfect to market expensive items to this segment of customers.
+```{r}
+# High value cluster summary
+summary(customerDF[which(normalizedDF$Cluster == 4),])
+```
+
+As you can see from this example, looking at the centers of clusters helps us understand
+different types and segments of customers and how to target them differently. Lastly, we
+can also find out what the best-selling items are for each customer segment. Take a look at
+the following code:
+```{r}
+highValueCustomers <- unlist(
+  customerDF[which(normalizedDF$Cluster == 4),'CustomerID'][,1], use.names = FALSE
+)
+#highValueCustomers
+```
+
+
+```{r}
+df[which(df$CustomerID %in% highValueCustomers),] %>%
+  group_by(Description) %>%
+  summarise(Count=n()) %>%
+  arrange(desc(Count))
+```
+As we have seen before, the fourth cluster was the group of high-value customers and we
+are going to take a look at the best-selling items for this group. The output of this code is
+shown in the following screenshot:
+For this high-value segment, the best-selling item was JUMBO BAG RED
+RETROSPOT and the second best-selling item was REGENCY CAKESTAND 3 TIER. You
+can utilize this information in the marketing strategies, when you target this customer
+segment. In your marketing campaigns, you can recommend items similar to these bestselling items to this segment of customers, as they are the most interested in these types of
+items.
+
+#2 Customer segment by DNN
+```{r}
+library(readxl)
+library(tidyverse)
+```
+
+```{r}
+df <- read_excel(path="./Online Retail.xlsx",sheet="Online Retail")
+df
+```
+
+
+```{r}
+# ignore negative quantity
+dim(df)
+df <- df[which(df$Quantity > 0),]
+dim(df)
+
+# remove records with NA
+df <- na.omit(df)
+dim(df)
+
+# excluding incomplete month
+sprintf("Date Range: %s ~ %s", min(df$InvoiceDate), max(df$InvoiceDate))
+dim(df)
+df <- df[which(df$InvoiceDate < '2011-12-01'),]
+dim(df)
+
+# total sales
+df$Sales <- df$Quantity * df$UnitPrice
+
+# per customer data
+customerDF <- df %>% 
+  group_by(CustomerID) %>% 
+  dplyr::summarize(TotalSales=sum(Sales), OrderCount=length(unique(InvoiceDate))) %>%
+  mutate(AvgOrderValue=TotalSales/OrderCount)
+customerDF
+```
+
+```{r}
+
+# library(quantable)
+# class(robustscale(customerDF["OrderCount"])) # list
+# as.data.frame(robustscale(customerDF["OrderCount"]))["OrderCount"] 
+# class(as.data.frame(robustscale(customerDF["OrderCount"]))) # dataframe
+# rb_scale <- quantable::robustscale(customerDF[,2:4])
+# class(rb_scale) # list
+# rb_scale # cannot scale all feature to same scale -1 --> 1, cannot combine to dataframe due to list
+
+```
+```{r}
+# try standard scale by prop.table
+customerDF_matrix <- as.matrix(customerDF[,-1])
+customerDF_matrix_prop <- prop.table(customerDF_matrix,margin=2)
+summary(customerDF_matrix_prop)
+```
+```{r}
+summary(customerDF_matrix)
+```
+
+```{r}
+# rank will give all column with the same range (from 1 to 4298)
+rankDF <- customerDF %>%
+  mutate(TotalSales=rank(TotalSales), OrderCount=rank(OrderCount, ties.method="first"), AvgOrderValue=rank(AvgOrderValue))
+rankDF
+
+```
+```{r}
+# normalize these rank
+normalizedDF <- rankDF %>%
+  mutate(TotalSales=scale(TotalSales), OrderCount=scale(OrderCount), AvgOrderValue=scale(AvgOrderValue))
+normalizedDF
+```
+
+```{r}
+#check for normalization - mean of 0 & std of 1
+summary(normalizedDF)
+sapply(normalizedDF, sd)
+```
+
+# Kmeans
+```{r}
+cluster <- kmeans(normalizedDF[c("TotalSales", "OrderCount", "AvgOrderValue")], 4)
+# cluster centers
+cluster$centers
+```
+
+
+```{r}
+# cluster labels
+normalizedDF$Cluster <- cluster$cluster
+normalizedDF
+```
+```{r}
+normalizedDF %>% group_by(Cluster) %>% summarise(Count=n())
+```
+
+# find best kmean
+```{r}
+data_kmean <- normalizedDF[c("TotalSales", "OrderCount", "AvgOrderValue")]
+rownames(data_kmean) <- normalizedDF$CustomerID
+data_kmean
+```
+
+```{r}
+
+# Setup for k-means loop 
+km.out <- list()
+sil.out <- list()
+x <- vector()
+y <- vector()
+minClust <- 2      # Hypothesized minimum number of segments
+maxClust <- 8      # Hypothesized maximum number of segments
+# Compute k-means clustering over various clusters, k, from minClust to maxClust
+for (centr in minClust:maxClust) {
+        i <- centr-(minClust-1) # relevels start as 1, and increases with centr
+        set.seed(11) # For reproducibility
+        km.out[i] <- list(kmeans(data_kmean, centers = centr, nstart = 50))
+        sil.out[i] <- list(silhouette(km.out[[i]][[1]], dist(data_kmean)))
+        # Used for plotting silhouette average widths
+        x[i] = centr  # value of k
+        y[i] = summary(sil.out[[i]])[[4]]  # Silhouette average width
+}
+```
+
+
+```{r}
+ggplot(data = data.frame(x, y), aes(x, y)) + 
+  geom_point(size=3) + 
+  geom_line() +
+  xlab("Number of Cluster Centers") +
+  ylab("Silhouette Average Width") +
+  ggtitle("Silhouette Average Width as Cluster Center Varies")
+```
+
+
+```{r}
+# Get attributes of optimal k-means output
+# maxSilRow <- which.max(y)          # Row number of max silhouette value
+maxSilRow <- 3          # Row number of max silhouette value
+optimalClusters <- x[maxSilRow]    # Number of clusters
+km.out.best <- km.out[[maxSilRow]] # k-means output of best cluster
+maxSilRow # 3
+optimalClusters # 4
+```
+
+
+```{r}
+customerDF$Cluster <- km.out.best$cluster
+customerDF
+```
+
+
+```{r}
+# count per cluster
+customerDF %>% group_by(Cluster) %>% summarise(Count=n())
+```
+```{r}
+# Cluster size
+cluster$size
+```
+
+
+```{r}
+# cluster centers
+cluster$centers
+```
+
+Let's take a closer look at this. The third cluster has the lowest numbers for all three
+attributes. This suggests that the third cluster contains customers with the lowest amount of
+sales, lowest number of orders, and lowest average per-order value. This group of
+customers is a group of low-value customers. On the other hand, the fourth cluster has the
+highest numbers for all three attributes. The customers in the fourth cluster have the
+highest amount of sales, highest number of orders, and highest average per-order value.
+This suggests that these customers in the fourth cluster purchase expensive items and give
+the business the highest revenue. You would typically want to focus your marketing efforts
+on this segment of customers, as it will result in the highest return.
+
+```{r}
+str(cluster)
+```
+
+# Visual cluster
+
+```{r}
+library(factoextra) # clustering algorithms & visualization
+fviz_cluster(cluster, data = data_kmean)
+```
+
+
+```{r}
+k2 <- kmeans(data_kmean, centers = 2, nstart = 25)
+k3 <- kmeans(data_kmean, centers = 3, nstart = 25)
+k4 <- kmeans(data_kmean, centers = 4, nstart = 25)
+k5 <- kmeans(data_kmean, centers = 5, nstart = 25)
+
+# plots to compare
+p1 <- fviz_cluster(k2, geom = "point", data = data_kmean) + ggtitle("k = 2")
+p2 <- fviz_cluster(k3, geom = "point",  data = data_kmean) + ggtitle("k = 3")
+p3 <- fviz_cluster(k4, geom = "point",  data = data_kmean) + ggtitle("k = 4")
+p4 <- fviz_cluster(k5, geom = "point",  data = data_kmean) + ggtitle("k = 5")
+
+library(gridExtra)
+grid.arrange(p1, p2, p3, p4, nrow = 2)
+```
+
+```{r}
+# Cannot see sth in this plot due to outlier
+customerDF %>% 
+  ggplot(aes(x=factor(Cluster),y=TotalSales))+
+   geom_boxplot()
+```
+
+```{r}
+p1<-normalizedDF %>% 
+  ggplot(aes(x=factor(Cluster),y=TotalSales,color=factor(Cluster)))+
+  geom_boxplot()
+
+p2<-normalizedDF %>% 
+  ggplot(aes(x=factor(Cluster),y=OrderCount,color=factor(Cluster)))+
+  geom_boxplot()
+
+p3<-normalizedDF %>% 
+  ggplot(aes(x=factor(Cluster),y=AvgOrderValue,color=factor(Cluster)))+
+  geom_boxplot()
+library(gridExtra)
+grid.arrange(p1, p2, p3)
+```
+```{r}
+cluster$centers
+```
+
+# PCA
+```{r}
+res.pca <- prcomp(data_kmean)
+res.pca
+```
+
+```{r}
+summary(res.pca)
+```
+
+
+```{r}
+library(plotly)
+ggplotly(fviz_eig(res.pca))
+```
+
+
+```{r}
+fviz_pca_ind(res.pca,
+             col.ind = "cos2", # Color by the quality of representation
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             repel = TRUE     # Avoid text overlapping
+             )
+```
+```{r}
+pca$rotation
+```
+
+```{r}
+pca4.dat <- cbind(pca, group=k4$cluster)
+pca4.dat
+```
+
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
