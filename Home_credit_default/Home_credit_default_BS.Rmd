@@ -1,0 +1,154 @@
+---
+title: "Untitled"
+output: html_document
+---
+https://www.business-science.io/business/2018/08/07/kaggle-competition-home-credit-default-risk.html
+
+# 1. Import library
+```{r}
+# General 
+library(tidyverse)
+library(skimr)
+
+# Preprocessing
+library(recipes)
+
+# Machine Learning
+library(h2o)
+library(tictoc)
+```
+
+# 2. Data
+```{r}
+# tic()
+# train_path <- "C:/Users/DNN/Data_science/Git/Data/home-credit-default-risk/application_train.csv"
+# test_path <- "C:/Users/DNN/Data_science/Git/Data/home-credit-default-risk/application_test.csv"
+# application_train_tbl <- read_csv(train_path)
+# application_test_tbl  <- read_csv(test_path)
+# toc() # 11.23 sec elapsed
+```
+
+
+```{r}
+library(data.table)
+tic()
+train_path <- "C:/Users/DNN/Data_science/Git/Data/home-credit-default-risk/application_train.csv"
+test_path <- "C:/Users/DNN/Data_science/Git/Data/home-credit-default-risk/application_test.csv"
+application_train_tbl <- fread(train_path)
+application_test_tbl  <- fread(test_path)
+toc() # 2 sec elapsed
+```
+
+```{r}
+dim(application_train_tbl)
+dim(application_test_tbl)
+```
+
+```{r}
+application_train_tbl %>%
+    slice(1:10)
+```
+
+A few points about the data:
+
+The training data contains 307K observations, which are people applied for and received loans
+
+The “TARGET” column identifies whether or not the person defaulted
+
+The remaining 121 features describe various attributes about the person, loan, and application
+
+There are several additional data sets (bureau.csv, previous_application.csv). I ignored these since most of the important data was likely to be in the main file. These auxiliary files contain data that is one-to-many relationship, which would require aggregation (a feature engineering method) and considerably more work for the unknown benefit.
+
+I was more interested in agile iteration: Building a good model quickly, then going back to try to improve later.
+
+# Train And Test Sets
+```{r}
+# Training data: Separate into x and y tibbles
+#x_train_tbl <- application_train_tbl %>% select(-TARGET)
+#y_train_tbl <- application_train_tbl %>% select(TARGET)   
+
+# Testing data: What we submit in the competition
+#x_test_tbl  <- application_test_tbl
+
+# Remove the original data to save memory
+rm(application_train_tbl)
+rm(application_test_tbl)
+```
+
+```{r}
+library(caret)
+```
+
+
+```{r}
+response="TARGET"
+set.seed(430)
+split = caret::createDataPartition(application_train_tbl[[response]], p =0.7, list = FALSE)
+train = application_train_tbl[split, ]
+
+valid_test = application_train_tbl[-split, ]
+split2 = caret::createDataPartition(valid_test[[response]], p =0.5, list = FALSE)
+valid = valid_test[split2, ]
+test = valid_test[-split2, ]
+
+dim(train)
+dim(valid)
+dim(test)
+prop.table(table(as.data.frame(train[[response]])))
+prop.table(table(as.data.frame(valid[[response]])))
+prop.table(table(as.data.frame(test[[response]])))
+```
+
+# Process data
+```{r}
+string_2_factor_names <- train %>%
+    select_if(is.character) %>%
+    names()
+
+string_2_factor_names
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
