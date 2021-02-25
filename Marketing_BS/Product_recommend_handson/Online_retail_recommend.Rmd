@@ -1,0 +1,185 @@
+---
+title: "Untitled"
+output: html_document
+---
+```{r}
+library(dplyr)
+library(readxl)
+```
+
+#### 1. Load Data ####
+```{r}
+df <- read_excel(
+  path="/home/dnn/Data_science/Git/R_project/Marketing_BS/Online Retail.xlsx", 
+  sheet="Online Retail"
+)
+dim(df)
+```
+
+
+```{r}
+# ignore cancel orders
+df <- df[which(df$Quantity > 0),]
+dim(df)
+```
+
+#### 2. Data Preparation ####
+
+## 2.1. Handle NaNs in CustomerID field
+```{r}
+# there are 133,361 records with no CustomerID
+sum(is.na(df$CustomerID))
+```
+
+
+```{r}
+# sneak peek at records with no CustomerID
+head(df[which(is.na(df$CustomerID)),])
+```
+
+
+```{r}
+# current DataFrame shape
+dim(df)
+# remove records with NA
+df <- na.omit(df)
+dim(df)
+```
+
+## 2.2. Customer-Item Matrix
+```{r}
+library(reshape2)
+customerItemMatrix <- reshape2::dcast(
+  df, CustomerID ~ StockCode, value.var="Quantity"
+)
+head(customerItemMatrix) # 4339x3661
+```
+
+
+```{r}
+# 0-1 encode 
+encode_fn <- function(x) {as.integer(x > 0)}
+
+customerItemMatrix <- customerItemMatrix %>% 
+  mutate_at(vars(-CustomerID), funs(encode_fn))
+dim(customerItemMatrix) # 4339 3666
+head(customerItemMatrix)
+```
+
+#### 3. Collaborative Filtering ###
+```{r}
+library(coop)
+```
+
+## 3.1. User-based Collaborative Filtering
+```{r}
+# User-to-User Similarity Matrix
+userToUserSimMatrix <- cosine(
+  as.matrix(
+    # excluding CustomerID column
+    t(customerItemMatrix[, 2:dim(customerItemMatrix)[2]])
+  )
+)
+#head(userToUserSimMatrix)
+```
+
+
+```{r}
+colnames(userToUserSimMatrix) <- customerItemMatrix$CustomerID
+#userToUserSimMatrix
+```
+# Making Recommendations
+```{r}
+top10SimilarCustomersTo12350 <- customerItemMatrix$CustomerID[
+  order(userToUserSimMatrix[,"12350"], decreasing = TRUE)[1:11]
+]
+
+itemsBoughtByA <- customerItemMatrix[
+  which(customerItemMatrix$CustomerID == "12350"),
+]
+itemsBoughtByA <- colnames(customerItemMatrix)[which(itemsBoughtByA != 0)]
+
+itemsBoughtByB <- customerItemMatrix[
+  which(customerItemMatrix$CustomerID == "17935"),
+]
+itemsBoughtByB <- colnames(customerItemMatrix)[which(itemsBoughtByB != 0)]
+
+itemsToRecommendToB <- setdiff(itemsBoughtByA, itemsBoughtByB)
+itemsToRecommendToB
+```
+
+
+```{r}
+itemsToRecommendToBDescriptions <- unique(
+  df[
+    which(df$StockCode %in% itemsToRecommendToB), 
+    c("StockCode", "Description")
+    ]
+)
+itemsToRecommendToBDescriptions <- itemsToRecommendToBDescriptions[
+  match(itemsToRecommendToB, itemsToRecommendToBDescriptions$StockCode),
+]
+itemsToRecommendToBDescriptions
+```
+## 3.2. Item-based Collaborative Filtering
+
+```{r}
+# Item-to-Item Similarity Matrix
+itemToItemSimMatrix <- cosine(
+  as.matrix(
+    # excluding CustomerID column
+    customerItemMatrix[, 2:dim(customerItemMatrix)[2]]
+  )
+)
+```
+
+
+```{r}
+# Making Recommendations
+top10SimilarItemsTo23166 <- colnames(itemToItemSimMatrix)[
+  order(itemToItemSimMatrix[,"23166"], decreasing = TRUE)[1:11]
+]
+top10SimilarItemsTo23166
+```
+
+
+```{r}
+top10SimilarItemDescriptions <- unique(
+  df[
+    which(df$StockCode %in% top10SimilarItemsTo23166), 
+    c("StockCode", "Description")
+  ]
+)
+top10SimilarItemDescriptions <- top10SimilarItemDescriptions[
+  match(top10SimilarItemsTo23166, top10SimilarItemDescriptions$StockCode),
+]
+top10SimilarItemDescriptions
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+```{r}
+```
+
+
+```{r}
+```
+

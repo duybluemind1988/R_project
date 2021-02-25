@@ -28,15 +28,21 @@ library(tictoc)
 # toc() # 11.23 sec elapsed
 ```
 
+```{r}
+getwd()
+```
 
 ```{r}
 library(data.table)
 tic()
-train_path <- "C:/Users/DNN/Data_science/Git/Data/home-credit-default-risk/application_train.csv"
-test_path <- "C:/Users/DNN/Data_science/Git/Data/home-credit-default-risk/application_test.csv"
+#train_path <- "C:/Users/DNN/Data_science/Git/Data/home-credit-default-risk/application_train.csv"
+#test_path <- "C:/Users/DNN/Data_science/Git/Data/home-credit-default-risk/application_test.csv"
+
+train_path <- "/mnt/01D6B57CFBE4DB20/1.Linux/Data/home-credit-default-risk/application_train.csv"
+test_path <- "/mnt/01D6B57CFBE4DB20/1.Linux/Data/home-credit-default-risk/application_test.csv"
 application_train_tbl <- fread(train_path)
 application_test_tbl  <- fread(test_path)
-toc() # 2 sec elapsed
+toc() # 2 sec elapsed compay (core i3), 5 s at home (core i2)
 ```
 
 ```{r}
@@ -61,7 +67,7 @@ There are several additional data sets (bureau.csv, previous_application.csv). I
 
 I was more interested in agile iteration: Building a good model quickly, then going back to try to improve later.
 
-# Train And Test Sets
+# Split data
 ```{r}
 # Training data: Separate into x and y tibbles
 #x_train_tbl <- application_train_tbl %>% select(-TARGET)
@@ -71,14 +77,13 @@ I was more interested in agile iteration: Building a good model quickly, then go
 #x_test_tbl  <- application_test_tbl
 
 # Remove the original data to save memory
-rm(application_train_tbl)
-rm(application_test_tbl)
+#rm(application_train_tbl)
+#rm(application_test_tbl)
 ```
 
 ```{r}
 library(caret)
 ```
-
 
 ```{r}
 response="TARGET"
@@ -99,53 +104,319 @@ prop.table(table(as.data.frame(valid[[response]])))
 prop.table(table(as.data.frame(test[[response]])))
 ```
 
-# Process data
+
+# 3. Process data
+Note: Remove target to not affect to recipe
 ```{r}
-string_2_factor_names <- train %>%
+# Training data: Separate into x and y tibbles
+x_train <- train %>% select(-TARGET)
+y_train <- train %>% select(TARGET)  
+
+x_val <- valid %>% select(-TARGET)
+y_val <- valid %>% select(TARGET)  
+
+x_test <- test %>% select(-TARGET)
+y_test <- test %>% select(TARGET)  
+
+# convert target to factor:
+y_train_convert <- y_train %>%
+                  mutate(TARGET = TARGET %>% as.character() %>% as.factor())
+y_valid_convert <- y_val %>%
+                  mutate(TARGET = TARGET %>% as.character() %>% as.factor())
+y_test_convert <- y_test %>%
+                  mutate(TARGET = TARGET %>% as.character() %>% as.factor())
+```
+
+```{r}
+skim_to_list(x_train)
+```
+
+The main things I focused on were:
+
+Character data that needs to be factored: h2o.automl() requires any character data to be converted to a factor.
+
+Numeric data that has a low number of unique counts: This is common in business data where there are numeric features that have low number of unique values. These are typically categorical data.
+
+Missing values: Missing values need to be either imputed or to have the columns and or rows dropped. I made a point to impute all data before modeling with h2o.automl() although I believe that AutoML has methods for handling missing data.
+
+## Character Data
+First, I collected the names of all character data. These columns will be converted into factors
+```{r}
+string_2_factor_names <- x_train %>%
     select_if(is.character) %>%
     names()
 
 string_2_factor_names
 ```
 
+## Numeric Factor Data
+Next, I looked at which numeric data should be factored (categorical). These typically have a low number of unique levels. I used a few dplyr and purrr operations to get a count of the unique levels. The real trick is using map_df() with the anonymous function ~ unique(.) %>% length(), which counts the unique values in each column, then gather()-ing the results in the long format.
+```{r}
+unique_numeric_values_tbl <- x_train %>%
+    select_if(is.numeric) %>%
+    map_df(~ unique(.) %>% length()) %>%
+    gather() %>%
+    arrange(value) %>%
+    mutate(key = as_factor(key))
+
+unique_numeric_values_tbl
+```
+I used a factor limit of 7 meaning any values with less than 7 unique observations will not be converted to factors. I then collected the column names by pull()-ing the key column and storing as character data.
 
 ```{r}
+factor_limit <- 7
+
+num_2_factor_names <- unique_numeric_values_tbl %>%
+    filter(value < factor_limit) %>%
+    arrange(desc(value)) %>%
+    pull(key) %>%
+    as.character()
+
+num_2_factor_names
+```
+
+## Missing Data
+I wanted to see how much missing data I was dealing with. The trick here was using the summarize_all() function with an anonymous function (.funs = ~ sum(is.na(.)) / length(.)) to calculate the percentage of missing data.
+```{r}
+missing_tbl <- x_train %>%
+    summarize_all(.funs = ~ sum(is.na(.)) / length(.)) %>%
+    gather() %>%
+    arrange(desc(value)) %>%
+    filter(value > 0)
+
+missing_tbl
+```
+## Recipes Preprocessing
+I used recipes to quickly preprocess the data for AutoML.
+
+Converting character to factor: I used step_string2factor() for the character names we stored earlier.
+
+Converting numeric values with few unique levels to factor: I used step_mutate_at() for the numeric column names we stored earlier.
+
+Imputing missing data: I used step_meanimpute() for the numeric features and step_modeimpute() for the categorical features.
+
+After applying the step_ functions, I prepared the recipe using prep(). The trick here was to use stringsAsFactors = FALSE, which eliminates a pesky error with .
+```{r}
+rec_obj <- recipe(~ ., data = x_train) %>%
+    step_string2factor(string_2_factor_names) %>%
+    #step_num2factor(num_2_factor_names) %>%
+    step_mutate_at(num_2_factor_names,fn=factor) %>%  # convert to factor
+    step_meanimpute(all_numeric()) %>% # continuous number
+    step_modeimpute(all_nominal()) %>% # category number not order
+    prep(stringsAsFactors = FALSE)
+
+rec_obj
+```
+
+```{r}
+h2o.init()
+h2o.removeAll()
+h2o.no_progress()
+```
+
+```{r}
+baked_train <- bake(rec_obj, new_data = train)
+baked_valid <- bake(rec_obj, new_data = valid)
+baked_test <- bake(rec_obj, new_data = test)
+# convert training data to h2o object
+x_train_h2o <- as.h2o(baked_train)
+x_valid_h2o <- as.h2o(baked_valid)
+x_test_h2o <- as.h2o(baked_test)
+
+y_train_h2o <- as.h2o(y_train_convert)
+y_valid_h2o <- as.h2o(y_valid_convert)
+y_test_h2o <- as.h2o(y_test_convert)
+# bind data to training h2o
+train_h2o <- h2o.cbind(x_train_h2o, y_train_h2o)
+valid_h2o <- h2o.cbind(x_valid_h2o, y_valid_h2o)
+test_h2o <- h2o.cbind(x_test_h2o, y_test_h2o)
+# set the predictor names
+predictors <- setdiff(colnames(train_h2o), response)
+```
+
+```{r}
+# Before transformation
+# train %>%
+#     select(1:30) %>%
+#     glimpse()
 ```
 
 
 ```{r}
+# After transformation
+# baked_train %>%
+#     select(1:30) %>%
+#     glimpse()
+```
+Last, I removed the unprocessed datasets and recipe object to save memory.
+```{r}
+# rm(rec_obj)
+# rm(x_train_tbl)
+# rm(x_test_tbl)
+# rm(y_train_tbl)
+```
+#4. Build machine learning model
+## GBM
+```{r}
+# BEST
+assignment_type <- "Stratified"
+tic()
+h2o.gbm <- h2o.gbm(
+    x = predictors, 
+    y = response,
+    training_frame = train_h2o, 
+    validation_frame = valid_h2o,
+    balance_classes = TRUE,
+    #fold_assignment = assignment_type,
+    #nfolds=5,
+    #ntrees = 1000,
+    #booster = "dart",
+    #normalize_type = "tree",
+    
+    seed = 123
+)
+toc() #  106 s
+test_pred <-h2o.predict(h2o.gbm, newdata = test_h2o)
+predict <- as.data.frame(test_pred)$predict
+reference <- as.data.frame(test_h2o)[[response]]
+caret::confusionMatrix(predict,reference,positive = "1",mode="prec_recall")
+```
+```{r}
+performance_h2o <- h2o.performance(h2o.gbm, newdata = test_h2o)
+performance_h2o %>%
+    h2o.auc()
+```
+
+## Light gbm (BEST)
+```{r}
+# Light gbm
+assignment_type <- "Stratified"
+tic()
+h2o_model_lightgbm <- h2o.xgboost(
+    x = predictors, 
+    y = response,
+    training_frame = train_h2o, 
+    validation_frame = valid_h2o,
+    #fold_assignment = assignment_type,
+    tree_method="hist",
+    grow_policy="lossguide",
+    #nfolds=5,
+    seed = 123
+)
+toc() # 33 s
+test_pred <-h2o.predict(h2o_model_lightgbm, newdata = test_h2o)
+predict <- as.data.frame(test_pred)$predict
+reference <- as.data.frame(test_h2o)[[response]]
+caret::confusionMatrix(predict,reference,positive = "1",mode="prec_recall")
 ```
 
 
 ```{r}
+performance_h2o <- h2o.performance(h2o_model_lightgbm, newdata = test_h2o)
+performance_h2o %>%
+    h2o.auc()
+```
+## AutoML
+
+```{r}
+tic()
+auto_ml <- h2o.automl(
+    x = predictors, 
+    y = response,
+    training_frame    = train_h2o,
+    validation_frame  = valid_h2o,
+    leaderboard_frame = test_h2o,
+    max_runtime_secs  = 180
+)
+toc()
+auto_ml
+```
+
+```{r}
+model_ids <- as.data.frame(auto_ml@leaderboard$model_id)[,1]
+# Check performance GBM autoML
+slect_model <- h2o.getModel(model_ids[1])
+test_pred <- h2o.predict(slect_model, test_h2o) 
+reference <- as.data.frame(test_h2o)[[response]]
+predict <- as.data.frame(test_pred)$predict
+caret::confusionMatrix(predict,reference,positive = "1",mode="prec_recall")
+performance_h2o <- h2o.performance(slect_model, newdata = test_h2o)
+performance_h2o %>%
+    h2o.auc()
+```
+
+#5. Prediction
+```{r}
+#application_test_tbl
+application_test_tbl_bake <- bake(rec_obj, new_data = application_test_tbl)
+prediction_h2o <- h2o.predict(h2o_model_lightgbm, newdata = as.h2o(application_test_tbl_bake)) 
+```
+
+```{r}
+prediction_tbl <- prediction_h2o %>%
+    as.tibble() %>%
+    bind_cols(
+        application_test_tbl %>% select(SK_ID_CURR)
+    ) %>%
+    select(SK_ID_CURR, p1) %>%
+    rename(TARGET = p1)
+
+prediction_tbl
 ```
 
 
 ```{r}
+prediction_tbl %>%
+    write_csv(file = "submission_001.csv")
+```
+
+# 6. Explain model
+```{r}
+#h2o_model_load <- h2o.loadModel(model_path)
+h2o_model_load <- h2o_model_lightgbm
+```
+
+```{r}
+h2o.varimp_plot(h2o_model_load)
 ```
 
 
 ```{r}
+h2o.shap_summary_plot(h2o_model_load,test_h2o)
+```
+
+```{r}
+h2o.pd_plot(h2o_model_load, test_h2o, column = "Contract")
+h2o.pd_plot(h2o_model_load, test_h2o, column = "tenure")
+h2o.pd_plot(h2o_model_load, test_h2o, column = "MonthlyCharges")
+h2o.pd_plot(h2o_model_load, test_h2o, column = "OnlineSecurity")
+h2o.pd_plot(h2o_model_load, test_h2o, column = "PaymentMethod")
+h2o.pd_plot(h2o_model_load, test_h2o, column = "MultipleLines")
+```
+
+```{r}
+h2o.shap_explain_row_plot(h2o_model_load, test_h2o,row_index = 10)
+h2o.shap_explain_row_plot(h2o_model_load, test_h2o,row_index = 3)
 ```
 
 
 ```{r}
-```
-
-
-```{r}
-```
-
-
-```{r}
-```
-
-
-```{r}
-```
-
-
-```{r}
+library(lime)
+# Run lime() on training set
+explainer <- lime::lime(
+    as.data.frame(train_h2o), 
+    model          = h2o_model_load, 
+    bin_continuous = FALSE)
+# Run explain() on explainer
+explanation <- lime::explain(
+    as.data.frame(test_h2o[1,]), 
+    explainer    = explainer, 
+    n_labels     = 1, 
+    n_features   = 10,
+    kernel_width = 0.5)
+lime::plot_features(explanation) +
+      labs(title = "HR Predictive Analytics: LIME Feature Importance Visualization",
+           subtitle = "Hold Out (Test) Set, First 10 Cases Shown")
 ```
 
 

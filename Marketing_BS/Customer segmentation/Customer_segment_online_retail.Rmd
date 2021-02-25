@@ -5,8 +5,12 @@ output: html_document
 # Handson marketing chap 10
 #### 1. Load Data ####
 ```{r}
+getwd()
+```
+
+```{r}
 df <- read_excel(
-  path="./Online Retail.xlsx", 
+  path="/home/dnn/Data_science/Git/R_project/Marketing_BS/Online Retail.xlsx", 
   sheet="Online Retail"
 )
 df
