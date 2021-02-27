@@ -706,11 +706,35 @@ cluster_morphology_tbl
 ```
 
 ```{r}
-#devtools::install_github("ricardo-bion/ggradar", 
-                          #dependencies = TRUE)
+# EXAMPLE
+library(ggradar)
+library(dplyr)
+library(scales)
+library(tibble)
+mtcars_radar <- mtcars %>% 
+  as_tibble(rownames = "group") %>% 
+  mutate_at(vars(-group), rescale) %>% 
+  tail(4) %>% 
+  select(1:10)
+ggradar(mtcars_radar)
+# NOT ggradar use in this r notebook
 ```
-ERROR
 ```{r}
+#install.packages("gdtools")
+#devtools::install_github("dreamRs/esquisse")
+```
+
+
+```{r}
+#devtools::install_github('davidgohel/ggiraph')
+#install.packages("ggiraphExtra")
+library(ggiraph)
+library(ggiraphExtra)
+```
+
+
+```{r}
+# ERROR
 cluster_morphology_ggplot <- cluster_morphology_tbl %>%
     select(cluster, count, sum, cat_0, cat_1, cat_2, cat_3, cat_4, cat_NA) %>%
     ggRadar(aes(color = cluster), size = 1) +
@@ -815,9 +839,6 @@ predictions_svm[1:10]
 metrics.accuracy_score(Y_test, predictions_svm)
 ```
 
-
-
-
 ## Logistic Regression
 
 ```{python}
@@ -887,6 +908,9 @@ X[1:5,] %>% lr_predict()
 # Save Preprocessing
 
 ## Product Clusters
+```{r}
+head(product_clusters_tbl)
+```
 
 ```{r, eval=F}
 product_clusters_tbl %>% write_rds("preprocessing/product_clusters_tbl.rds")
@@ -894,6 +918,9 @@ product_clusters_tbl %>% write_rds("preprocessing/product_clusters_tbl.rds")
 
 
 ## Customer History
+```{r}
+head(customer_habits_joined_tbl)
+```
 
 ```{r, eval=F}
 customer_habits_joined_tbl %>% write_rds("preprocessing/customer_habits_joined_tbl.rds")

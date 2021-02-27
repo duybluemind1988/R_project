@@ -1,6 +1,6 @@
 # LEARNING LAB 34: ADVANCED CUSTOMER SEGMENTATION WITH PYTHON
 # BONUS #1 - MARKET BASKET ANALYZER
-
+#devtools::install_github("haozhu233/kableExtra")
 # LIBRARIES ----
 library(shiny)
 library(shinythemes)
@@ -23,11 +23,13 @@ library(reticulate)
 # PYTHON SETUP ----
 
 # Replace this with your conda environment containking sklearn, pandas, & numpy
-use_condaenv("py3.8", required = TRUE)
+use_condaenv("py3.8.5", required = TRUE)
 source_python("py/logistic_reg.py")
 
 # DATA SETUP ----
-ecommerce_raw_tbl  <- read_csv("data/ecommerce_data.csv")
+#ecommerce_raw_tbl  <- read_csv("./Py_R/lab_34_python_ecommerce/data/ecommerce_data.csv")
+ecommerce_raw_tbl  <- read_csv("~/Data_science/Git/R_project/Py_R/lab_34_python_ecommerce/data/ecommerce_data.csv")
+
 invoice_selections <- ecommerce_raw_tbl %>%
     filter(!InvoiceNo %>% str_detect("^C")) %>%
     distinct(InvoiceNo) %>% 
@@ -36,16 +38,16 @@ invoice_selections <- ecommerce_raw_tbl %>%
 
 sample_data <- ecommerce_raw_tbl %>% filter(InvoiceNo %in% invoice_selections)
 
-customer_order_history_tbl <- read_rds("preprocessing/customer_habits_joined_tbl.rds") %>%
+customer_order_history_tbl <- read_rds("~/Data_science/Git/R_project/Py_R/lab_34_python_ecommerce/preprocessing/customer_habits_joined_tbl.rds") %>%
     select(CustomerID, count)
 
-product_clusters_tbl <- read_rds("preprocessing/product_clusters_tbl.rds") 
+product_clusters_tbl <- read_rds("~/Data_science/Git/R_project/Py_R/lab_34_python_ecommerce/preprocessing/product_clusters_tbl.rds") 
 
-recipe_spec <- read_rds("preprocessing/recipe_spec_customer_prediction.rds")
+recipe_spec <- read_rds("~/Data_science/Git/R_project/Py_R/lab_34_python_ecommerce/preprocessing/recipe_spec_customer_prediction.rds")
 
-cluster_morphology_tbl <- read_rds("preprocessing/cluster_morphology_tbl.rds")
+cluster_morphology_tbl <- read_rds("~/Data_science/Git/R_project/Py_R/lab_34_python_ecommerce/preprocessing/cluster_morphology_tbl.rds")
 
-cluster_morphology_ggplot <- read_rds("preprocessing/cluster_morphology_ggplot.rds")
+cluster_morphology_ggplot <- read_rds("~/Data_science/Git/R_project/Py_R/lab_34_python_ecommerce/preprocessing/cluster_morphology_ggplot.rds")
 
 # INFO CARD ----
 info_card <- function(title, value, sub_value = NULL,
