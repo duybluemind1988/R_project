@@ -356,6 +356,9 @@ rownames(X) <- stock_code
 X[1:10, 1:10]
 ```
 
+```{r}
+dim(X)
+```
 
 
 # Part 2 - Product Segmentation (Python)
@@ -376,10 +379,11 @@ from sklearn.manifold import TSNE
 ```{python}
 X_embedded = TSNE(n_components=2, random_state=123).fit_transform(r.X)
 
-pd.DataFrame(X_embedded)
+X_embedded_df <-pd.DataFrame(X_embedded) # Cannot print or show
 ```
-
-
+```{r}
+#print(reticulate::py$X_embedded)
+```
 
 
 ## DBSCAN Cluster Assignments
@@ -394,6 +398,7 @@ db = DBSCAN(eps=0.5, min_samples=40).fit(r.X)
 
 ```{python}
 cluster_assignments_db = db.labels_
+ocluster_assignments_db
 ```
 
 ```{python}
@@ -525,6 +530,9 @@ term_freq_by_cluster_tbl %>%
 
 
 ## Join Product Categories 
+```{r}
+ecommerce_tbl
+```
 
 ```{r}
 transaction_product_clusters_tbl <- ecommerce_tbl %>%
@@ -567,6 +575,32 @@ customer_spend_habits_tbl
 ```
 
 ## Characterize Product Categories
+```{r}
+transaction_product_clusters_tbl
+```
+
+```{r}
+transaction_product_clusters_tbl %>%
+    select(CustomerID, PriceExt, cluster) %>%
+    group_by(CustomerID, cluster) %>%
+    summarize(PriceExt = SUM(PriceExt)) %>%
+    mutate(prop = PriceExt / SUM(PriceExt)) %>%
+    ungroup() %>%
+    select(-PriceExt)
+```
+```{r}
+transaction_product_clusters_tbl %>%
+    select(CustomerID, PriceExt, cluster) %>%
+    group_by(CustomerID, cluster) %>%
+    summarize(PriceExt = SUM(PriceExt)) %>%
+    mutate(prop = PriceExt / SUM(PriceExt)) %>%
+    ungroup() %>%
+    select(-PriceExt) %>%
+    pivot_wider(names_from   = cluster, 
+                values_from  = prop, 
+                values_fill  = list(prop = 0), 
+                names_prefix = "cat_") 
+```
 
 ```{r}
 customer_product_habits_tbl <- transaction_product_clusters_tbl %>%
@@ -602,6 +636,10 @@ customer_recency_habits_tbl
 ```
 
 ## Join Customer Habits
+```{r}
+customer_spend_habits_tbl
+customer_product_habits_tbl
+```
 
 ```{r}
 customer_habits_joined_tbl <- customer_spend_habits_tbl %>%
@@ -610,8 +648,6 @@ customer_habits_joined_tbl <- customer_spend_habits_tbl %>%
 
 customer_habits_joined_tbl
 ```
-
-
 
 ## Prepare for Modeling
 
@@ -679,6 +715,10 @@ pd.Series(cluster_assignments_km).unique()
 ```
 
 ## Customers by Cluster
+```{r}
+customer_habits_joined_tbl
+```
+
 
 ```{r}
 cluster_assignments <- py$cluster_assignments_km
@@ -731,6 +771,9 @@ ggradar(mtcars_radar)
 library(ggiraph)
 library(ggiraphExtra)
 ```
+```{r}
+cluster_morphology_tbl
+```
 
 
 ```{r}
@@ -753,9 +796,11 @@ cluster_morphology_ggplot <- cluster_morphology_tbl %>%
 
 cluster_morphology_ggplot
 ```
-Error: 'ggRadar' is not an exported object from 'namespace:ggradar'
 
 ## Prepare for Machine Learning
+```{r}
+customer_clusters_tbl
+```
 
 ```{r, paged.print = FALSE}
 data <- customer_clusters_tbl %>%
