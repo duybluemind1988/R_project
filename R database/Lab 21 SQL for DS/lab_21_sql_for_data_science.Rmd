@@ -1,0 +1,285 @@
+---
+title: "Lab 21 - SQL for Data Science"
+author: "Business Science"
+date: "10/17/2019"
+output: 
+    html_document:
+        theme: flatly
+        toc: 2
+        toc_float: true
+        df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+    echo = TRUE,
+    message = FALSE,
+    warning = FALSE
+    )
+```
+
+## Libraries
+
+```{r}
+library(DBI)       # Database Connection
+library(tidyverse) # Core Libraries - dplyr, ggplot2
+library(dbplyr)    # Database Backend for dplyr
+library(knitr)     # Report Graphics
+```
+
+```{r}
+con <- dbConnect(
+    drv    = RSQLite::SQLite(),
+    #dbname = "home_loan_applications"
+    dbname ="/home/dnn/Data_science/Git/Business science/Database-SQL/lab_21_SQL_for_datascience/lab_21_SQL_for_datascience/home_loan_applications"
+)
+
+con
+```
+
+
+## SQL Tables
+
+Data and Image Source: [Kaggle Home Credit Default Challenge](https://www.kaggle.com/c/home-credit-default-risk)
+
+```{r}
+knitr::include_graphics("home_credit_diagram.png")
+```
+
+
+```{r}
+dbListTables(con)
+```
+
+```{r, paged.print = FALSE, results='hide'}
+dbListTables(con) %>%
+    map(.f = function(x) tbl(con, x)) %>%
+    set_names(dbListTables(con))
+```
+
+
+## SQL in Rmarkdown
+
+```{sql, connection = con}
+-- SQL in Rmarkdown
+SELECT *
+FROM applications_train
+LIMIT 10
+```
+
+```{sql, connection = con, output.var = "application_head"}
+-- Store output as a variable application_head
+SELECT *
+FROM applications_train
+LIMIT 10
+```
+
+```{r}
+application_head
+```
+
+## Switch from SQL to dbplyr Backend
+
+`dbplyr` converts `dplyr` operations to `SQL` Operations
+
+```{r, paged.print = FALSE}
+tbl(con, "applications_train") %>%
+    filter(NAME_CONTRACT_TYPE == "Cash loans") %>%
+    show_query()
+```
+
+
+```{r, paged.print = FALSE}
+tbl(con, "applications_train") %>% count()
+
+tbl(con, "applications_train") %>% count(NAME_CONTRACT_TYPE)
+
+tbl(con, "applications_train") %>% count(NAME_CONTRACT_TYPE, TARGET)
+```
+```{r}
+tbl(con, "applications_train") %>% count(NAME_CONTRACT_TYPE, TARGET)
+```
+
+```{r}
+tbl(con, "applications_train") %>% count(NAME_CONTRACT_TYPE, TARGET) %>% show_query()
+```
+
+
+## Working with SQL + dbplyr
+
+### Limitations
+
+- Time-Based Operations with `lubridate`
+- String-Based Operations with `stringr`
+- Pivoting and Spread/Gather with `tidyr`
+
+```{r, error = TRUE}
+# ERROR due to limitation
+tbl(con, "applications_train") %>%
+    filter(str_detect(NAME_CONTRACT_TYPE, "Cash")) 
+```
+```{r}
+# Add collect can make it happen, but not fast
+tbl(con, "applications_train") %>%
+    collect() %>% 
+    filter(str_detect(NAME_CONTRACT_TYPE, "Cash")) 
+```
+
+```{r}
+# ERROR due to limitation
+#tbl(con, "applications_train") %>% 
+#    filter(grepl("Cash",NAME_CONTRACT_TYPE))
+```
+
+### Getting Creative with SQL
+```{r}
+tbl(con, "applications_train") %>% 
+    filter(NAME_CONTRACT_TYPE %LIKE% "Cash%")
+```
+
+```{r}
+tbl(con, "applications_train") %>% 
+    filter(NAME_CONTRACT_TYPE %LIKE% "Cash%") %>%
+    show_query()
+```
+
+```{r}
+tbl(con, "applications_train") %>%
+    filter(sql("NAME_CONTRACT_TYPE LIKE 'Cash%'")) %>%
+    show_query()
+```
+
+### Lags and Window Functions
+
+- Have form: [expression] OVER ([partition clause] [order clause] [frame_clause])
+
+- Most Databases Support: lead, lag, nth, first, last, count, min, max, sum, avg and stddev
+
+
+```{r}
+window_functions_query <- tbl(con, "previous_application") %>%
+    select(SK_ID_CURR, NFLAG_INSURED_ON_APPROVAL) %>%
+    
+    # Grouping Operation
+    group_by(SK_ID_CURR) %>%
+    
+    # Window Function - Calculate Lag & Cumulative Sum
+    mutate(Lag_1  = lag(NFLAG_INSURED_ON_APPROVAL, n = 1)) %>%
+    mutate(CumSum = cumsum(NFLAG_INSURED_ON_APPROVAL)) 
+
+window_functions_query %>% show_query()
+
+window_functions_query %>% collect()
+```
+
+
+
+
+## Question - Does Days Credit Influence Default?
+
+
+### Get mean days credit from bureau table
+
+```{r, paged.print = FALSE}
+days_credit_query <- tbl(con, "bureau") %>%
+    # Selet columns
+    select(SK_ID_CURR, DAYS_CREDIT) %>%
+    # Group by SK_ID_CURR and calculate average days credit
+    group_by(SK_ID_CURR) %>%
+    summarise(mean_days_credit = mean(DAYS_CREDIT, na.rm = T)) %>%
+    ungroup() %>%
+    # Arrange Descending by mean
+    arrange(desc(mean_days_credit))
+
+days_credit_query
+days_credit_query %>% show_query()
+```
+
+```{r,  paged.print = FALSE}
+days_credit_query %>% collect()
+```
+
+### Join average days_credit with applications_train
+```{r}
+tbl(con, "applications_train")
+```
+
+```{r, paged.print = FALSE, results="hide"}
+applications_days_credit_joined_query <- tbl(con, "applications_train") %>%
+    left_join(days_credit_query) %>%
+    filter(!is.na(mean_days_credit)) %>%
+    select(SK_ID_CURR, TARGET, mean_days_credit, everything())
+
+applications_days_credit_joined_query %>% show_query()
+```
+
+```{r, paged.print = FALSE}
+applications_days_credit_joined_query %>%
+    select(1:10)
+```
+
+### Perform a quick check to see if there is a relationship
+
+```{r}
+application_mean_days_credit_tbl <- applications_days_credit_joined_query %>%
+    # Bring into R
+    collect() 
+```
+
+#### Correlation
+
+```{r}
+# Data Science in R
+application_mean_days_credit_tbl %>%
+    select(TARGET, mean_days_credit) %>%
+    cor()
+```
+
+#### Visualize Relationship
+
+```{r}
+application_mean_days_credit_tbl %>%
+    select(TARGET, mean_days_credit) %>%
+    mutate(TARGET = as.factor(TARGET)) %>%
+    ggplot(aes(TARGET, mean_days_credit)) +
+    geom_boxplot() +
+    labs(title = "Feature Engineering: Mean Days Credit",
+         subtitle = "Defaults have higher (less negative) average days credit") +
+    theme_minimal()
+```
+
+
+## LLPRO Bonus - Machine Learning
+
+```{r}
+library(parsnip)
+library(xgboost)
+library(recipes)
+library(yardstick)
+library(DataExplorer)
+library(tictoc)
+
+source("llpro_bonus_machine_learning.R") # 31.9 s
+```
+
+```{r, paged.print = FALSE}
+rec_obj
+```
+
+```{r}
+model_xgb
+```
+
+```{r}
+prediction_tbl <- predict.model_fit(model_xgb, new_data = train_processed_tbl, type = "prob") %>%
+    bind_cols(train_processed_tbl) 
+
+prediction_tbl
+```
+
+```{r}
+prediction_tbl %>%
+    select(.pred_1, TARGET) %>%
+    yardstick::roc_auc(TARGET, .pred_1)
+```
+

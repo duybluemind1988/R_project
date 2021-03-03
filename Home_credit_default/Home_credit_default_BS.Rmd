@@ -200,7 +200,7 @@ After applying the step_ functions, I prepared the recipe using prep(). The tric
 rec_obj <- recipe(~ ., data = x_train) %>%
     step_string2factor(string_2_factor_names) %>%
     #step_num2factor(num_2_factor_names) %>%
-    step_mutate_at(num_2_factor_names,fn=factor) %>%  # convert to factor
+    step_mutate_at(num_2_factor_names,fn=factor) %>%  # convert to factor (replace step_num2factor)
     step_meanimpute(all_numeric()) %>% # continuous number
     step_modeimpute(all_nominal()) %>% # category number not order
     prep(stringsAsFactors = FALSE)

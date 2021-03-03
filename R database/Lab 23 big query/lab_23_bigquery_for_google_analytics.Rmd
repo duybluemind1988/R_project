@@ -1,0 +1,419 @@
+---
+title: "Lab 23 - BigQuery for Google Analytics"
+author: "Business Science"
+date: "11/20/2019"
+output: 
+    html_document:
+        theme: flatly
+        df_print: paged
+        toc: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+    echo    = TRUE,
+    message = FALSE,
+    warning = FALSE)
+```
+
+## 1.0 Libraries & Setup
+
+To get Started:
+
+- Create a Google Cloud Platform Account. Navigate to BigQuery. Add a dataset. 
+
+- Make sure to use the [RStudio Preview Version](https://rstudio.com/products/rstudio/download/preview/) for this Learning Lab. Otherwise you may get an "Error: Option error has NULL value".
+
+```{r}
+# Libraries ----
+#install.packages("bigrquery")
+# Databases
+library(bigrquery)
+library(DBI)
+library(connections)
+library(jsonlite)
+
+# Parallel Processing
+library(furrr)
+library(tictoc)
+
+# Core
+library(tidyverse)
+library(tidyquant)
+library(dbplyr)
+library(lubridate)
+library(plotly)
+```
+
+## 2.0 Connection 
+
+```{r}
+# Connect to BigQuery 
+bigrquery::bq_auth() # This will use your Google Account to setup billing info. There will be zero cost to run this analysis. 
+
+con <- dbConnect(
+    bigrquery::bigquery(),
+    project = "bigquery-public-data",
+    dataset = "google_analytics_sample",
+    billing = "YOUR PROJECT ID HERE"
+)
+
+con
+```
+
+```{r}
+# View the Connection in Connections Pane
+connection_view(con)
+```
+
+## 3.0 Data Exploration
+
+### 3.1 Inspect the BigQuery Google Analytics Tables & Table Structure
+
+```{r}
+# List the tables
+dbListTables(con) %>% length()
+```
+
+```{r, error=TRUE}
+# Show the error - file size too large
+ga_sessions_20160801 <- tbl(con, "ga_sessions_20160801") %>% collect()
+```
+
+```{r}
+# Check out data format - Nested List Structure
+# - Similar to NoSQL
+tbl(con, "ga_sessions_20160801") %>% glimpse()
+```
+
+### 3.2 View as JSON
+
+```{r}
+# JSON
+# - Take a look at "totals" list column
+# - Each visitor session has 
+totals_tbl <- tbl(con, "ga_sessions_20160801") %>%
+    head(1) %>%
+    select(visitId, totals) %>%
+    collect()
+```
+
+```{r}
+totals_tbl
+```
+
+
+
+```{r}
+# View as JSON
+totals_tbl %>% toJSON() %>% prettify()
+```
+
+
+### 3.3 View as Nested Tibble
+
+```{r}
+# Tibble - Can also inspect as a nested tibble
+# - Filter to get session info first visitID == 1470117657
+hits_tbl <- tbl(con, "ga_sessions_20160801") %>%
+    filter(visitId == 1470117657) %>%
+    select(visitId, hits) %>%
+    collect() 
+```
+
+```{r}
+# VisitId == 1470117657
+hits_tbl
+```
+
+
+```{r}
+# Drill into hits column for visitID == 1470117657
+hits_tbl %>% pluck("hits", 1)
+```
+
+```{r}
+# Drill into hits > pages for visitID == 1470117657
+hits_tbl %>% 
+    pluck("hits", 1, "page") %>% 
+    toJSON() %>% 
+    prettify() %>%
+    fromJSON() %>% 
+    unnest(cols = pagePath:pagePathLevel4)
+```
+
+
+## 4.0 Iterating with BigQuery
+
+### Question 1 - How many unique visitors per day? 
+
+#### Method 1 - Sequential Iteration with `map()` Functions. 
+
+- Pros - Can utilize `dplyr`
+- Cons - Takes 35 seconds to count unique visits for 10-days.
+
+```{r, eval=FALSE}
+# Iterate through each table sequentially
+tic()
+dbListTables(con) %>%
+    
+    # First 10 only 
+    .[1:10] %>%
+    
+    # Collect counts
+    map_dfr(.f = function(x) {
+        tbl(con, x) %>%
+            distinct(fullVisitorId) %>%
+            count() %>%
+            collect()
+    })
+toc()
+```
+
+#### Method 2 - Process in Parallel with `furrr`
+
+- Pros - Can utilize `dplyr`
+- Cons - Takes __6 seconds__ to count unique visits for 10-days.
+
+```{r, eval=F}
+plan("multisession")
+
+tic()
+dbListTables(con) %>%
+    .[1:10] %>%
+    future_map_dfr(.f = function(x) {
+        tbl(con, x) %>%
+            distinct(fullVisitorId) %>%
+            count() %>%
+            collect()
+    }, .progress = TRUE)
+toc()
+```
+
+#### Method 3 - Use BigQuery Wildcard and Table Suffixes
+
+- Pros: Much more scalable - takes __14 seconds for all 365-days__
+- Cons: For nested data, we need to know __BigQuery Standard SQL__
+
+```{r, eval=F}
+tic()
+unique_visitors_tbl <- tbl(con, "ga_sessions_*") %>%
+    # filter(`_TABLE_SUFFIX` %>% between("20160801", "20160810")) %>%
+    distinct(date, fullVisitorId) %>%
+    count(date) %>%
+    collect() 
+toc()
+
+unique_visitors_tbl
+```
+
+```{r, eval=F}
+# Visualize Unique Visitor Traffic
+g <- unique_visitors_tbl %>%
+    mutate(date = ymd(date)) %>%
+    arrange(desc(date)) %>%
+    ggplot(aes(date, n)) +
+    geom_line() +
+    expand_limits(y = 0) +
+    labs(title = "Daily Active Users - Unique Visitor IDs")
+
+ggplotly(g)
+```
+
+
+## 5.0 Big Query SQL - Introduction
+
+### Question 2 - Total Number of Transactions Over Time 
+
+Need to use BigQuery Standard SQL because of the nested `totals.transactions` list column. 
+
+```{r}
+transactions_by_date_query <- "
+SELECT date, SUM ( totals.transactions ) AS total_transactions
+FROM `bigquery-public-data.google_analytics_sample.ga_sessions_*`
+GROUP BY date
+ORDER BY total_transactions DESC;
+"
+
+transactions_by_date_tbl <- dbGetQuery(con, transactions_by_date_query)
+```
+
+```{r}
+g <- transactions_by_date_tbl %>%
+    mutate(date = ymd(date)) %>%
+    arrange(desc(date)) %>%
+    
+    ggplot(aes(date, total_transactions)) +
+    geom_line() +
+    expand_limits(y = 0) +
+    labs(title = "Transactions Over Time")
+
+ggplotly(g)
+```
+
+### Question 3 - Transactions by Referral / Medium 
+
+```{r}
+traffic_tbl <- tbl(con, "ga_sessions_20160801") %>%
+    filter(visitId == 1470117657) %>%
+    select(visitId, trafficSource) %>%
+    collect()
+```
+
+```{r}
+traffic_tbl %>%
+    pluck("trafficSource") %>%
+    toJSON() %>%
+    fromJSON() %>%
+    unnest(referralPath:campaignCode)
+```
+
+```{r}
+transactions_by_medium_query <- "
+SELECT date, trafficSource.medium, SUM ( totals.transactions ) AS total_transactions
+FROM `bigquery-public-data.google_analytics_sample.ga_sessions_*`
+GROUP BY date, medium
+ORDER BY total_transactions DESC;
+"
+
+transactions_by_medium_tbl <- dbGetQuery(con, transactions_by_medium_query)
+```
+
+```{r}
+g <- transactions_by_medium_tbl %>%
+    mutate(date = ymd(date)) %>%
+    
+    ggplot(aes(date, total_transactions, color = medium, group = medium)) +
+    geom_line()
+
+ggplotly(g)
+```
+
+## 6.0 BigQuery SQL - Unnesting & Joining Multiple Queries in BigQuery 
+
+### Question 4 - Which Page Paths Leading to Transactions?
+
+```{r}
+page_path_query <- "
+SELECT fullVisitorId, visitId, visitNumber, h.hitNumber AS hitNumber, h.page.pagePath AS pagePath
+FROM `bigquery-public-data.google_analytics_sample.ga_sessions_*`
+
+LEFT JOIN UNNEST(hits) AS h
+
+WHERE _TABLE_SUFFIX BETWEEN '20170701' AND '20170731'
+AND h.type='PAGE'
+
+ORDER BY fullVisitorId, visitId, visitNumber, hitNumber
+"
+
+page_path_tbl <- dbGetQuery(con, page_path_query)
+```
+
+```{r}
+page_path_tbl
+```
+
+
+```{r}
+transaction_visitId_query <- "
+SELECT visitId, SUM( totals.transactionRevenue ) AS total_transaction_revenue
+FROM `bigquery-public-data.google_analytics_sample.ga_sessions_*`
+WHERE _TABLE_SUFFIX BETWEEN '20170701' AND '20170731'
+GROUP BY visitId
+ORDER BY total_transaction_revenue DESC
+"
+
+transaction_visitId_tbl <- dbGetQuery(con, transaction_visitId_query)
+
+```
+
+```{r}
+transaction_visitId_tbl
+```
+
+
+```{r}
+join_query <- str_glue(
+"
+SELECT * FROM ( {page_path_query} )
+LEFT JOIN ( {transaction_visitId_query} ) 
+USING (visitId)
+"
+) 
+
+join_query
+```
+
+```{r}
+page_path_transactions_joined_tbl <- dbGetQuery(con, join_query)
+```
+
+```{r}
+page_path_transactions_joined_tbl %>%
+    select(total_transaction_revenue, everything()) %>%
+    arrange(desc(total_transaction_revenue)) %>%
+    mutate(total_transaction_revenue = total_transaction_revenue * 1e-6) 
+```
+
+
+```{r}
+successful_transactions_tbl <- page_path_transactions_joined_tbl %>%
+    filter(total_transaction_revenue > 0) %>%
+    select(total_transaction_revenue, everything()) %>%
+    mutate(total_transaction_revenue = total_transaction_revenue * 1e-6) 
+
+successful_transactions_tbl
+```
+
+```{r}
+success_page_path_summary_tbl <- successful_transactions_tbl %>%
+    group_by(pagePath) %>%
+    summarize(
+        n = n(),
+        median_hit_number   = median(hitNumber),
+        median_visit_number = median(visitNumber)
+    ) %>%
+    ungroup() %>%
+    arrange(desc(n))
+
+success_page_path_summary_tbl
+```
+
+```{r}
+g <- success_page_path_summary_tbl %>%
+    slice(1:10) %>%
+    arrange(median_hit_number) %>%
+    mutate(pagePath = as_factor(pagePath)) %>%
+    
+    ggplot(aes(pagePath, median_hit_number, fill = n)) +
+    geom_col() +
+    coord_flip() +
+    theme_tq() +
+    scale_fill_viridis_c() +
+    labs(
+        title = "Transaction Page Path Funnel",
+        fill  = "Success Count"
+    )
+
+ggplotly(g)
+```
+
+```{r}
+g <- success_page_path_summary_tbl %>%
+    slice(1:10) %>%
+    arrange(median_hit_number) %>%
+    mutate(pagePath = as_factor(pagePath)) %>%
+    
+    ggplot(aes(pagePath, n, fill = n)) +
+    geom_col() +
+    coord_flip() +
+    theme_tq() +
+    scale_fill_viridis_c() +
+    labs(
+        title = "Most Important Step in Funnel",
+        fill  = "Success Count"
+    )
+
+ggplotly(g)
+```
+
