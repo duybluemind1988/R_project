@@ -78,6 +78,7 @@ dbListTables(con) %>% length()
 ```{r, error=TRUE}
 # Show the error - file size too large
 ga_sessions_20160801 <- tbl(con, "ga_sessions_20160801") %>% collect()
+ga_sessions_20160801
 ```
 
 ```{r}

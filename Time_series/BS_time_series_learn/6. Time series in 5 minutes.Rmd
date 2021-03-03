@@ -1,0 +1,215 @@
+---
+title: "6.Series Time series 5 minutes"
+output: html_document
+---
+# Time Series in 5-Minutes, Part 1: Data Wrangling and Rolling Calculations
+```{r}
+library(tidyverse)
+library(tidyquant) 
+library(timetk)
+```
+
+
+```{r}
+FANG
+```
+
+
+```{r}
+FANG %>%
+  group_by(symbol) %>%
+  plot_time_series(date, adjusted, .facet_ncol = 2, .interactive = FALSE)
+```
+
+
+```{r}
+FANG %>%
+  group_by(symbol) %>%
+  plot_time_series(date, volume, .facet_ncol = 2, .interactive = FALSE)
+```
+```{r}
+FANG
+```
+
+
+```{r}
+FANG %>%
+  group_by(symbol) %>%
+  summarise_by_time(
+    date, .by = "quarter",
+    volume = SUM(volume)
+  )
+```
+
+
+```{r}
+FANG %>%
+  group_by(symbol) %>%
+  summarise_by_time(
+    date, .by = "quarter",
+    volume = SUM(volume)
+  ) %>%
+  plot_time_series(date, volume, .facet_ncol = 2, .interactive = FALSE, .y_intercept = 0)
+```
+
+Objective: Get the first value in each month
+
+We can use FIRST() to get the first value, which has the effect of reducing the data (i.e. smoothing). We could use AVERAGE() or MEDIAN().
+Use the summarization by time: .by = "month" to aggregate by month.
+
+```{r}
+FANG %>%
+  group_by(symbol) %>%
+  summarise_by_time(
+    date, .by = "month",
+    adjusted = FIRST(adjusted)
+  ) %>%
+  plot_time_series(date, adjusted, .facet_ncol = 2, .interactive = FALSE)
+```
+
+Time Range Filtering
+Objective: Get the adjusted stock prices in the 3rd quarter of 2013.
+
+.start_date = "2013-09": Converts to “2013-09-01
+.end_date = "2013": Converts to “2013-12-31
+A more advanced example of filtering using %+time and %-time is shown in “Padding Data: Low to High Frequency”.
+```{r}
+FANG %>%
+  group_by(symbol) %>%
+  filter_by_time(date, "2013-09", "2013") %>%
+  plot_time_series(date, adjusted, .facet_ncol = 2, .interactive = FALSE)
+
+```
+
+Fill in Gaps
+```{r}
+FANG %>%
+  group_by(symbol) %>%
+  pad_by_time(date, .by = "auto") # Guesses .by = "day"
+```
+
+Low to High Frequency
+```{r}
+FANG %>%
+  group_by(symbol) %>%
+  pad_by_time(date, .by = "hour") %>%
+  mutate_at(vars(open:adjusted), .funs = ts_impute_vec, period = 1) %>%
+  filter_by_time(date, "start", FIRST(date) %+time% "1 month") %>%
+  plot_time_series(date, adjusted, .facet_ncol = 2, .interactive = FALSE) 
+```
+
+Sliding (Rolling) Calculations
+```{r}
+# Make the rolling function
+roll_avg_30 <- slidify(.f = AVERAGE, .period = 30, .align = "center", .partial = TRUE)
+roll_avg_30
+```
+
+
+```{r}
+# Apply the rolling function
+FANG %>%
+  select(symbol, date, adjusted) %>%
+  group_by(symbol) %>%
+  # Apply Sliding Function
+  mutate(rolling_avg_30 = roll_avg_30(adjusted)) %>%
+  pivot_longer(cols = c(adjusted, rolling_avg_30)) %>%
+  plot_time_series(date, value, .color_var = name,
+                   .facet_ncol = 2, .smooth = FALSE, 
+                   .interactive = FALSE)
+```
+
+
+```{r}
+FANG %>%
+  select(symbol, date, adjusted) %>%
+  group_by(symbol) %>%
+  # Apply roll apply Function
+  mutate(rolling_avg_30 = slidify_vec(adjusted,  ~ AVERAGE(.), 
+                                      .period = 30, .partial = TRUE))
+```
+
+
+```{r}
+# Rolling regressions are easy to implement using `.unlist = FALSE`
+lm_roll <- slidify(~ lm(..1 ~ ..2 + ..3), .period = 90, 
+                   .unlist = FALSE, .align = "right")
+FANG %>%
+  select(symbol, date, adjusted, volume) %>%
+  group_by(symbol) %>%
+  mutate(numeric_date = as.numeric(date)) %>%
+  # Apply rolling regression
+  mutate(rolling_lm = lm_roll(adjusted, volume, numeric_date)) %>%
+  filter(!is.na(rolling_lm))
+```
+
+# Time Series in 5-Minutes, Part 6: Modeling Time Series Data
+```{r}
+remotes::install_github("business-science/modeltime")
+```
+
+```{r}
+install.packages("modeltime",dependencies = T)
+library(tidymodels)
+library(modeltime)
+library(tidyverse)
+library(lubridate)
+library(timetk)
+# This toggles plots from plotly (interactive) to ggplot (static)
+interactive <- TRUE
+```
+
+```{r}
+m4_monthly
+```
+
+
+```{r}
+summary(m4_monthly)
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
