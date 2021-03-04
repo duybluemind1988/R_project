@@ -288,17 +288,17 @@ test = data[-split, ]
 ## Recipe
 ```{r}
 recipe_obj <- recipe(Attrition ~ ., data = train) %>%
-  #step_rm(EmployeeNumber,StandardHours,Over18,EmployeeCount) %>% 
+  #step_rm(EmployeeNumber,StandardHours,Over18,EmployeeCount) %>%
   #step_string2factor(all_nominal()) %>% # convert character to factor
   #step_integer(Education,EnvironmentSatisfaction) %>% # Ordinal encoder
   #step_num2factor(Education,EnvironmentSatisfaction,JobInvolvement,JobLevel,JobSatisfaction,PerformanceRating,RelationshipSatisfaction,StockOptionLevel,WorkLifeBalance) %>%  # convert number to factor
   step_nzv(all_numeric(), -all_outcomes())  %>% #Remove near-zero variance features like sex, yes/no...
   #step_knnimpute(all_predictors(), neighbors = 6) %>%  # Impute, very slow in large data in train, need step outside
   #step_YeoJohnson(all_numeric(),-all_outcomes()) %>% # Remove skewness
-  
+
   #step_center(all_numeric(), -all_outcomes()) %>% # center, no need for tree method
   #step_scale(all_numeric(), -all_outcomes()) %>% # scale, no need for tree method
-  #step_dummy(all_nominal(), one_hot = TRUE) %>% 
+  #step_dummy(all_nominal(), one_hot = TRUE) %>%
   #step_pca(all_numeric(), -all_outcomes()) #Perform dimension reduction
   prep()
 baked_train <- bake(recipe_obj, new_data = train)
@@ -306,6 +306,9 @@ baked_test <- bake(recipe_obj, new_data = test)
 baked_train
 ```
 
+```{r}
+
+```
 
 ```{r}
 h2o.init()

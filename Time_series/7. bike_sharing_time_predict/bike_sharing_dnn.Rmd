@@ -634,7 +634,7 @@ ggplot(data.frame(residuals = tsforecasts$residuals), aes(residuals)) + geom_his
   checkresiduals(tsforecasts)
 ```
 
-# DNN combine all
+# DNN combine all final
 ```{r}
 library(tidyverse) # metapackage with lots of helpful functions
 library(lubridate)
@@ -716,7 +716,7 @@ baked_test <- bake(prepare, new_data = test)
 head(baked_train)
 ```
 
-# ML model
+## ML model
 ```{r}
 start_time <- lubridate::minute(Sys.time())
 model <- train(count~., data=baked_train, method="gbm", metric="RMSE",verbose=FALSE)

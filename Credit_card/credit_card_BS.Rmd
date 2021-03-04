@@ -604,14 +604,14 @@ confusionMatrix(test$Class, tree.predict,positive="1")
 
 random forest model (VERY LONG, OUT OF RAM , RESTART MANY TIMES)
 ```{r}
-#library(randomForest)
-#set.seed(10)
-#tic()
-#rf.model <- randomForest(Class ~ ., data = train,
-#                         ntree = 2000, nodesize = 20)
-#toc()
-#rf.predict <- predict(rf.model, test)
-#confusionMatrix(test$Class, rf.predict)
+library(randomForest)
+set.seed(10)
+tic()
+rf.model <- randomForest(Class ~ ., data = train,
+                        ntree = 2000, nodesize = 20)
+toc()
+rf.predict <- predict(rf.model, test)
+confusionMatrix(test$Class, rf.predict)
 ```
 
 # XGBOOST WITH parsnip

@@ -1,0 +1,289 @@
+---
+title: "Untitled"
+output: html_document
+---
+https://www.business-science.io/code-tools/2020/09/09/five-minute-time-series-modeling-data.html
+```{r}
+#install.packages("modeltime")
+```
+
+```{r}
+library(tidymodels)
+library(modeltime) 
+library(tidyverse)
+library(lubridate)
+library(timetk)
+# This toggles plots from plotly (interactive) to ggplot (static)
+interactive <- TRUE
+```
+
+```{r}
+m4_monthly
+```
+
+```{r}
+# Data
+m750 <- m4_monthly %>% filter(id == "M750")
+m750
+```
+
+
+```{r}
+m750 %>%
+  plot_time_series(date, value, .interactive = interactive)
+```
+
+
+```{r}
+# Split Data 80/20
+splits <- initial_time_split(m750, prop = 0.9)
+splits
+```
+
+# Model time package 
+```{r}
+# Model 1: auto_arima ----
+model_fit_arima_no_boost <- arima_reg() %>%
+    set_engine(engine = "auto_arima") %>%
+    fit(value ~ date, data = training(splits))
+#> frequency = 12 observations per 1 year
+```
+
+
+```{r}
+# Model 2: arima_boost ----
+model_fit_arima_boosted <- arima_boost(
+    min_n = 2,
+    learn_rate = 0.015
+) %>%
+    set_engine(engine = "auto_arima_xgboost") %>%
+    fit(value ~ date + as.numeric(date) + factor(month(date, label = TRUE), ordered = F),
+        data = training(splits))
+#> frequency = 12 observations per 1 
+```
+```{r}
+# Model 3: ets ----
+model_fit_ets <- exp_smoothing() %>%
+    set_engine(engine = "ets") %>%
+    fit(value ~ date, data = training(splits))
+#> frequency = 12 observations per 1 year
+```
+```{r}
+# Model 4: prophet ----
+model_fit_prophet <- prophet_reg() %>%
+    set_engine(engine = "prophet") %>%
+    fit(value ~ date, data = training(splits))
+#> Disabling weekly seasonality. Run prophet with weekly.seasonality=TRUE to override this.
+#> Disabling daily seasonality. Run prophet with daily.seasonality=TRUE to override this.
+```
+
+## Parsnip
+```{r}
+# Model 5: lm ----
+model_fit_lm <- linear_reg() %>%
+    set_engine("lm") %>%
+    fit(value ~ as.numeric(date) + factor(month(date, label = TRUE), ordered = FALSE),
+        data = training(splits))
+#model_fit_lm
+```
+
+## Workflow
+```{r}
+# Model 6: earth ----
+model_spec_mars <- mars(mode = "regression") %>%
+    set_engine("earth") 
+recipe_spec <- recipe(value ~ date, data = training(splits)) %>%
+    step_date(date, features = "month", ordinal = FALSE) %>%
+    step_mutate(date_num = as.numeric(date)) %>%
+    step_normalize(date_num) %>%
+    step_rm(date)
+  
+wflw_fit_mars <- workflow() %>%
+    add_recipe(recipe_spec) %>%
+    add_model(model_spec_mars) %>%
+    fit(training(splits))
+```
+
+```{r}
+models_tbl <- modeltime_table(
+    model_fit_arima_no_boost,
+    model_fit_arima_boosted,
+    model_fit_ets,
+    model_fit_prophet,
+    model_fit_lm,
+    wflw_fit_mars
+)
+models_tbl
+```
+```{r}
+calibration_tbl <- models_tbl %>%
+    modeltime_calibrate(new_data = testing(splits))
+
+calibration_tbl
+
+```
+
+
+```{r}
+calibration_tbl %>%
+    modeltime_forecast(
+        new_data    = testing(splits),
+        actual_data = m750
+    ) %>%
+    plot_modeltime_forecast(
+      .legend_max_width = 25, # For mobile screens
+      .interactive      = interactive
+    )
+```
+
+
+```{r}
+calibration_tbl %>%
+    modeltime_accuracy() %>%
+    table_modeltime_accuracy(
+        .interactive = interactive
+    )
+```
+
+
+```{r}
+refit_tbl <- calibration_tbl %>%
+    modeltime_refit(data = m750)
+refit_tbl %>%
+    modeltime_forecast(h = "3 years", actual_data = m750) %>%
+    plot_modeltime_forecast(
+      .legend_max_width = 25, # For mobile screens
+      .interactive      = interactive
+    )
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+# Not model time (DNN)
+## ARIMA
+```{r}
+# loading packages
+library(forecast)
+library(Metrics)
+library(xts)
+```
+
+
+```{r}
+data <- training(splits) %>% select(date,value)
+data_xts <- xts(data$value,order.by=data$date)
+#attr(data_xts, 'frequency') <- length(data_xts)/22 # Set the frequency of the xts yearly (in 2 years)
+attr(data_xts, 'frequency') <- 12 # Set the frequency of the xts yearly
+```
+```{r}
+summary(data)
+```
+
+```{r}
+# training model
+model = auto.arima(data_xts)
+# model summary
+#summary(model)
+tsforecasts <- forecast(model, h = 100)
+tsforecasts
+#tsforecasts
+autoplot(tsforecasts)
+```
+
+```{r}
+plot.ts(tsforecasts$residuals) 
+```
+## ETS
+
+```{r}
+fit <- ets(data_xts)
+summary(fit)
+```
+
+
+```{r}
+etsforecasts <- forecast(fit, h = 100)
+etsforecasts
+```
+```{r}
+autoplot(fit)
+autoplot(etsforecasts)
+```
+
+```{r}
+
+```
+
+## Prophet
+```{r}
+#install.packages("prophet")
+# R
+library(prophet)
+```
+```{r}
+data
+```
+
+
+```{r}
+#data
+data_p <- data %>% 
+            rename(
+              ds = date,
+              y = value
+              )
+# Dataframe must have columns 'ds' and 'y' with the dates and values respectively.
+m <- prophet(data_p)
+#m <- prophet(data_p,seasonality.mode = 'multiplicative')
+#m.add_seasonality(period=30.4, components=5, name='monthly')
+m
+```
+```{r}
+#tail(m)
+```
+
+
+```{r}
+future <- make_future_dataframe(m, periods = 365)
+dim(future) # 640 = 275 (m) + 365 day prediction
+head(future)
+tail(future)
+```
+
+```{r}
+forecast <- predict(m, future)
+tail(forecast[c('ds', 'yhat', 'yhat_lower', 'yhat_upper')])
+
+```
+
+
+```{r}
+# R
+plot(m, forecast)
+```
+
+
+```{r}
+prophet_plot_components(m, forecast)
+
+```
+
+
+```{r}
+dyplot.prophet(m, forecast)
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
