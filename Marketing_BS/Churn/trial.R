@@ -1,19 +1,11 @@
-#install.packages("lime")
+install.packages("tensorflow")
+library(tensorflow)
+install_tensorflow()
 
-# Modeling
-library(survival)
-library(parsnip)
-library(broom)
+# You can confirm that the installation succeeded with:
+library(tensorflow)
+tf$constant("Hellow Tensorflow")
+## tf.Tensor(b'Hellow Tensorflow', shape=(), dtype=string)
 
-# Advanced ML
-library(h2o) 
-h2o.init()
-library(lime)
-
-# EDA
-library(correlationfunnel)
-
-# Core & Data Viz
-library(tidyverse)
-library(plotly) 
-library(tidyquant)
+reticulate::conda_version()
+sessionInfo()

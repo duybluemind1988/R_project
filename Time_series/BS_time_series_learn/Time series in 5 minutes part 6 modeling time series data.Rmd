@@ -4,7 +4,7 @@ output: html_document
 ---
 https://www.business-science.io/code-tools/2020/09/09/five-minute-time-series-modeling-data.html
 ```{r}
-#install.packages("modeltime")
+#install.packages("modeltime",dependencies = TRUE)
 ```
 
 ```{r}
@@ -16,7 +16,16 @@ library(timetk)
 # This toggles plots from plotly (interactive) to ggplot (static)
 interactive <- TRUE
 ```
+The fourth M Competition. M4, started on 1 January 2018 and ended in 31 May 2018. The competition included 100,000 time series datasets. This dataset includes a sample of 4 monthly time series from the competition.
 
+Format
+A tibble: 9,743 x 3
+
+- id Factor. Unique series identifier (4 total)
+
+- date Date. Timestamp information. Monthly format.
+
+- value Numeric. Value at the corresponding timestamp
 ```{r}
 m4_monthly
 ```
@@ -41,6 +50,7 @@ splits
 ```
 
 # Model time package 
+# Model 1: auto_arima ----
 ```{r}
 # Model 1: auto_arima ----
 model_fit_arima_no_boost <- arima_reg() %>%
@@ -48,7 +58,7 @@ model_fit_arima_no_boost <- arima_reg() %>%
     fit(value ~ date, data = training(splits))
 #> frequency = 12 observations per 1 year
 ```
-
+# Model 2: arima_boost ----
 
 ```{r}
 # Model 2: arima_boost ----
@@ -61,6 +71,7 @@ model_fit_arima_boosted <- arima_boost(
         data = training(splits))
 #> frequency = 12 observations per 1 
 ```
+# Model 3: ets ----
 ```{r}
 # Model 3: ets ----
 model_fit_ets <- exp_smoothing() %>%
@@ -68,6 +79,8 @@ model_fit_ets <- exp_smoothing() %>%
     fit(value ~ date, data = training(splits))
 #> frequency = 12 observations per 1 year
 ```
+
+# Model 4: prophet ----
 ```{r}
 # Model 4: prophet ----
 model_fit_prophet <- prophet_reg() %>%
@@ -77,7 +90,8 @@ model_fit_prophet <- prophet_reg() %>%
 #> Disabling daily seasonality. Run prophet with daily.seasonality=TRUE to override this.
 ```
 
-## Parsnip
+# Parsnip
+# Model 5: lm ----
 ```{r}
 # Model 5: lm ----
 model_fit_lm <- linear_reg() %>%
@@ -86,8 +100,7 @@ model_fit_lm <- linear_reg() %>%
         data = training(splits))
 #model_fit_lm
 ```
-
-## Workflow
+# Model 6: earth With workflow ----
 ```{r}
 # Model 6: earth ----
 model_spec_mars <- mars(mode = "regression") %>%
@@ -103,6 +116,7 @@ wflw_fit_mars <- workflow() %>%
     add_model(model_spec_mars) %>%
     fit(training(splits))
 ```
+# Compare all models
 
 ```{r}
 models_tbl <- modeltime_table(

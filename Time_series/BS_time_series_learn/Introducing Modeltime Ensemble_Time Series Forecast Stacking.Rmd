@@ -1,0 +1,415 @@
+---
+title: "Untitled"
+output: html_document
+---
+https://www.business-science.io/code-tools/2020/10/13/introducing-modeltime-ensemble.html
+```{r}
+#install.packages("modeltime.ensemble",dependencies = TRUE)
+```
+
+# Get Your Data
+```{r}
+# Time Series Modeling and Machine Learning
+library(tidymodels)
+library(modeltime)
+library(modeltime.ensemble)
+
+# Time Series and Data Wrangling
+library(timetk)
+library(tidyverse)
+```
+
+
+```{r}
+walmart_sales_weekly 
+```
+
+We’ll simplify the data set to a univariate time series with columns, “Date” and “Weekly_Sales” from Store 1 and Department 1.
+```{r}
+store_1_1_tbl <- walmart_sales_weekly %>%
+    filter(id == "1_1") %>%
+    select(Date, Weekly_Sales)
+
+store_1_1_tbl
+```
+
+
+```{r}
+store_1_1_tbl %>%
+    plot_time_series(Date, Weekly_Sales, .smooth_period = "3 months", .interactive = FALSE)
+```
+# Seasonality Evaluation
+
+```{r}
+store_1_1_tbl %>%
+    plot_seasonal_diagnostics(
+        Date, Weekly_Sales,
+        .feature_set = c("week", "month.lbl"),
+        .interactive = FALSE
+    )
+```
+We can see that certain weeks and months of the year have higher sales. These anomalies are likely due to events. The Kaggle Competition informed competitors that Super Bowl, Labor Day, Thanksgiving, and Christmas were special holidays. To approximate the events, week number and month may be good features. Let’s come back to this when we preprocess our data.
+
+Give the objective to forecast 12 weeks of product sales, we use time_series_split() to make a train/test set consisting of 12-weeks of test data (hold out) and the rest for training.
+
+Setting assess = "12 weeks" tells the function to use the last 12-weeks of data as the testing set.
+Setting cumulative = TRUE tells the sampling to use all of the prior data as the training set.
+
+# Train / Test
+
+```{r}
+dim(store_1_1_tbl)
+splits <- store_1_1_tbl %>%
+    time_series_split(assess = "12 weeks", cumulative = TRUE)
+splits
+```
+Next, visualize the train/test split.
+
+tk_time_series_cv_plan(): Converts the splits object to a data frame
+plot_time_series_cv_plan(): Plots the time series sampling data using the “date” and “value” columns.
+
+```{r}
+splits %>%
+    tk_time_series_cv_plan() %>%
+    plot_time_series_cv_plan(Date, Weekly_Sales, .interactive = FALSE)
+```
+
+# Feature Engineering
+
+We’ll make a number of calendar features using recipes. Most of the heavy lifting is done by timetk::step_timeseries_signature(), which generates a series of common time series features. We remove the ones that won’t help. After dummying we have 74 total columns, 72 of which are engineered calendar features.
+```{r}
+recipe_spec <- recipe(Weekly_Sales ~ Date, store_1_1_tbl) %>%
+    step_timeseries_signature(Date) %>%
+    step_rm(matches("(iso$)|(xts$)|(day)|(hour)|(min)|(sec)|(am.pm)")) %>%
+    step_mutate(Date_week = factor(Date_week, ordered = TRUE)) %>%
+    step_dummy(all_nominal()) %>%
+    step_normalize(contains("index.num"), Date_year)
+
+recipe_spec %>% prep() %>% juice()
+```
+
+# Make Sub-Models
+##------model need only date and value --
+## Auto ARIMA
+```{r}
+training
+```
+
+```{r}
+## Auto ARIMA
+model_fit_arima <- arima_reg(seasonal_period = 52) %>%
+    set_engine("auto_arima") %>%
+    fit(Weekly_Sales ~ Date, training(splits))
+
+model_fit_arima
+```
+## ETS (DNN add)
+```{r}
+# Model 3: ets ----
+model_fit_ets <- exp_smoothing() %>% #seasonal_period = 24 (not larger than 24)
+    set_engine(engine = "ets") %>%
+    fit(Weekly_Sales ~ Date, data = training(splits))
+#> frequency = 13 observations per 1 quarter (4x3 =12 weeks)
+model_fit_ets
+```
+```{r}
+# ---- MODELTIME TABLE ----
+models_tbl <- modeltime_table(
+    model_fit_ets
+)
+models_tbl %>%
+    modeltime_calibrate(new_data = testing(splits)) %>%
+    modeltime_accuracy()
+```
+## ETS parsnip:
+```{r}
+data <- training(splits) 
+data_xts <- xts(data$Weekly_Sales,order.by=data$Date)
+#attr(data_xts, 'frequency') <- length(data_xts)/22 # Set the frequency of the xts yearly (in 2 years)
+attr(data_xts, 'frequency') <- 12 # Set the frequency of the xts yearly
+```
+```{r}
+fit <- ets(data_xts,allow.multiplicative.trend = TRUE)
+etsforecasts <- forecast(fit, h = length(testing(splits)$Weekly_Sales))
+summary(fit)
+autoplot(fit)
+autoplot(etsforecasts)
+rmse(etsforecasts$mean, testing(splits)$Weekly_Sales)
+```
+```{r}
+
+
+```
+
+## Prophet
+```{r}
+# Model 4: prophet ----
+model_fit_prophet <- prophet_reg(seasonality_weekly = TRUE) %>% # Not good as auto (blank)
+    set_engine(engine = "prophet") %>%
+    fit(Weekly_Sales ~ Date, data = training(splits))
+#> Disabling weekly seasonality. Run prophet with weekly.seasonality=TRUE to override this.
+#> Disabling daily seasonality. Run prophet with daily.seasonality=TRUE to override this.
+```
+
+## ------model need multy feature------
+## Elastic Net
+
+```{r}
+model_spec_glmnet <- linear_reg(penalty = 0.01, mixture = 0.5) %>%
+    set_engine("glmnet")
+```
+Next, make a fitted workflow:
+
+Start with a workflow()
+Add a Model Spec: add_model(model_spec_glmnet)
+Add Preprocessing: add_recipe(recipe_spec %>% step_rm(date)) <– Note that I’m removing the “date” column since Machine Learning algorithms don’t typically know how to deal with date or date-time features
+Fit the Workflow: fit(training(splits))
+
+```{r}
+wflw_fit_glmnet <- workflow() %>%
+    add_model(model_spec_glmnet) %>%
+    add_recipe(recipe_spec %>% step_rm(Date)) %>%
+    fit(training(splits))
+```
+## LM - DNN add
+```{r}
+model_fit_lm <- linear_reg() %>%
+    set_engine("lm")
+wflw_fit_lm <- workflow() %>%
+    add_model(model_fit_lm) %>%
+    add_recipe(recipe_spec %>% step_rm(Date)) %>%
+    fit(training(splits))
+```
+
+## Mars - DNN add
+```{r}
+model_spec_mars <- mars(mode = "regression") %>%
+    set_engine("earth") 
+wflw_fit_mars <- workflow() %>%
+    add_model(model_spec_mars) %>%
+    add_recipe(recipe_spec %>% step_rm(Date)) %>%
+    fit(training(splits))
+```
+
+## XGBoost
+```{r}
+model_spec_xgboost <- boost_tree() %>%
+    set_engine("xgboost")
+
+set.seed(123)
+wflw_fit_xgboost <- workflow() %>%
+    add_model(model_spec_xgboost) %>%
+    add_recipe(recipe_spec %>% step_rm(Date)) %>%
+    fit(training(splits))
+
+wflw_fit_xgboost
+```
+## NNETAR 
+```{r}
+model_spec_nnetar <- nnetar_reg(
+        seasonal_period = 52,
+        non_seasonal_ar = 4,
+        seasonal_ar     = 1
+    ) %>%
+    set_engine("nnetar")
+
+set.seed(123)
+wflw_fit_nnetar <- workflow() %>%
+    add_model(model_spec_nnetar) %>%
+    add_recipe(recipe_spec) %>%
+    fit(training(splits))
+wflw_fit_nnetar
+```
+## Prophet w/ Regressors
+We’ll build a Prophet Model with Regressors. This uses the Facebook Prophet forecasting algorithm and supplies all of the 72 features as regressors to the model. Note - Because this is a Modeltime Model we need to have a Date Feature in the recipe.
+```{r}
+model_spec_prophet <- prophet_reg(
+      seasonality_yearly = TRUE
+    ) %>%
+    set_engine("prophet") 
+
+wflw_fit_prophet <- workflow() %>%
+    add_model(model_spec_prophet) %>%
+    add_recipe(recipe_spec) %>%
+    fit(training(splits))
+```
+
+# Sub-Model Evaluation
+```{r}
+submodels_tbl <- modeltime_table(
+    model_fit_arima,
+    model_fit_ets, # DNN
+    wflw_fit_lm,# DNN
+    wflw_fit_mars,# DNN
+    model_fit_prophet, #DNN
+    wflw_fit_glmnet,
+    wflw_fit_xgboost,
+    wflw_fit_nnetar,
+    wflw_fit_prophet
+)
+
+submodels_tbl
+```
+```{r}
+testing(splits)
+```
+
+
+```{r}
+submodels_tbl %>% 
+    modeltime_accuracy(testing(splits)) %>%
+    table_modeltime_accuracy(.interactive = TRUE)
+```
+```{r}
+submodels_tbl %>%
+    modeltime_forecast(
+        new_data    = testing(splits),
+        actual_data = store_1_1_tbl
+    ) %>%
+    plot_modeltime_forecast(.interactive = TRUE)
+```
+
+# Build Modeltime Ensembles
+
+We’ll make Average, Median, and Weighted Ensembles. If you are interested in making Super Learners (Meta-Learner Models that leverage sub-model predictions), I teach this in my new High-Performance Time Series course.
+
+I’ve made it super simple to build an ensemble from a Modeltime Tables. Here’s how to use ensemble_average().
+
+Start with your Modeltime Table of Sub-Models
+Pipe into ensemble_average(type = "mean")
+You now have a fitted average ensemble.
+
+```{r}
+# Simple Average Ensemble
+ensemble_fit_avg <- submodels_tbl %>%
+    ensemble_average(type = "mean")
+
+ensemble_fit_avg
+```
+
+
+```{r}
+# Simple Median Ensemble
+ensemble_fit_med <- submodels_tbl %>%
+    ensemble_average("median")
+
+# Higher Loading on Better Models (Test RMSE)
+ensemble_fit_wt <- submodels_tbl %>%
+    ensemble_weighted(loadings = c(2, 4, 6, 1, 6))
+```
+
+# Ensemble Evaluation
+
+Let’s see how we did
+We need to have Modeltime Tables that organize our ensembles before we can assess performance. Just use modeltime_table() to organize ensembles just like we did for the Sub-Models.
+```{r}
+ensemble_models_tbl <- modeltime_table(
+    ensemble_fit_avg,
+    ensemble_fit_med,
+    ensemble_fit_wt
+)
+
+ensemble_models_tbl
+```
+Let’s check out the Accuracy Table using modeltime_accuracy() and table_modeltime_accuracy().
+
+From MAE, Ensemble Model ID 1 has 1000 MAE, a 3% improvement over our best submodel (MAE 1031).
+From RMSE, Ensemble Model ID 3 has 1228, which is on par with our best submodel.
+
+```{r}
+ensemble_models_tbl %>%
+    modeltime_accuracy(testing(splits)) %>%
+    table_modeltime_accuracy(.interactive = FALSE)
+```
+
+
+```{r}
+ensemble_models_tbl %>%
+    modeltime_forecast(
+        new_data    = testing(splits),
+        actual_data = store_1_1_tbl
+    ) %>%
+    plot_modeltime_forecast(.interactive = FALSE)
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+submodels_tbl %>%
+    modeltime_forecast(
+        new_data    = testing(splits),
+        actual_data = store_1_1_tbl
+    ) %>%
+    plot_modeltime_forecast(.interactive = FALSE)
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+```{r}
+```
+
