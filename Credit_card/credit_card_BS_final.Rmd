@@ -16,7 +16,7 @@ library(tictoc)
 
 
 ```{r}
-credit_card_tbl <- vroom("/mnt/01D6B57CFBE4DB20/1.Linux/Business science/lab_17_anomaly_detection_h2o/lab_17_anomaly_detection_h2o/data/creditcard.csv")
+credit_card_tbl <- vroom("/mnt/01D6B57CFBE4DB20/1.Linux/Data/creditcard.csv")
 credit_card_tbl
 ```
 
@@ -94,11 +94,15 @@ h2o.hist(predictions[,"mean_length"])
 
 prob: Specify a list of probabilities with values in the range [0,1]. By default, the following probabilities are returned:
 ```{r}
+class(predictions)
+```
+
+```{r}
  h2o.quantile(predictions)
 ```
 Ti le fraud: <0.2 %
 Neu chon mean_lengthQuantiles thi phai chon thieu so tuc la duoi 1% --> < 5.64
-Neu chon predictQuantiles thi phai chon thieu so tuc la tren 99% --> > 0.3325
+Neu chon predictQuantiles thi phai chon da so tuc la tren 99% --> > 0.3325
 ```{r}
 quantile <- h2o.quantile(predictions, probs = 0.99)
 quantile
@@ -144,7 +148,7 @@ predictions_tbl %>% conf_mat(class, outlier)
 
 ```{r}
 library(caret)     # for model packages
-caret::confusionMatrix(predictions_tbl$outlier,predictions_tbl$class,positive="1")
+caret::confusionMatrix(predictions_tbl$outlier,predictions_tbl$class,positive="1",mode="prec_recall")
 ```
 
 ```{r}
@@ -314,15 +318,16 @@ library(h2o)
 library(tidyverse)
 library(tidyquant)
 library(yardstick) # Use devtools::install_github("tidymodels/yardstick")
+library(caret)
 library(vroom)
 library(plotly)
 
 
-credit_card_tbl <- vroom("/mnt/01D6B57CFBE4DB20/1.Linux/Business science/lab_17_anomaly_detection_h2o/lab_17_anomaly_detection_h2o/data/creditcard.csv")
+credit_card_tbl <- vroom("/mnt/01D6B57CFBE4DB20/1.Linux/Data/creditcard.csv")
 credit_card_tbl
 ```
 
-# 1. Supervised model (H2O XGBOOST)
+# 1. Unsupervised model (H2O Isolation Forest)
 ```{r}
 #credit_card_tbl
 credit_card_tbl$Class <-as.factor(credit_card_tbl$Class)
@@ -333,6 +338,10 @@ train = credit_card_tbl[split, ]
 test = credit_card_tbl[-split, ]
 dim(train)
 dim(test)
+```
+```{r}
+library(h2o)
+h2o.init()
 ```
 
 ```{r}
@@ -346,40 +355,8 @@ n_features <- length(setdiff(names(train), "Class"))
 predictors <- setdiff(colnames(train), response)
 ```
 
-
 ```{r}
-tic()
-h2o_xgboost <- h2o.xgboost(
-    x = predictors, 
-    y = response,
-    training_frame = train_h2o, 
-    seed = 123
-)
-end_time <- Sys.time()
-h2o_xgboost
-#pred <-h2o.predict(h2o_xgboost, newdata = test_h2o)
-toc() # 45 s
-```
-
-```{r}
-# Check model performance in test set
-h2o.performance(h2o_xgboost, newdata = test_h2o) # mcc 0.84
-```
-
-```{r}
-pred <-h2o.predict(h2o_xgboost, newdata = test_h2o)
-pred$Class <- test_h2o$Class
-pred_tbl <- as_tibble(pred)
-pred_tbl
-```
-
-```{r}
-#XGBOOST
-caret::confusionMatrix(pred_tbl$predict,pred_tbl$Class,positive="1")
-```
-
-# 2. Unsupervised model (H2O Isolation Forest)
-```{r}
+library(tictoc)
 tic()
 isoforest <- h2o.isolationForest(
     training_frame = train_h2o,
@@ -392,6 +369,7 @@ toc() #18 s
 
 
 Evaluate on training set
+
 Choose threshold:
 ```{r}
 # 3.0 PREDICTIONS
@@ -405,16 +383,19 @@ predictions
 h2o.hist(predictions[,"predict"])
 h2o.hist(predictions[,"mean_length"])
 ```
+prob: Specify a list of probabilities with values in the range [0,1]. By default, the following probabilities are returned:
+```{r}
+ h2o.quantile(predictions)
+```
+Ti le fraud: <0.2 %
+Neu chon mean_lengthQuantiles thi phai chon thieu so tuc la duoi 1% --> < 5.64
+Neu chon predictQuantiles thi phai chon da so tuc la tren 99% --> > 0.3325
 
 ```{r}
-
 quantile <- h2o.quantile(predictions, probs = 0.99)
 quantile
 thresh <- quantile["predictQuantiles"]
 thresh
-```
-```{r}
-train_h2o$Class
 ```
 
 Predict on this threshold
@@ -430,8 +411,20 @@ predictions
 predictions_tbl <- as_tibble(predictions) %>%
     mutate(class = as.factor(class)) %>%
     mutate(outlier = as.factor(outlier))
-caret::confusionMatrix(predictions_tbl$outlier,predictions_tbl$class,positive="1")
+caret::confusionMatrix(predictions_tbl$outlier,predictions_tbl$class,positive="1",mode="prec_recall")
 ```
+```{r}
+quantile <- h2o.quantile(predictions, probs = 0.99)
+thresh <- quantile["predictQuantiles"]
+predictions$outlier <- predictions$predict > thresh %>% as.numeric()
+#predictions
+predictions$class <- train_h2o$Class
+predictions_tbl <- as_tibble(predictions) %>%
+    mutate(class = as.factor(class)) %>%
+    mutate(outlier = as.factor(outlier))
+caret::confusionMatrix(predictions_tbl$outlier,predictions_tbl$class,positive="1",mode="prec_recall")
+```
+
 Evaluation on test set:
 
 ```{r}
@@ -446,10 +439,10 @@ predictions
 predictions_tbl <- as_tibble(predictions) %>%
     mutate(class = as.factor(class)) %>%
     mutate(outlier = as.factor(outlier))
-caret::confusionMatrix(predictions_tbl$outlier,predictions_tbl$class,positive="1")
+caret::confusionMatrix(predictions_tbl$outlier,predictions_tbl$class,positive="1",mode="prec_recall")
 ```
 
-# 3 Other ML Method from KAGGLE
+# 2 Supervised learning
 https://www.kaggle.com/nschneider/gbm-vs-xgboost-vs-lightgbm
 ```{r}
 #install.packages("microbenchmark")
@@ -463,6 +456,7 @@ library(tictoc)
 
 ```{r}
 #credit_card_tbl
+response <- "Class"
 credit_card_tbl$Class <-as.factor(credit_card_tbl$Class)
 # Create training (80%) and test (20%) sets for the 
 set.seed(430)
@@ -473,80 +467,155 @@ dim(train)
 dim(test)
 table(train$Class)
 table(test$Class)
+
+# convert training data to h2o object
+train_h2o <- as.h2o(train)
+#valid_h2o <- as.h2o(baked_valid)
+test_h2o <- as.h2o(test)
+# set the predictor names
+predictors <- setdiff(colnames(train), response)
 ```
-XGBOOST (not sucessful)
+## Light GBM with no validadtion data
 ```{r}
-#install.packages("xgboost")
-library(xgboost, quietly=TRUE)
-xgb.data.train <- xgb.DMatrix(as.matrix(train[, colnames(train) != "Class"]), label = train$Class)
-xgb.data.test <- xgb.DMatrix(as.matrix(test[, colnames(test) != "Class"]), label = test$Class)
-xgb.data.train
-xgb.data.test
-```
-
-
-```{r}
-# Get the time to train the xgboost model
-
-xgb.model <- xgb.train(data = xgb.data.train
-	, params = list(objective = "binary:logistic"
-		, eta = 0.1
-		, max.depth = 3
-		, min_child_weight = 100
-		, subsample = 1
-		, colsample_bytree = 1
-		, nthread = 3
-		, eval_metric = "auc"
-		)
-	, watchlist = list(test = xgb.data.test)
-	, nrounds = 500
-	, early_stopping_rounds = 40
-	, print_every_n = 20
+# Light gbm
+assignment_type <- "Stratified"
+tic()
+h2o_model_lightgbm <- h2o.xgboost(
+    x = predictors, 
+    y = response,
+    training_frame = train_h2o, 
+    #validation_frame = valid_h2o,
+    #fold_assignment = assignment_type,
+    tree_method="hist",
+    grow_policy="lossguide",
+    #nfolds=5,
+    seed = 123
 )
+toc() # 7 s
+test_pred <-h2o.predict(h2o_model_lightgbm, newdata = test_h2o)
+predict <- as.data.frame(test_pred)$predict
+reference <- as.data.frame(test_h2o)[[response]]
+caret::confusionMatrix(predict,reference,positive = "1",mode="prec_recall")
+```
+## GBM
+```{r}
+assignment_type <- "Stratified"
+tic()
+h2o.gbm <- h2o.gbm(
+    x = predictors, 
+    y = response,
+    training_frame = train_h2o, 
+    #validation_frame = valid_h2o,
+    balance_classes = TRUE,
+    #fold_assignment = assignment_type,
+    #ntrees = 1000,
+    #booster = "dart",
+    #normalize_type = "tree",
+    #nfolds=5,
+    seed = 123
+)
+toc() # 7 s
+test_pred <-h2o.predict(h2o.gbm, newdata = test_h2o)
+predict <- as.data.frame(test_pred)$predict
+reference <- as.data.frame(test_h2o)[[response]]
+caret::confusionMatrix(predict,reference,positive = "1",mode="prec_recall")
+```
+## XGBOOST
+```{r}
+
+assignment_type <- "Stratified"
+tic()
+h2o_model_lightgbm <- h2o.xgboost(
+    x = predictors, 
+    y = response,
+    training_frame = train_h2o, 
+    #validation_frame = valid_h2o,
+    #fold_assignment = assignment_type,
+    #nfolds=5,
+    seed = 123
+)
+toc() # 7 s
+test_pred <-h2o.predict(h2o_model_lightgbm, newdata = test_h2o)
+predict <- as.data.frame(test_pred)$predict
+reference <- as.data.frame(test_h2o)[[response]]
+caret::confusionMatrix(predict,reference,positive = "1",mode="prec_recall")
+```
+## Random forest
+Co tiem nang rat tot, chi chay vai giay ma do chinh xac > GBM
+```{r}
+assignment_type <- "Stratified"
+tic()
+h2o_model_rf <- h2o.randomForest(
+    x = predictors, 
+    y = response,
+    training_frame = train_h2o, 
+    #validation_frame = valid_h2o,
+    balance_classes = TRUE,
+    ntrees = 500,
+    #fold_assignment = assignment_type,
+    #nfolds=5,
+    seed = 123
+)
+toc() # 420 s
+test_pred <-h2o.predict(h2o_model_rf, newdata = test_h2o)
+predict <- as.data.frame(test_pred)$predict
+reference <- as.data.frame(test_h2o)[[response]]
+caret::confusionMatrix(predict,reference,positive = "1",mode="prec_recall")
 ```
 
-light GBM  (not sucessful)
+## Light GBM with  validadtion data
 ```{r}
 #credit_card_tbl
+response <- "Class"
 credit_card_tbl$Class <-as.factor(credit_card_tbl$Class)
 # Create training (80%) and test (20%) sets for the 
 set.seed(430)
-split = createDataPartition(credit_card_tbl$Class, p =0.8, list = FALSE)
+split = caret::createDataPartition(credit_card_tbl[[response]], p =0.6, list = FALSE)
 train = credit_card_tbl[split, ]
-test = credit_card_tbl[-split, ]
+
+valid_test = credit_card_tbl[-split, ]
+split2 = caret::createDataPartition(valid_test[[response]], p =0.5, list = FALSE)
+valid = valid_test[split2, ]
+test = valid_test[-split2, ]
+
 dim(train)
 dim(test)
 table(train$Class)
 table(test$Class)
+# convert training data to h2o object
+train_h2o <- as.h2o(train)
+valid_h2o <- as.h2o(valid)
+test_h2o <- as.h2o(test)
+# set the predictor names
+predictors <- setdiff(colnames(train), response)
 ```
-
 ```{r}
-#install.packages("lightgbm")
-library(lightgbm, quietly=TRUE)
-lgb.train = lgb.Dataset(as.matrix(train[, colnames(train) != "Class"]), label = train$Class)
-lgb.test = lgb.Dataset(as.matrix(test[, colnames(test) != "Class"]), label = test$Class)
+# Light gbm
+assignment_type <- "Stratified"
+tic()
+h2o_model_lightgbm <- h2o.xgboost(
+    x = predictors, 
+    y = response,
+    training_frame = train_h2o, 
+    validation_frame = valid_h2o,
+    #fold_assignment = assignment_type,
+    tree_method="hist",
+    grow_policy="lossguide",
+    #nfolds=5,
+    seed = 123
+)
+toc() # 7 s
+test_pred <-h2o.predict(h2o_model_lightgbm, newdata = test_h2o)
+predict <- as.data.frame(test_pred)$predict
+reference <- as.data.frame(test_h2o)[[response]]
+caret::confusionMatrix(predict,reference,positive = "1",mode="prec_recall")
 ```
 
 
-```{r}
-params.lgb = list(
-	objective = "binary"
-	, metric = "auc"
-	, min_data_in_leaf = 1
-	, min_sum_hessian_in_leaf = 100
-	, feature_fraction = 1
-	, bagging_fraction = 1
-	, bagging_freq = 0
-	)
 
-# Get the time to train the lightGBM model
-lgb.model <- lgb.train(
-    data = lgb.train,
-    valids = list(test = lgb.test),
-		params = params.lgb)
-```
 
-# Try caret method 
+
+# Other caret method 
 https://www.kaggle.com/arathee2/achieving-100-accuracy
 ```{r}
 library(tidyverse)
@@ -555,7 +624,7 @@ library(tictoc)
 ```
 
 
-# logistic regression
+## logistic regression
 ```{r}
 #credit_card_tbl
 credit_card_tbl$Class <-as.factor(credit_card_tbl$Class)
@@ -584,7 +653,7 @@ pred
 ```{r}
 caret::confusionMatrix(factor(pred$pred),test$Class,positive="1")
 ```
-# Decision Tree Model
+## Decision Tree Model
 
 ```{r}
 #install.packages("rpart.plot")
@@ -599,7 +668,7 @@ prp(tree.model)
 
 ```{r}
 tree.predict <- predict(tree.model, test, type = "class")
-confusionMatrix(test$Class, tree.predict,positive="1")
+confusionMatrix(test$Class, tree.predict,positive="1",mode="prec_recall")
 ```
 
 random forest model (VERY LONG, OUT OF RAM , RESTART MANY TIMES)
@@ -611,10 +680,10 @@ rf.model <- randomForest(Class ~ ., data = train,
                         ntree = 2000, nodesize = 20)
 toc()
 rf.predict <- predict(rf.model, test)
-confusionMatrix(test$Class, rf.predict)
+confusionMatrix(test$Class, rf.predict,positive="1",mode="prec_recall")
 ```
 
-# XGBOOST WITH parsnip
+## XGBOOST WITH parsnip
 ```{r}
 # Modeling packages
 #install.packages("parsnip")
@@ -641,10 +710,10 @@ model_xgboost
 
 ```{r}
 predict <- predict(model_xgboost, test)
-confusionMatrix(test$Class, predict$.pred_class,positive="1")
+confusionMatrix(test$Class, predict$.pred_class,positive="1",mode="prec_recall")
 ```
 
-# Ranger with parsnip (VERY LONG)
+## Ranger with parsnip (VERY LONG)
 
 ```{r}
 #install.packages("ranger")
@@ -659,7 +728,7 @@ confusionMatrix(test$Class, predict$.pred_class,positive="1")
 #predict <- predict(model_ranger, test)
 #confusionMatrix(test$Class, predict$.pred_class,positive="1")
 ```
-# Linear discriminant analysis - LDA
+## Linear discriminant analysis - LDA
 
 ```{r}
 #install.packages("e1071") 
@@ -671,6 +740,6 @@ toc() # 4 s
 
 ```{r}
 predict <- predict(model, test)
-confusionMatrix(test$Class, predict$class,positive="1")
+confusionMatrix(test$Class, predict$class,positive="1",mode="prec_recall")
 ```
 
