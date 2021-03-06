@@ -25,10 +25,12 @@ library(plotly)
 library(tidyquant)
 
 #2. Load data and function ----
-path<-'/home/dnn/Data_science/Git/R_project/Churn/WA_Fn-UseC_-Telco-Customer-Churn.csv'
+path<-'/home/dnn/Data_science/Git/R_project/Marketing_BS/Churn/WA_Fn-UseC_-Telco-Customer-Churn.csv'
 # load the model
-model_path <- "/home/dnn/Data_science/Git/R_project/Churn/Shiny/dnn_shiny/GBM_model_R_1613740880034_453"
-recipe_path <- "/home/dnn/Data_science/Git/R_project/Churn/Shiny/dnn_shiny/recipe.Rds"
+model_path <- "/home/dnn/Data_science/Git/R_project/Marketing_BS/Churn/Shiny/dnn_shiny/GBM_model_R_1613740880034_453"
+#model_path <- "/home/dnn/Data_science/Git/R_project/Marketing_BS/Churn/Shiny/dnn_shiny/GBM_model_R_1614996058676_2208"
+recipe_path <- "/home/dnn/Data_science/Git/R_project/Marketing_BS/Churn/Shiny/dnn_shiny/recipe.Rds"
+#recipe_path <- "/home/dnn/Data_science/Git/R_project/Marketing_BS/Churn/Shiny/dnn_shiny/recipe2.Rds"
 
 h2o_model_load <- h2o.loadModel(model_path)
 recipe_load <- readr::read_rds(recipe_path)
@@ -112,7 +114,7 @@ server <- function(input, output, session) {
   })
   
   observeEvent(data(),updateSelectInput(session, "numeric_column", 
-                                        choices=names(data() %>% select_if(is.numeric)),selected="tenure"))
+                                        choices=names(data() %>% select_if(is.numeric)),selected="MonthlyCharges"))
   
   ## Plot Categorical vs. Quantitative
   Categorical_vs_quantitative_plot <- function(data,categorical_col,quantitative_col){
@@ -151,7 +153,7 @@ server <- function(input, output, session) {
                                         choices=names(data() %>% select_if(is.character)),selected="Contract"))
   
   observeEvent(data(),updateSelectInput(session, "numeric_column2", 
-                                        choices=names(data() %>% select_if(is.numeric)),selected="tenure"))
+                                        choices=names(data() %>% select_if(is.numeric)),selected="MonthlyCharges"))
   
   facet_plot <- function(data,categorical_col,quantitative_col,facet_col){
     # plot the distribution using violin and boxplots
@@ -345,6 +347,8 @@ server <- function(input, output, session) {
 
   # Show test row choose all features
   output$test_row_choose_DT <- renderDataTable(test_row_choose())
+  # Show test row choose target
+  output$test_row_choose_DT_target <- renderTable(test_row_choose() %>% select("Churn"))
 
   # Process test row choose
   test_row_choose_process <- reactive ({
@@ -387,4 +391,48 @@ server <- function(input, output, session) {
     p1
 
   })
+  
+  # Strategy to retain customer and upsell:
+  output$strategy_retain_cust <- renderPrint({
+    customer_choose_df<-as.data.frame(test_row_choose_process())
+    
+    if (customer_choose_df$tenure == "bin1"  | customer_choose_df$tenure == "bin2" ){
+      print(paste("--- Current tenure < 2 years:", customer_choose_df$tenure) )
+      print("Strategy for tenure: discount to extend service usage time")
+    } 
+    if ( customer_choose_df$Contract == 'Month-to-month') {
+      print(paste("--- Current contract:", customer_choose_df$Contract) )
+      print("Strategy for contract: Upsell to annual contract")
+    }
+    if ( customer_choose_df$InternetService == 'Fiber optic') {
+      print(paste("--- Current InternetService:", customer_choose_df$InternetService) )
+      print("Strategy for InternetService: Offer tech support and service")
+    }
+    if ( customer_choose_df$InternetService == 'No') {
+      print(paste("--- Current InternetService:", customer_choose_df$InternetService) )
+      print("Strategy for InternetService: Upsell to internet service")
+    }
+    if ( customer_choose_df$MonthlyCharges > 50 ) {
+      print(paste("--- Current MonthlyCharges:", customer_choose_df$MonthlyCharges) )
+      print("Strategy for MonthlyCharges: Offer discount in monthly rate (<50)")
+    }
+    if ( customer_choose_df$PaymentMethod %in% c('Mailed Check', 'Electronic Check') ) {
+      print(paste("--- Current PaymentMethod:", customer_choose_df$PaymentMethod) )
+      print("Strategy for PaymentMethod: Move to credit card or bank transfer")
+    }
+    if ( customer_choose_df$OnlineSecurity == 'No') {
+      print(paste("--- Current OnlineSecurity:", customer_choose_df$OnlineSecurity) )
+      print("Strategy for OnlineSecurity: Upsell online security")
+    }
+    if ( customer_choose_df$DeviceProtection == 'No') {
+      print(paste("--- Current DeviceProtection:", customer_choose_df$DeviceProtection) )
+      print("Strategy for DeviceProtection: Upsell Device Protection")
+    }
+    if ( customer_choose_df$TechSupport == 'No') {
+      print(paste("--- Current TechSupport:", customer_choose_df$TechSupport) )
+      print("Strategy for TechSupport: Upsell Tech Support")
+    }
+  })
+  
+  
 }

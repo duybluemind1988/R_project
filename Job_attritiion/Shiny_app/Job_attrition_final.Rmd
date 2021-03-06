@@ -255,6 +255,7 @@ library(recipes)
 library(caret)     # for model packages
 library(h2o)
 library(tictoc)
+h2o.init()
 ```
 
 ```{r}
@@ -305,15 +306,6 @@ baked_train <- bake(recipe_obj, new_data = train)
 baked_test <- bake(recipe_obj, new_data = test)
 baked_train
 ```
-
-```{r}
-
-```
-
-```{r}
-h2o.init()
-```
-
 Method 1: transform data by recipe
 ```{r}
 # convert training data to h2o object
@@ -325,22 +317,12 @@ response <- "Attrition"
 # set the predictor names
 predictors <- setdiff(colnames(baked_train), response)
 ```
-Method 2: No transform data
-```{r}
-#train <- mutate_if(train, is.character, as.factor)
-#test <- mutate_if(test, is.character, as.factor)
-#train_h2o <- as.h2o(train)
-#test_h2o <- as.h2o(test)
-#response <- "Attrition"
-#n_features <- length(setdiff(names(train), "Attrition"))
-#predictors <- setdiff(colnames(train), response)
-```
 
 ## Base model
 ```{r}
 train_h2o
 ```
-
+## h2o.GBM
 ```{r}
 assignment_type <- "Stratified"
 tic()
@@ -348,20 +330,18 @@ h2o_model_gbm <- h2o.gbm(
     x = predictors, 
     y = response,
     training_frame = train_h2o, 
+    balance_classes = TRUE,
     fold_assignment = assignment_type,
     nfolds=5,
     seed = 123
 )
 toc() # 7 s
-```
-
-
-```{r}
 test_pred <-h2o.predict(h2o_model_gbm, newdata = test_h2o)
 predict <- as.data.frame(test_pred)$predict
 reference <- as.data.frame(test_h2o)$Attrition
 caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
 ```
+## h2o.xgboost
 ```{r}
 assignment_type <- "Stratified"
 tic()
@@ -382,6 +362,7 @@ predict <- as.data.frame(test_pred)$predict
 reference <- as.data.frame(test_h2o)$Attrition
 caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
 ```
+## Light gbm
 ```{r}
 # Light gbm
 assignment_type <- "Stratified"
@@ -402,7 +383,7 @@ predict <- as.data.frame(test_pred)$predict
 reference <- as.data.frame(test_h2o)$Attrition
 caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
 ```
-
+## Random forest (VERY BEST)
 ```{r}
 assignment_type <- "Stratified"
 tic()
@@ -420,482 +401,17 @@ predict <- as.data.frame(test_pred)$predict
 reference <- as.data.frame(test_h2o)$Attrition
 caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
 ```
-## Base model with train, valid, test
-### Split data
-```{r}
-path <- "WA_Fn-UseC_-HR-Employee-Attrition.csv"
-data <- fread(path)
-set.seed(430)
-response="Attrition"
-set.seed(430)
-split = caret::createDataPartition(data[[response]], p =0.6, list = FALSE)
-train = data[split, ]
-
-valid_test = data[-split, ]
-split2 = caret::createDataPartition(valid_test[[response]], p =0.5, list = FALSE)
-valid = valid_test[split2, ]
-test = valid_test[-split2, ]
-
-dim(train)
-dim(valid)
-dim(test)
-prop.table(table(as.data.frame(train[[response]])))
-prop.table(table(as.data.frame(valid[[response]])))
-prop.table(table(as.data.frame(test[[response]])))
-```
-```{r}
-#splits <- h2o.splitFrame(
-#  data = as.h2o(data),
-#  ratios = c(0.6,0.2),   ## only need to specify 2 fractions, the 3rd is implied
-#  destination_frames = c("train.hex", "valid.hex", "test.hex"), seed = 1234
-#)
-#train <- splits[[1]]
-#valid <- splits[[2]]
-#test  <- splits[[3]]
-#prop.table(table(as.data.frame(train$Attrition)))
-#prop.table(table(as.data.frame(valid$Attrition)))
-#prop.table(table(as.data.frame(test$Attrition)))
-```
-
-
-```{r}
-recipe_obj <- recipe(Attrition ~ ., data = train) %>%
-  #step_rm(EmployeeNumber,StandardHours,Over18,EmployeeCount) %>% 
-  #step_string2factor(all_nominal()) %>% # convert character to factor
-  #step_integer(Education,EnvironmentSatisfaction) %>% # Ordinal encoder
-  #step_num2factor(Education,EnvironmentSatisfaction,JobInvolvement,JobLevel,JobSatisfaction,PerformanceRating,RelationshipSatisfaction,StockOptionLevel,WorkLifeBalance) %>%  # convert number to factor
-  step_nzv(all_numeric(), -all_outcomes())  %>% #Remove near-zero variance features like sex, yes/no...
-  #step_knnimpute(all_predictors(), neighbors = 6) %>%  # Impute, very slow in large data in train, need step outside
-  #step_YeoJohnson(all_numeric(),-all_outcomes()) %>% # Remove skewness
-  
-  #step_center(all_numeric(), -all_outcomes()) %>% # center, no need for tree method
-  #step_scale(all_numeric(), -all_outcomes()) %>% # scale, no need for tree method
-  #step_dummy(all_nominal(), one_hot = TRUE) %>% 
-  #step_pca(all_numeric(), -all_outcomes()) #Perform dimension reduction
-  prep()
-baked_train <- bake(recipe_obj, new_data = train)
-baked_valid <- bake(recipe_obj, new_data = valid)
-baked_test <- bake(recipe_obj, new_data = test)
-# convert training data to h2o object
-train_h2o <- as.h2o(baked_train)
-valid_h2o <- as.h2o(baked_valid)
-test_h2o <- as.h2o(baked_test)
-# set the response column to Sale_Price
-response <- "Attrition"
-#n_features <- length(setdiff(names(baked_train), response))
-# set the predictor names
-predictors <- setdiff(colnames(baked_train), response)
-```
-
-### GBM
-```{r}
-assignment_type <- "Stratified"
-tic()
-h2o.gbm <- h2o.gbm(
-    x = predictors, 
-    y = response,
-    training_frame = train_h2o, 
-    validation_frame = valid_h2o,
-    #fold_assignment = assignment_type,
-    #ntrees = 1000,
-    #booster = "dart",
-    #normalize_type = "tree",
-    #nfolds=5,
-    seed = 123
-)
-toc() # 7 s
-test_pred <-h2o.predict(h2o.gbm, newdata = test_h2o)
-predict <- as.data.frame(test_pred)$predict
-reference <- as.data.frame(test_h2o)[[response]]
-caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
-```
-```{r}
-assignment_type <- "Stratified"
-tic()
-h2o.gbm <- h2o.gbm(
-    x = predictors, 
-    y = response,
-    training_frame = train_h2o, 
-    validation_frame = valid_h2o,
-    balance_classes = TRUE,
-    #fold_assignment = assignment_type,
-    #ntrees = 1000,
-    #booster = "dart",
-    #normalize_type = "tree",
-    #nfolds=5,
-    seed = 123
-)
-toc() # 7 s
-test_pred <-h2o.predict(h2o.gbm, newdata = test_h2o)
-predict <- as.data.frame(test_pred)$predict
-reference <- as.data.frame(test_h2o)[[response]]
-caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
-```
-```{r}
-assignment_type <- "Stratified"
-# you can also try "Auto", "Modulo", and "Stratified"
-h2o_gbm <- h2o.gbm(
-  ## standard model parameters
-  x = predictors,
-  y = response,
-  training_frame = train_h2o,
-  #fold_assignment = assignment_type,
-  #nfolds=5,
-  validation_frame = valid_h2o,
-  ## more trees is better if the learning rate is small enough
-  ## here, use "more than enough" trees - we have early stopping
-  ntrees = 1000,
-  ## smaller learning rate is better (this is a good value for most datasets, but see below for annealing)
-  learn_rate=0.02,
-  ## early stopping once the validation AUC doesn't improve by at least 0.01% for 5 consecutive scoring events
-  stopping_rounds = 5, stopping_tolerance = 1e-4, stopping_metric = "AUC",
-  ## sample 80% of rows per tree
-  sample_rate = 0.8,
-  ## sample 80% of columns per split
-  col_sample_rate = 0.8,
-  ## fix a random number generator seed for reproducibility
-  seed = 1234,
-  ## score every 10 trees to make early stopping reproducible (it depends on the scoring interval)
-  #score_tree_interval = 10
-)
-test_pred <-h2o.predict(h2o_gbm, newdata = test_h2o)
-predict <- as.data.frame(test_pred)$predict
-reference <- as.data.frame(test_h2o)[[response]]
-caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
-```
-
-```{r}
-## Depth 10 is usually plenty of depth for most datasets, but you never know
-hyper_params = list( max_depth = seq(1,29,2) )
-#hyper_params = list( max_depth = c(4,6,8,12,16,20) ) ##faster for larger datasets
-grid <- h2o.grid(
-  ## hyper parameters
-  hyper_params = hyper_params,
-  ## full Cartesian hyper-parameter search
-  search_criteria = list(strategy = "Cartesian"),
-  ## which algorithm to run
-  algorithm="gbm",
-  ## identifier for the grid, to later retrieve it
-  grid_id="depth_grid",
-  ## standard model parameters
-  x = predictors,
-  y = response,
-  training_frame = train_h2o,
-  validation_frame = valid_h2o,
-  ## more trees is better if the learning rate is small enough
-  ## here, use "more than enough" trees - we have early stopping
-  ntrees = 10000,
-  ## smaller learning rate is better
-  ## since we have learning_rate_annealing, we can afford to start with a bigger learning rate
-  learn_rate = 0.05,
-  ## learning rate annealing: learning_rate shrinks by 1% after every tree
-  ## (use 1.00 to disable, but then lower the learning_rate)
-  learn_rate_annealing = 0.99,
-  ## sample 80% of rows per tree
-  sample_rate = 0.8,
-  ## sample 80% of columns per split
-  col_sample_rate = 0.8,
-  ## fix a random number generator seed for reproducibility
-  seed = 1234,
-  ## early stopping once the validation AUC doesn't improve by at least 0.01% for 5 consecutive scoring events
-  stopping_rounds = 5,
-  stopping_tolerance = 1e-4,
-  stopping_metric = "AUC",
-  ## score every 10 trees to make early stopping reproducible (it depends on the scoring interval)
-  score_tree_interval = 10
-)
-## by default, display the grid search results sorted by increasing logloss (since this is a classification task)
-grid
-```
-
-### XGBOOST
-```{r}
-assignment_type <- "Stratified"
-tic()
-h2o_model_xgboost <- h2o.xgboost(
-    x = predictors, 
-    y = response,
-    training_frame = train_h2o, 
-    validation_frame = valid_h2o,
-    #fold_assignment = assignment_type,
-    #ntrees = 1000,
-    #booster = "dart",
-    #normalize_type = "tree",
-    #nfolds=5,
-    seed = 123
-)
-toc() # 7 s
-test_pred <-h2o.predict(h2o_model_xgboost, newdata = test_h2o)
-predict <- as.data.frame(test_pred)$predict
-reference <- as.data.frame(test_h2o)[[response]]
-caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
-```
-```{r}
-assignment_type <- "Stratified"
-# you can also try "Auto", "Modulo", and "Stratified"
-h2o_model_xgboost <- h2o.xgboost(
-  ## standard model parameters
-  x = predictors,
-  y = response,
-  training_frame = train_h2o,
-  #fold_assignment = assignment_type,
-  #nfolds=5,
-  validation_frame = valid_h2o,
-  ## more trees is better if the learning rate is small enough
-  ## here, use "more than enough" trees - we have early stopping
-  ntrees = 1000,
-  ## smaller learning rate is better (this is a good value for most datasets, but see below for annealing)
-  learn_rate=0.02,
-  ## early stopping once the validation AUC doesn't improve by at least 0.01% for 5 consecutive scoring events
-  stopping_rounds = 5, stopping_tolerance = 1e-4, stopping_metric = "AUC",
-  ## sample 80% of rows per tree
-  sample_rate = 0.8,
-  ## sample 80% of columns per split
-  col_sample_rate = 0.8,
-  ## fix a random number generator seed for reproducibility
-  seed = 1234,
-  ## score every 10 trees to make early stopping reproducible (it depends on the scoring interval)
-  #score_tree_interval = 10
-)
-test_pred <-h2o.predict(h2o_model_xgboost, newdata = test_h2o)
-predict <- as.data.frame(test_pred)$predict
-reference <- as.data.frame(test_h2o)[[response]]
-caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
-```
-
-### Light GBM
-```{r}
-# Light gbm
-assignment_type <- "Stratified"
-tic()
-h2o_model_lightgbm <- h2o.xgboost(
-    x = predictors, 
-    y = response,
-    training_frame = train_h2o, 
-    validation_frame = valid_h2o,
-    #fold_assignment = assignment_type,
-    tree_method="hist",
-    grow_policy="lossguide",
-    #nfolds=5,
-    seed = 123
-)
-toc() # 7 s
-test_pred <-h2o.predict(h2o_model_lightgbm, newdata = test_h2o)
-predict <- as.data.frame(test_pred)$predict
-reference <- as.data.frame(test_h2o)[[response]]
-caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
-```
-```{r}
-# Light gbm
-assignment_type <- "Stratified"
-tic()
-h2o_model_lightgbm <- h2o.xgboost(
-    x = predictors, 
-    y = response,
-    training_frame = train_h2o, 
-    #validation_frame = valid_h2o,
-    fold_assignment = assignment_type,
-    tree_method="hist",
-    grow_policy="lossguide",
-    nfolds=5,
-    seed = 123
-)
-toc() # 7 s
-test_pred <-h2o.predict(h2o_model_lightgbm, newdata = test_h2o)
-predict <- as.data.frame(test_pred)$predict
-reference <- as.data.frame(test_h2o)[[response]]
-caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
-```
-### Random forest
-```{r}
-assignment_type <- "Stratified"
-tic()
-h2o_model_rf <- h2o.randomForest(
-    x = predictors, 
-    y = response,
-    training_frame = train_h2o, 
-    validation_frame = valid_h2o,
-    #balance_classes = TRUE,
-    #fold_assignment = assignment_type,
-    #nfolds=5,
-    seed = 123
-)
-toc() # 7 s
-test_pred <-h2o.predict(h2o_model_rf, newdata = test_h2o)
-predict <- as.data.frame(test_pred)$predict
-reference <- as.data.frame(test_h2o)[[response]]
-caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
-```
-
-```{r}
-assignment_type <- "Stratified"
-tic()
-h2o_model_rf <- h2o.randomForest(
-    x = predictors, 
-    y = response,
-    training_frame = train_h2o, 
-    validation_frame = valid_h2o,
-    balance_classes = TRUE,
-    #fold_assignment = assignment_type,
-    #nfolds=5,
-    seed = 123
-)
-toc() # 7 s
-test_pred <-h2o.predict(h2o_model_rf, newdata = test_h2o)
-predict <- as.data.frame(test_pred)$predict
-reference <- as.data.frame(test_h2o)[[response]]
-caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
-```
-
-```{r}
-assignment_type <- "Stratified"
-tic()
-h2o_model_rf <- h2o.randomForest(
-    x = predictors, 
-    y = response,
-    training_frame = train_h2o, 
-    validation_frame = valid_h2o,
-    balance_classes = TRUE,
-    ntrees = 1000,
-    #fold_assignment = assignment_type,
-    #nfolds=5,
-    seed = 123
-)
-toc() # 7 s
-test_pred <-h2o.predict(h2o_model_rf, newdata = test_h2o)
-predict <- as.data.frame(test_pred)$predict
-reference <- as.data.frame(test_h2o)[[response]]
-caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
-```
-
-## Try other models tunning
-
-```{r}
-assignment_type <- "Stratified"
-# you can also try "Auto", "Modulo", and "Stratified"
-gbm <- h2o.gbm(
-  ## standard model parameters
-  x = predictors,
-  y = response,
-  training_frame = train_h2o,
-  fold_assignment = assignment_type,
-  nfolds=5,
-  #validation_frame = valid,
-  ## more trees is better if the learning rate is small enough
-  ## here, use "more than enough" trees - we have early stopping
-  ntrees = 10000,
-  ## smaller learning rate is better (this is a good value for most datasets, but see below for annealing)
-  learn_rate=0.01,
-  ## early stopping once the validation AUC doesn't improve by at least 0.01% for 5 consecutive scoring events
-  stopping_rounds = 5, stopping_tolerance = 1e-4, stopping_metric = "logloss",
-  ## sample 80% of rows per tree
-  sample_rate = 0.8,
-  ## sample 80% of columns per split
-  col_sample_rate = 0.8,
-  ## fix a random number generator seed for reproducibility
-  seed = 1234,
-  ## score every 10 trees to make early stopping reproducible (it depends on the scoring interval)
-  score_tree_interval = 10
-)
-test_pred <-h2o.predict(gbm, newdata = test_h2o)
-predict <- as.data.frame(test_pred)$predict
-reference <- as.data.frame(test_h2o)[[response]]
-caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
-```
-
-```{r}
-test_pred <-h2o.predict(gbm, newdata = test_h2o)
-predict <- as.data.frame(test_pred)$predict
-reference <- as.data.frame(test_h2o)$Attrition
-caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
-```
-
-```{r}
-assignment_type <- "Stratified"
-# you can also try "Auto", "Modulo", and "Stratified"
-h2o_rf_tunning <- h2o.randomForest(
-  ## standard model parameters
-  x = predictors,
-  y = response,
-  training_frame = train_h2o,
-  fold_assignment = assignment_type,
-  nfolds=5,
-  #validation_frame = valid,
-  ## more trees is better if the learning rate is small enough
-  ## here, use "more than enough" trees - we have early stopping
-  ntrees = 1000,
-  ## smaller learning rate is better (this is a good value for most datasets, but see below for annealing)
-  #learn_rate=0.01,
-  ## early stopping once the validation AUC doesn't improve by at least 0.01% for 5 consecutive scoring events
-  #stopping_rounds = 5, stopping_tolerance = 1e-4, stopping_metric = "AUC",
-  ## sample 80% of rows per tree
-  #sample_rate = 0.8,
-  ## sample 80% of columns per split
-  #col_sample_rate = 0.8,
-  ## fix a random number generator seed for reproducibility
-  seed = 1234,
-  ## score every 10 trees to make early stopping reproducible (it depends on the scoring interval)
-  #score_tree_interval = 10
-)
-test_pred <-h2o.predict(h2o_rf_tunning, newdata = test_h2o)
-predict <- as.data.frame(test_pred)$predict
-reference <- as.data.frame(test_h2o)[[response]]
-caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
-```
-
-## Auto ML H2O
-
-```{r}
-tic()
-auto_ml <- h2o.automl(
-    x = predictors, 
-    y = response,
-    training_frame = train_h2o,
-    #leaderboard_frame = h2o_validation,
-    project_name = "Attrition",
-    #max_runtime_secs = 300,
-    max_models = 10,
-    seed = 12
-)
-toc()
-```
-
-```{r}
-# Check for the top models
-#top_models <- auto_ml@leaderboard
-#print(top_models)
-model_ids <- as.data.frame(auto_ml@leaderboard$model_id)[,1]
-auto_ml
-```
-
-```{r}
-# Check performance best model auto ML (stacked)
-test_pred <- h2o.predict(auto_ml, test_h2o) 
-reference <- as.data.frame(test_h2o)$Attrition
-predict <- as.data.frame(test_pred)$predict
-caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
-```
-
-```{r}
-# Check performance GBM autoML
-slect_model <- h2o.getModel(model_ids[5])
-test_pred <- h2o.predict(slect_model, test_h2o) 
-reference <- as.data.frame(test_h2o)$Attrition
-predict <- as.data.frame(test_pred)$predict
-caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
-```
-Choose select model because best Recall/F1/balanced accuracy and easy model explanation
 
 # 4. Save model for Shiny app
 
 ```{r}
 # Save recipe
-#write_rds(recipe_obj,"recipe.Rds")
+write_rds(recipe_obj,"recipe.Rds")
 
 #Save model
-#getwd()
-#model_path <- h2o.saveModel(object = slect_model, path = getwd(), force = TRUE)
-#print(model_path)
+getwd()
+model_path <- h2o.saveModel(object = h2o_model_rf, path = getwd(), force = TRUE)
+print(model_path)
 ```
 # 5. Load the model
 ```{r}
@@ -903,7 +419,7 @@ path <- "WA_Fn-UseC_-HR-Employee-Attrition.csv"
 # Load recipe
 recipe_load <- readr::read_rds("/home/dnn/Data_science/Git/R_project/Job_attritiion/Shiny_app/recipe.Rds")
 # Load model
-model_path <- "/home/dnn/Data_science/Git/R_project/Job_attritiion/Shiny_app/GBM_5_AutoML_20210211_204652"
+model_path <- "/home/dnn/Data_science/Git/R_project/Job_attritiion/Shiny_app/DRF_model_R_1614996058676_5057"
 h2o_model_load <- h2o.loadModel(model_path)
 ```
 ```{r}
@@ -952,7 +468,10 @@ h2o.varimp(h2o_model_load)
 ```
 
 ```{r}
-h2o.varimp_plot(h2o_model_load)
+h2o.varimp_plot(h2o_model_load,num_of_features=20)
+```
+```{r}
+str(test_h2o)
 ```
 
 ```{r}
@@ -964,12 +483,30 @@ h2o.shap_summary_plot(h2o_model_load,test_h2o)
 
 
 ```{r}
-h2o.pd_plot(h2o_model_load, test_h2o, column = "OverTime")
-#h2o.pd_plot(h2o_model_load, test_h2o, column = "MonthlyIncome")
-#h2o.pd_plot(h2o_model_load, test_h2o, column = "StockOptionLevel")
-#h2o.pd_plot(h2o_model_load, test_h2o, column = "DistanceFromHome")
-#h2o.pd_plot(h2o_model_load, test_h2o, column = "EnvironmentSatisfaction")
+library(gridExtra)
+p1 <- h2o.pd_plot(h2o_model_load, test_h2o, column = "OverTime")
+p2 <- h2o.pd_plot(h2o_model_load, test_h2o, column = "MonthlyIncome")
+p3 <- h2o.pd_plot(h2o_model_load, test_h2o, column = "JobRole")
+p4 <- h2o.pd_plot(h2o_model_load, test_h2o, column = "DistanceFromHome")
+p5 <- h2o.pd_plot(h2o_model_load, test_h2o, column = "Age")
+p6 <- h2o.pd_plot(h2o_model_load, test_h2o, column = "MonthlyRate")
+grid.arrange(p1, p2,p3,p4,p5,p6,nrow = 3)
 ```
+```{r}
+# h2o.pd_plot(h2o_model_load, test_h2o, column = "OverTime")
+# h2o.pd_plot(h2o_model_load, test_h2o, column = "MonthlyIncome")
+# h2o.pd_plot(h2o_model_load, test_h2o, column = "JobRole")
+# h2o.pd_plot(h2o_model_load, test_h2o, column = "DistanceFromHome")
+# h2o.pd_plot(h2o_model_load, test_h2o, column = "Age")
+# h2o.pd_plot(h2o_model_load, test_h2o, column = "MonthlyRate")
+
+for (name in h2o.varimp(h2o_model_load)$variable){
+  #print(name)
+  print(h2o.pd_plot(h2o_model_load, test_h2o, column = name))
+}
+#h2o.pd_plot(h2o_model_load, test_h2o, column = name) 
+```
+
 ```{r}
 # built-in PDP support in H2O
 h2o.partialPlot(h2o_model_load, data = test_h2o, cols = "MonthlyIncome")
@@ -1027,6 +564,66 @@ explanation
 lime::plot_features(explanation) +
       labs(title = "HR Predictive Analytics: LIME Feature Importance Visualization",
            subtitle = "Hold Out (Test) Set, First 10 Cases Shown")
+```
+
+# 6.2 Suggestion
+```{r}
+customer_choose_df<- as.data.frame(test_h2o[2,])
+customer_choose_df
+```
+```{r}
+h2o.varimp(h2o_model_load)$variable
+```
+
+```{r}
+if (customer_choose_df$OverTime == "Yes" ){
+  print(paste("---Current OverTime", customer_choose_df$OverTime) )
+  print("Strategy for OverTime: Training, increase project resources, expert support...")
+} 
+if ( customer_choose_df$MonthlyIncome < 2000) {
+  print(paste("---Current MonthlyIncome (<2000):", customer_choose_df$MonthlyIncome) )
+  print("Strategy for MonthlyIncome: Promotion or adjustment monthly income")
+}
+if ( customer_choose_df$JobRole == 'Laboratory Technician') {
+  print(paste("---Current JobRole:", customer_choose_df$JobRole) )
+  print("Strategy for JobRole: cross job training, move to another department")
+}
+if ( customer_choose_df$JobRole == 'Sales Executive') {
+  print(paste("---Current JobRole:", customer_choose_df$JobRole) )
+  print("Strategy for JobRole: increase sales bonus, flexible working hours")
+}
+if ( customer_choose_df$DistanceFromHome > 20 ) {
+  print(paste("---Current DistanceFromHome (>20):", customer_choose_df$DistanceFromHome) )
+  print("Strategy for DistanceFromHome: offer company bus or travel fee")
+}
+if ( customer_choose_df$TotalWorkingYears <= 3 ) {
+  print(paste("---Current TotalWorkingYears (<=3):", customer_choose_df$TotalWorkingYears) )
+  print("Strategy for TotalWorkingYears: create new career path to retain employee")
+}
+if ( customer_choose_df$YearsWithCurrManager < 2 ) {
+  print(paste("---Current YearsWithCurrManager: (<2)", customer_choose_df$YearsWithCurrManager) )
+  print("Strategy for YearsWithCurrManager: survey employee satifaction")
+}
+if ( customer_choose_df$EnvironmentSatisfaction < 2 ) {
+  print(paste("---Current EnvironmentSatisfaction: (<2)", customer_choose_df$EnvironmentSatisfaction) )
+  print("Strategy for EnvironmentSatisfaction: change department or manager")
+}
+
+if ( customer_choose_df$JobSatisfaction < 2 ) {
+  print(paste("---Current JobSatisfaction: (<2)", customer_choose_df$JobSatisfaction) )
+  print("Strategy for JobSatisfaction: change Job or manager")
+}
+
+if ( customer_choose_df$JobLevel < 2 ) {
+  print(paste("---Current JobLevel: (<2)", customer_choose_df$JobLevel) )
+  print("Strategy for JobLevel: cross job training, extend job responsible")
+}
+
+if ( customer_choose_df$BusinessTravel == "Travel_Frequently" ) {
+  print(paste("---Current BusinessTravel:", customer_choose_df$BusinessTravel) )
+  print("Strategy for BusinessTravel: change job or decrease travel")
+}
+
 ```
 
 # 7. Create data for predict
@@ -1451,6 +1048,471 @@ p3 <- plot_features(explanation_gbm, ncol = 1) + ggtitle("gbm")
 gridExtra::grid.arrange(p1, p2, p3, nrow = 1)
 ```
 
+## Base model with train, valid, test
+### Split data
+```{r}
+path <- "WA_Fn-UseC_-HR-Employee-Attrition.csv"
+data <- fread(path)
+set.seed(430)
+response="Attrition"
+set.seed(430)
+split = caret::createDataPartition(data[[response]], p =0.6, list = FALSE)
+train = data[split, ]
+
+valid_test = data[-split, ]
+split2 = caret::createDataPartition(valid_test[[response]], p =0.5, list = FALSE)
+valid = valid_test[split2, ]
+test = valid_test[-split2, ]
+
+dim(train)
+dim(valid)
+dim(test)
+prop.table(table(as.data.frame(train[[response]])))
+prop.table(table(as.data.frame(valid[[response]])))
+prop.table(table(as.data.frame(test[[response]])))
+```
+```{r}
+#splits <- h2o.splitFrame(
+#  data = as.h2o(data),
+#  ratios = c(0.6,0.2),   ## only need to specify 2 fractions, the 3rd is implied
+#  destination_frames = c("train.hex", "valid.hex", "test.hex"), seed = 1234
+#)
+#train <- splits[[1]]
+#valid <- splits[[2]]
+#test  <- splits[[3]]
+#prop.table(table(as.data.frame(train$Attrition)))
+#prop.table(table(as.data.frame(valid$Attrition)))
+#prop.table(table(as.data.frame(test$Attrition)))
+```
+
+
+```{r}
+recipe_obj <- recipe(Attrition ~ ., data = train) %>%
+  #step_rm(EmployeeNumber,StandardHours,Over18,EmployeeCount) %>% 
+  #step_string2factor(all_nominal()) %>% # convert character to factor
+  #step_integer(Education,EnvironmentSatisfaction) %>% # Ordinal encoder
+  #step_num2factor(Education,EnvironmentSatisfaction,JobInvolvement,JobLevel,JobSatisfaction,PerformanceRating,RelationshipSatisfaction,StockOptionLevel,WorkLifeBalance) %>%  # convert number to factor
+  step_nzv(all_numeric(), -all_outcomes())  %>% #Remove near-zero variance features like sex, yes/no...
+  #step_knnimpute(all_predictors(), neighbors = 6) %>%  # Impute, very slow in large data in train, need step outside
+  #step_YeoJohnson(all_numeric(),-all_outcomes()) %>% # Remove skewness
+  
+  #step_center(all_numeric(), -all_outcomes()) %>% # center, no need for tree method
+  #step_scale(all_numeric(), -all_outcomes()) %>% # scale, no need for tree method
+  #step_dummy(all_nominal(), one_hot = TRUE) %>% 
+  #step_pca(all_numeric(), -all_outcomes()) #Perform dimension reduction
+  prep()
+baked_train <- bake(recipe_obj, new_data = train)
+baked_valid <- bake(recipe_obj, new_data = valid)
+baked_test <- bake(recipe_obj, new_data = test)
+# convert training data to h2o object
+train_h2o <- as.h2o(baked_train)
+valid_h2o <- as.h2o(baked_valid)
+test_h2o <- as.h2o(baked_test)
+# set the response column to Sale_Price
+response <- "Attrition"
+#n_features <- length(setdiff(names(baked_train), response))
+# set the predictor names
+predictors <- setdiff(colnames(baked_train), response)
+```
+
+### GBM
+```{r}
+assignment_type <- "Stratified"
+tic()
+h2o.gbm <- h2o.gbm(
+    x = predictors, 
+    y = response,
+    training_frame = train_h2o, 
+    validation_frame = valid_h2o,
+    #fold_assignment = assignment_type,
+    #ntrees = 1000,
+    #booster = "dart",
+    #normalize_type = "tree",
+    #nfolds=5,
+    seed = 123
+)
+toc() # 7 s
+test_pred <-h2o.predict(h2o.gbm, newdata = test_h2o)
+predict <- as.data.frame(test_pred)$predict
+reference <- as.data.frame(test_h2o)[[response]]
+caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
+```
+```{r}
+assignment_type <- "Stratified"
+tic()
+h2o.gbm <- h2o.gbm(
+    x = predictors, 
+    y = response,
+    training_frame = train_h2o, 
+    validation_frame = valid_h2o,
+    balance_classes = TRUE,
+    #fold_assignment = assignment_type,
+    #ntrees = 1000,
+    #booster = "dart",
+    #normalize_type = "tree",
+    #nfolds=5,
+    seed = 123
+)
+toc() # 7 s
+test_pred <-h2o.predict(h2o.gbm, newdata = test_h2o)
+predict <- as.data.frame(test_pred)$predict
+reference <- as.data.frame(test_h2o)[[response]]
+caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
+```
+```{r}
+assignment_type <- "Stratified"
+# you can also try "Auto", "Modulo", and "Stratified"
+h2o_gbm <- h2o.gbm(
+  ## standard model parameters
+  x = predictors,
+  y = response,
+  training_frame = train_h2o,
+  #fold_assignment = assignment_type,
+  #nfolds=5,
+  validation_frame = valid_h2o,
+  ## more trees is better if the learning rate is small enough
+  ## here, use "more than enough" trees - we have early stopping
+  ntrees = 1000,
+  ## smaller learning rate is better (this is a good value for most datasets, but see below for annealing)
+  learn_rate=0.02,
+  ## early stopping once the validation AUC doesn't improve by at least 0.01% for 5 consecutive scoring events
+  stopping_rounds = 5, stopping_tolerance = 1e-4, stopping_metric = "AUC",
+  ## sample 80% of rows per tree
+  sample_rate = 0.8,
+  ## sample 80% of columns per split
+  col_sample_rate = 0.8,
+  ## fix a random number generator seed for reproducibility
+  seed = 1234,
+  ## score every 10 trees to make early stopping reproducible (it depends on the scoring interval)
+  #score_tree_interval = 10
+)
+test_pred <-h2o.predict(h2o_gbm, newdata = test_h2o)
+predict <- as.data.frame(test_pred)$predict
+reference <- as.data.frame(test_h2o)[[response]]
+caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
+```
+
+```{r}
+## Depth 10 is usually plenty of depth for most datasets, but you never know
+hyper_params = list( max_depth = seq(1,29,2) )
+#hyper_params = list( max_depth = c(4,6,8,12,16,20) ) ##faster for larger datasets
+grid <- h2o.grid(
+  ## hyper parameters
+  hyper_params = hyper_params,
+  ## full Cartesian hyper-parameter search
+  search_criteria = list(strategy = "Cartesian"),
+  ## which algorithm to run
+  algorithm="gbm",
+  ## identifier for the grid, to later retrieve it
+  grid_id="depth_grid",
+  ## standard model parameters
+  x = predictors,
+  y = response,
+  training_frame = train_h2o,
+  validation_frame = valid_h2o,
+  ## more trees is better if the learning rate is small enough
+  ## here, use "more than enough" trees - we have early stopping
+  ntrees = 10000,
+  ## smaller learning rate is better
+  ## since we have learning_rate_annealing, we can afford to start with a bigger learning rate
+  learn_rate = 0.05,
+  ## learning rate annealing: learning_rate shrinks by 1% after every tree
+  ## (use 1.00 to disable, but then lower the learning_rate)
+  learn_rate_annealing = 0.99,
+  ## sample 80% of rows per tree
+  sample_rate = 0.8,
+  ## sample 80% of columns per split
+  col_sample_rate = 0.8,
+  ## fix a random number generator seed for reproducibility
+  seed = 1234,
+  ## early stopping once the validation AUC doesn't improve by at least 0.01% for 5 consecutive scoring events
+  stopping_rounds = 5,
+  stopping_tolerance = 1e-4,
+  stopping_metric = "AUC",
+  ## score every 10 trees to make early stopping reproducible (it depends on the scoring interval)
+  score_tree_interval = 10
+)
+## by default, display the grid search results sorted by increasing logloss (since this is a classification task)
+grid
+```
+
+### XGBOOST
+```{r}
+assignment_type <- "Stratified"
+tic()
+h2o_model_xgboost <- h2o.xgboost(
+    x = predictors, 
+    y = response,
+    training_frame = train_h2o, 
+    validation_frame = valid_h2o,
+    #fold_assignment = assignment_type,
+    #ntrees = 1000,
+    #booster = "dart",
+    #normalize_type = "tree",
+    #nfolds=5,
+    seed = 123
+)
+toc() # 7 s
+test_pred <-h2o.predict(h2o_model_xgboost, newdata = test_h2o)
+predict <- as.data.frame(test_pred)$predict
+reference <- as.data.frame(test_h2o)[[response]]
+caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
+```
+```{r}
+assignment_type <- "Stratified"
+# you can also try "Auto", "Modulo", and "Stratified"
+h2o_model_xgboost <- h2o.xgboost(
+  ## standard model parameters
+  x = predictors,
+  y = response,
+  training_frame = train_h2o,
+  #fold_assignment = assignment_type,
+  #nfolds=5,
+  validation_frame = valid_h2o,
+  ## more trees is better if the learning rate is small enough
+  ## here, use "more than enough" trees - we have early stopping
+  ntrees = 1000,
+  ## smaller learning rate is better (this is a good value for most datasets, but see below for annealing)
+  learn_rate=0.02,
+  ## early stopping once the validation AUC doesn't improve by at least 0.01% for 5 consecutive scoring events
+  stopping_rounds = 5, stopping_tolerance = 1e-4, stopping_metric = "AUC",
+  ## sample 80% of rows per tree
+  sample_rate = 0.8,
+  ## sample 80% of columns per split
+  col_sample_rate = 0.8,
+  ## fix a random number generator seed for reproducibility
+  seed = 1234,
+  ## score every 10 trees to make early stopping reproducible (it depends on the scoring interval)
+  #score_tree_interval = 10
+)
+test_pred <-h2o.predict(h2o_model_xgboost, newdata = test_h2o)
+predict <- as.data.frame(test_pred)$predict
+reference <- as.data.frame(test_h2o)[[response]]
+caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
+```
+
+### Light GBM
+```{r}
+# Light gbm
+assignment_type <- "Stratified"
+tic()
+h2o_model_lightgbm <- h2o.xgboost(
+    x = predictors, 
+    y = response,
+    training_frame = train_h2o, 
+    validation_frame = valid_h2o,
+    #fold_assignment = assignment_type,
+    tree_method="hist",
+    grow_policy="lossguide",
+    #nfolds=5,
+    seed = 123
+)
+toc() # 7 s
+test_pred <-h2o.predict(h2o_model_lightgbm, newdata = test_h2o)
+predict <- as.data.frame(test_pred)$predict
+reference <- as.data.frame(test_h2o)[[response]]
+caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
+```
+```{r}
+# Light gbm
+assignment_type <- "Stratified"
+tic()
+h2o_model_lightgbm <- h2o.xgboost(
+    x = predictors, 
+    y = response,
+    training_frame = train_h2o, 
+    #validation_frame = valid_h2o,
+    fold_assignment = assignment_type,
+    tree_method="hist",
+    grow_policy="lossguide",
+    nfolds=5,
+    seed = 123
+)
+toc() # 7 s
+test_pred <-h2o.predict(h2o_model_lightgbm, newdata = test_h2o)
+predict <- as.data.frame(test_pred)$predict
+reference <- as.data.frame(test_h2o)[[response]]
+caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
+```
+### Random forest 
+```{r}
+assignment_type <- "Stratified"
+tic()
+h2o_model_rf <- h2o.randomForest(
+    x = predictors, 
+    y = response,
+    training_frame = train_h2o, 
+    validation_frame = valid_h2o,
+    #balance_classes = TRUE,
+    #fold_assignment = assignment_type,
+    #nfolds=5,
+    seed = 123
+)
+toc() # 7 s
+test_pred <-h2o.predict(h2o_model_rf, newdata = test_h2o)
+predict <- as.data.frame(test_pred)$predict
+reference <- as.data.frame(test_h2o)[[response]]
+caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
+```
+
+```{r}
+assignment_type <- "Stratified"
+tic()
+h2o_model_rf <- h2o.randomForest(
+    x = predictors, 
+    y = response,
+    training_frame = train_h2o, 
+    validation_frame = valid_h2o,
+    balance_classes = TRUE,
+    #fold_assignment = assignment_type,
+    #nfolds=5,
+    seed = 123
+)
+toc() # 7 s
+test_pred <-h2o.predict(h2o_model_rf, newdata = test_h2o)
+predict <- as.data.frame(test_pred)$predict
+reference <- as.data.frame(test_h2o)[[response]]
+caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
+```
+
+```{r}
+assignment_type <- "Stratified"
+tic()
+h2o_model_rf <- h2o.randomForest(
+    x = predictors, 
+    y = response,
+    training_frame = train_h2o, 
+    validation_frame = valid_h2o,
+    balance_classes = TRUE,
+    ntrees = 1000,
+    #fold_assignment = assignment_type,
+    #nfolds=5,
+    seed = 123
+)
+toc() # 7 s
+test_pred <-h2o.predict(h2o_model_rf, newdata = test_h2o)
+predict <- as.data.frame(test_pred)$predict
+reference <- as.data.frame(test_h2o)[[response]]
+caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
+```
+
+## Try other models tunning
+
+```{r}
+assignment_type <- "Stratified"
+# you can also try "Auto", "Modulo", and "Stratified"
+gbm <- h2o.gbm(
+  ## standard model parameters
+  x = predictors,
+  y = response,
+  training_frame = train_h2o,
+  fold_assignment = assignment_type,
+  nfolds=5,
+  #validation_frame = valid,
+  ## more trees is better if the learning rate is small enough
+  ## here, use "more than enough" trees - we have early stopping
+  ntrees = 10000,
+  ## smaller learning rate is better (this is a good value for most datasets, but see below for annealing)
+  learn_rate=0.01,
+  ## early stopping once the validation AUC doesn't improve by at least 0.01% for 5 consecutive scoring events
+  stopping_rounds = 5, stopping_tolerance = 1e-4, stopping_metric = "logloss",
+  ## sample 80% of rows per tree
+  sample_rate = 0.8,
+  ## sample 80% of columns per split
+  col_sample_rate = 0.8,
+  ## fix a random number generator seed for reproducibility
+  seed = 1234,
+  ## score every 10 trees to make early stopping reproducible (it depends on the scoring interval)
+  score_tree_interval = 10
+)
+test_pred <-h2o.predict(gbm, newdata = test_h2o)
+predict <- as.data.frame(test_pred)$predict
+reference <- as.data.frame(test_h2o)[[response]]
+caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
+```
+
+```{r}
+test_pred <-h2o.predict(gbm, newdata = test_h2o)
+predict <- as.data.frame(test_pred)$predict
+reference <- as.data.frame(test_h2o)$Attrition
+caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
+```
+
+```{r}
+assignment_type <- "Stratified"
+# you can also try "Auto", "Modulo", and "Stratified"
+h2o_rf_tunning <- h2o.randomForest(
+  ## standard model parameters
+  x = predictors,
+  y = response,
+  training_frame = train_h2o,
+  fold_assignment = assignment_type,
+  nfolds=5,
+  #validation_frame = valid,
+  ## more trees is better if the learning rate is small enough
+  ## here, use "more than enough" trees - we have early stopping
+  ntrees = 1000,
+  ## smaller learning rate is better (this is a good value for most datasets, but see below for annealing)
+  #learn_rate=0.01,
+  ## early stopping once the validation AUC doesn't improve by at least 0.01% for 5 consecutive scoring events
+  #stopping_rounds = 5, stopping_tolerance = 1e-4, stopping_metric = "AUC",
+  ## sample 80% of rows per tree
+  #sample_rate = 0.8,
+  ## sample 80% of columns per split
+  #col_sample_rate = 0.8,
+  ## fix a random number generator seed for reproducibility
+  seed = 1234,
+  ## score every 10 trees to make early stopping reproducible (it depends on the scoring interval)
+  #score_tree_interval = 10
+)
+test_pred <-h2o.predict(h2o_rf_tunning, newdata = test_h2o)
+predict <- as.data.frame(test_pred)$predict
+reference <- as.data.frame(test_h2o)[[response]]
+caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
+```
+
+## Auto ML H2O
+
+```{r}
+tic()
+auto_ml <- h2o.automl(
+    x = predictors, 
+    y = response,
+    training_frame = train_h2o,
+    #leaderboard_frame = h2o_validation,
+    project_name = "Attrition",
+    #max_runtime_secs = 300,
+    max_models = 10,
+    seed = 12
+)
+toc()
+```
+
+```{r}
+# Check for the top models
+#top_models <- auto_ml@leaderboard
+#print(top_models)
+model_ids <- as.data.frame(auto_ml@leaderboard$model_id)[,1]
+auto_ml
+```
+
+```{r}
+# Check performance best model auto ML (stacked)
+test_pred <- h2o.predict(auto_ml, test_h2o) 
+reference <- as.data.frame(test_h2o)$Attrition
+predict <- as.data.frame(test_pred)$predict
+caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
+```
+
+```{r}
+# Check performance GBM autoML
+slect_model <- h2o.getModel(model_ids[5])
+test_pred <- h2o.predict(slect_model, test_h2o) 
+reference <- as.data.frame(test_h2o)$Attrition
+predict <- as.data.frame(test_pred)$predict
+caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
+```
+Choose select model because best Recall/F1/balanced accuracy and easy model explanation
 
 ```{r}
 ```

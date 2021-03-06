@@ -5,6 +5,8 @@ output: html_document
 # Handson marketing chap 10
 #### 1. Load Data ####
 ```{r}
+library(tidyverse)
+library(readxl)
 getwd()
 ```
 
@@ -263,7 +265,7 @@ library(tidyverse)
 ```
 
 ```{r}
-df <- read_excel(path="./Online Retail.xlsx",sheet="Online Retail")
+df <- read_excel(path="/home/dnn/Data_science/Git/R_project/Marketing_BS/Online Retail.xlsx",sheet="Online Retail")
 df
 ```
 
@@ -306,6 +308,7 @@ customerDF
 # rb_scale # cannot scale all feature to same scale -1 --> 1, cannot combine to dataframe due to list
 
 ```
+
 ```{r}
 # try standard scale by prop.table
 customerDF_matrix <- as.matrix(customerDF[,-1])
@@ -367,7 +370,7 @@ km.out <- list()
 sil.out <- list()
 x <- vector()
 y <- vector()
-minClust <- 2      # Hypothesized minimum number of segments
+minClust <- 3      # Hypothesized minimum number of segments
 maxClust <- 8      # Hypothesized maximum number of segments
 # Compute k-means clustering over various clusters, k, from minClust to maxClust
 for (centr in minClust:maxClust) {
@@ -395,7 +398,7 @@ ggplot(data = data.frame(x, y), aes(x, y)) +
 ```{r}
 # Get attributes of optimal k-means output
 # maxSilRow <- which.max(y)          # Row number of max silhouette value
-maxSilRow <- 3          # Row number of max silhouette value
+maxSilRow <- 2          # Row number of max silhouette value
 optimalClusters <- x[maxSilRow]    # Number of clusters
 km.out.best <- km.out[[maxSilRow]] # k-means output of best cluster
 maxSilRow # 3
@@ -424,16 +427,6 @@ cluster$size
 cluster$centers
 ```
 
-Let's take a closer look at this. The third cluster has the lowest numbers for all three
-attributes. This suggests that the third cluster contains customers with the lowest amount of
-sales, lowest number of orders, and lowest average per-order value. This group of
-customers is a group of low-value customers. On the other hand, the fourth cluster has the
-highest numbers for all three attributes. The customers in the fourth cluster have the
-highest amount of sales, highest number of orders, and highest average per-order value.
-This suggests that these customers in the fourth cluster purchase expensive items and give
-the business the highest revenue. You would typically want to focus your marketing efforts
-on this segment of customers, as it will result in the highest return.
-
 ```{r}
 str(cluster)
 ```
@@ -447,26 +440,26 @@ fviz_cluster(cluster, data = data_kmean)
 
 
 ```{r}
-k2 <- kmeans(data_kmean, centers = 2, nstart = 25)
-k3 <- kmeans(data_kmean, centers = 3, nstart = 25)
-k4 <- kmeans(data_kmean, centers = 4, nstart = 25)
-k5 <- kmeans(data_kmean, centers = 5, nstart = 25)
-
-# plots to compare
-p1 <- fviz_cluster(k2, geom = "point", data = data_kmean) + ggtitle("k = 2")
-p2 <- fviz_cluster(k3, geom = "point",  data = data_kmean) + ggtitle("k = 3")
-p3 <- fviz_cluster(k4, geom = "point",  data = data_kmean) + ggtitle("k = 4")
-p4 <- fviz_cluster(k5, geom = "point",  data = data_kmean) + ggtitle("k = 5")
-
-library(gridExtra)
-grid.arrange(p1, p2, p3, p4, nrow = 2)
+# k2 <- kmeans(data_kmean, centers = 2, nstart = 25)
+# k3 <- kmeans(data_kmean, centers = 3, nstart = 25)
+# k4 <- kmeans(data_kmean, centers = 4, nstart = 25)
+# k5 <- kmeans(data_kmean, centers = 5, nstart = 25)
+# 
+# # plots to compare
+# p1 <- fviz_cluster(k2, geom = "point", data = data_kmean) + ggtitle("k = 2")
+# p2 <- fviz_cluster(k3, geom = "point",  data = data_kmean) + ggtitle("k = 3")
+# p3 <- fviz_cluster(k4, geom = "point",  data = data_kmean) + ggtitle("k = 4")
+# p4 <- fviz_cluster(k5, geom = "point",  data = data_kmean) + ggtitle("k = 5")
+# 
+# library(gridExtra)
+# grid.arrange(p1, p2, p3, p4, nrow = 2)
 ```
 
 ```{r}
 # Cannot see sth in this plot due to outlier
-customerDF %>% 
-  ggplot(aes(x=factor(Cluster),y=TotalSales))+
-   geom_boxplot()
+# customerDF %>% 
+#   ggplot(aes(x=factor(Cluster),y=TotalSales))+
+#    geom_boxplot()
 ```
 
 ```{r}
@@ -484,6 +477,8 @@ p3<-normalizedDF %>%
 library(gridExtra)
 grid.arrange(p1, p2, p3)
 ```
+
+
 ```{r}
 cluster$centers
 ```

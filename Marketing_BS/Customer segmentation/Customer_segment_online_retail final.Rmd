@@ -1,0 +1,244 @@
+---
+title: "Untitled"
+output: html_document
+---
+
+```{r}
+library(readxl)
+library(tidyverse)
+```
+
+```{r}
+df <- read_excel(path="/home/dnn/Data_science/Git/R_project/Marketing_BS/Online Retail.xlsx",sheet="Online Retail")
+df
+```
+
+
+```{r}
+# ignore negative quantity
+dim(df)
+df <- df[which(df$Quantity > 0),]
+dim(df)
+
+# remove records with NA
+df <- na.omit(df)
+dim(df)
+
+# excluding incomplete month
+sprintf("Date Range: %s ~ %s", min(df$InvoiceDate), max(df$InvoiceDate))
+dim(df)
+df <- df[which(df$InvoiceDate < '2011-12-01'),]
+dim(df)
+
+# total sales
+df$Sales <- df$Quantity * df$UnitPrice
+
+# per customer data
+customerDF <- df %>% 
+  group_by(CustomerID) %>% 
+  dplyr::summarize(TotalSales=sum(Sales), OrderCount=length(unique(InvoiceDate))) %>%
+  mutate(AvgOrderValue=TotalSales/OrderCount)
+customerDF
+```
+
+```{r}
+
+# library(quantable)
+# class(robustscale(customerDF["OrderCount"])) # list
+# as.data.frame(robustscale(customerDF["OrderCount"]))["OrderCount"] 
+# class(as.data.frame(robustscale(customerDF["OrderCount"]))) # dataframe
+# rb_scale <- quantable::robustscale(customerDF[,2:4])
+# class(rb_scale) # list
+# rb_scale # cannot scale all feature to same scale -1 --> 1, cannot combine to dataframe due to list
+
+```
+
+```{r}
+# try standard scale by prop.table
+customerDF_matrix <- as.matrix(customerDF[,-1])
+customerDF_matrix_prop <- prop.table(customerDF_matrix,margin=2)
+summary(customerDF_matrix_prop)
+```
+```{r}
+summary(customerDF_matrix)
+```
+
+```{r}
+# rank will give all column with the same range (from 1 to 4298)
+rankDF <- customerDF %>%
+  mutate(TotalSales=rank(TotalSales), OrderCount=rank(OrderCount, ties.method="first"), AvgOrderValue=rank(AvgOrderValue))
+rankDF
+
+```
+```{r}
+# normalize these rank
+normalizedDF <- rankDF %>%
+  mutate(TotalSales=scale(TotalSales), OrderCount=scale(OrderCount), AvgOrderValue=scale(AvgOrderValue))
+normalizedDF
+```
+
+```{r}
+#check for normalization - mean of 0 & std of 1
+summary(normalizedDF)
+sapply(normalizedDF, sd)
+```
+
+# Kmeans
+```{r}
+cluster <- kmeans(normalizedDF[c("TotalSales", "OrderCount", "AvgOrderValue")], 4)
+# cluster centers
+cluster$centers
+```
+
+
+```{r}
+# cluster labels
+normalizedDF$Cluster <- cluster$cluster
+normalizedDF
+```
+```{r}
+normalizedDF %>% group_by(Cluster) %>% summarise(Count=n())
+```
+
+# find best kmean
+```{r}
+data_kmean <- normalizedDF[c("TotalSales", "OrderCount", "AvgOrderValue")]
+rownames(data_kmean) <- normalizedDF$CustomerID
+data_kmean
+```
+
+```{r}
+
+# Setup for k-means loop 
+km.out <- list()
+sil.out <- list()
+x <- vector()
+y <- vector()
+minClust <- 3      # Hypothesized minimum number of segments
+maxClust <- 8      # Hypothesized maximum number of segments
+# Compute k-means clustering over various clusters, k, from minClust to maxClust
+for (centr in minClust:maxClust) {
+        i <- centr-(minClust-1) # relevels start as 1, and increases with centr
+        set.seed(11) # For reproducibility
+        km.out[i] <- list(kmeans(data_kmean, centers = centr, nstart = 50))
+        sil.out[i] <- list(silhouette(km.out[[i]][[1]], dist(data_kmean)))
+        # Used for plotting silhouette average widths
+        x[i] = centr  # value of k
+        y[i] = summary(sil.out[[i]])[[4]]  # Silhouette average width
+}
+```
+
+
+```{r}
+ggplot(data = data.frame(x, y), aes(x, y)) + 
+  geom_point(size=3) + 
+  geom_line() +
+  xlab("Number of Cluster Centers") +
+  ylab("Silhouette Average Width") +
+  ggtitle("Silhouette Average Width as Cluster Center Varies")
+```
+
+
+```{r}
+# Get attributes of optimal k-means output
+# maxSilRow <- which.max(y)          # Row number of max silhouette value
+maxSilRow <- 2          # Row number of max silhouette value
+optimalClusters <- x[maxSilRow]    # Number of clusters
+km.out.best <- km.out[[maxSilRow]] # k-means output of best cluster
+maxSilRow # 3
+optimalClusters # 4
+```
+
+
+```{r}
+customerDF$Cluster <- km.out.best$cluster
+customerDF
+```
+
+
+```{r}
+# count per cluster
+customerDF %>% group_by(Cluster) %>% summarise(Count=n())
+```
+```{r}
+# Cluster size
+cluster$size
+```
+
+```{r}
+# cluster centers
+cluster$centers
+```
+
+```{r}
+str(cluster)
+```
+
+# Visual cluster
+
+```{r}
+library(factoextra) # clustering algorithms & visualization
+fviz_cluster(cluster, data = data_kmean)
+```
+
+```{r}
+p1<-normalizedDF %>% 
+  ggplot(aes(x=factor(Cluster),y=TotalSales,color=factor(Cluster)))+
+  geom_boxplot()
+
+p2<-normalizedDF %>% 
+  ggplot(aes(x=factor(Cluster),y=OrderCount,color=factor(Cluster)))+
+  geom_boxplot()
+
+p3<-normalizedDF %>% 
+  ggplot(aes(x=factor(Cluster),y=AvgOrderValue,color=factor(Cluster)))+
+  geom_boxplot()
+library(gridExtra)
+grid.arrange(p1, p2, p3)
+```
+
+Let's take a closer look at this. The fourth cluster has the lowest numbers for all three
+attributes. This suggests that the fourth cluster contains customers with the smallest
+amount of sales, smallest number of orders, and lowest average per-order value. This group
+of customers is one of low-value customers. On the other hand, the third cluster has the
+highest numbers for all three attributes. The customers in the third cluster have the greatest
+amount of sales, greatest number of orders, and highest average per-order value. So, these
+customers in the third cluster purchase expensive items and give the business the highest
+revenue. You would typically want to focus your marketing efforts on this segment of
+customers, as it will result in the highest return.
+
+
+The customers in the second cluster are interesting. They make purchases relatively
+frequently, as they have a medium-to-high cluster center value for OrderCount, but their
+average per-order value is low, as the cluster center for AvgOrderValue is low. These are
+the customers who make frequent purchases of low-value items. So, it would be perfect to
+market items with low per-item prices to this segment of customers. The customers in the
+first cluster are also interesting. Their contributions to the revenue and number of orders
+are medium to low, looking at the centers of this cluster. However, their average per-order
+value is high. These are the customers who buy expensive items infrequently. Thus, it
+would be perfect to market expensive items to this segment of customers.
+
+```{r}
+cluster$centers
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+

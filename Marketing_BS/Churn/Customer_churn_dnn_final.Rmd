@@ -1,0 +1,707 @@
+#1. library ----
+```{r}
+# Modeling
+library(survival)
+library(broom)
+library(parsnip)
+library(recipes)
+library(tictoc)
+# Advanced ML
+library(h2o)
+library(lime)
+h2o.init()
+# EDA
+library(correlationfunnel)
+
+# Core & Data Viz
+library(data.table)
+library(tidyverse)
+library(plotly)
+library(tidyquant)
+```
+
+```{r}
+churn_data_raw <- fread("/home/dnn/Data_science/Git/R_project/Marketing_BS/Churn/WA_Fn-UseC_-Telco-Customer-Churn.csv") %>% 
+  mutate(
+    tenure_range = case_when(
+      tenure < 12 ~ '< 1 Yr',
+      tenure < 24 ~ '1-2 Yrs',
+      tenure < 36 ~ '2-3 Yrs',
+      tenure < 48 ~ '3-4 Yrs',
+      tenure < 60 ~ '4-5 Yrs',
+      tenure >= 60 ~ 'Over 5 Yrs',
+      TRUE ~ 'NA'
+    ),
+    monthly_charge_range = case_when(
+      MonthlyCharges < 20 ~ '< 20 per Month',
+      MonthlyCharges < 50 ~ '20-50 per Month',
+      MonthlyCharges < 100 ~ '50-100 per Month',
+      MonthlyCharges >= 100 ~ 'Over 100 per Month',
+      TRUE ~ 'NA'
+    )
+  )
+churn_data_raw
+```
+```{r}
+summary(churn_data_raw)
+```
+
+#2. Get data ----
+```{r}
+getwd()
+data_raw <- fread("/home/dnn/Data_science/Git/R_project/Marketing_BS/Churn/WA_Fn-UseC_-Telco-Customer-Churn.csv")
+#Remove unnecessary data
+data <- data_raw %>%
+  drop_na() %>%
+  select(Churn, everything())
+data
+```
+```{r}
+# Just experiment some thing
+
+#id <- "9237-HQITU" #5
+id <- "3668-QPYBK" #3
+# get rownames data base ID
+rownames(data_raw) <- data_raw$customerID
+# find id rownames base on customer ID
+which(rownames(data_raw)== id)
+
+class(rownames(data_raw))
+as.data.table((rownames(data_raw)))
+
+set.seed(430)
+data_test <- data_raw%>% drop_na()
+split = caret::createDataPartition(data_test$Churn, p =0.8, list = FALSE)
+#train = data()[split, ]
+test = data_test[-split, ]
+class(test)
+
+id <- "6713-OKOMC" #3
+rownames(test) <- test$customerID
+# find id rownames base on customer ID
+which(rownames(test)== id)
+```
+
+#3. EDA -----
+
+```{r}
+##  Correlation funnel
+
+data %>%
+  binarize() %>%
+  correlate(Churn__Yes) %>% 
+  plot_correlation_funnel(interactive = TRUE, alpha = 0.7)
+```
+
+
+```{r}
+## Plot categorical vs catagorical
+Categorical_vs_categorical_plot <- function(data,group_col,fill_col){
+  data %>%
+    group_by_(group_col, fill_col) %>%
+    summarize(n = n()) %>% 
+    mutate(pct = n/sum(n),lbl = scales::percent(pct))%>% 
+    ggplot(aes_(x = group_col,y = ~pct,
+                fill = fill_col)) +
+    geom_bar(stat = "identity",
+             position = "fill") +
+    scale_y_continuous(breaks = seq(0, 1, .2),label =scales::percent) +
+    geom_text(aes(label = lbl), 
+              size = 3, 
+              position = position_stack(vjust = 0.5)) +
+    #scale_fill_brewer(palette = "Set2") +
+    labs(y = "Percent",x = "Attrition",title = "Compare attrition accross category")+
+    theme_minimal()  
+}
+Categorical_vs_categorical_plot(data,~Churn,~Contract)
+
+```
+
+
+```{r}
+## Faceted Bar Charts
+
+data %>%
+  group_by(Contract,gender,Churn) %>%
+  summarize(n = n()) %>% 
+  mutate(pct = n/sum(n),lbl = scales::percent(pct))
+
+p1 <- ggplot( data %>%
+                group_by(Contract,gender,Churn) %>%
+                summarize(n = n()) %>% 
+                mutate(pct = n/sum(n),lbl = scales::percent(pct)),
+              aes( x = Contract, y = pct ,
+                   fill = Churn) ) + 
+  geom_bar( stat = "identity" ) + 
+  facet_wrap( ~ gender ) + 
+  xlab("Hours spent per week") + 
+  geom_text(aes(label = lbl), 
+            size = 3, 
+            position = position_stack(vjust = 0.5))
+p1
+```
+
+
+```{r}
+Categorical_facet_plot <- function(data,group_col,facet_col,target_col){
+  data %>%
+    group_by_(group_col, facet_col,target_col) %>%
+    summarize(n = n()) %>% 
+    mutate(pct = n/sum(n),lbl = scales::percent(pct))%>% 
+    ggplot(aes_(x = group_col,y = ~pct,
+                fill = target_col)) +
+    geom_bar(stat = "identity",
+             position = "fill") +
+    facet_wrap( facet_col ) + 
+    scale_y_continuous(breaks = seq(0, 1, .2),label =scales::percent) +
+    geom_text(aes(label = lbl), 
+              size = 3, 
+              position = position_stack(vjust = 0.5)) +
+    #scale_fill_brewer(palette = "Set2") +
+    labs(y = "Percent",x = "Attrition",title = "Compare attrition accross category")+
+    theme_minimal()  
+}
+Categorical_facet_plot(data,~Contract,~gender,~Churn)
+```
+
+
+```{r}
+## Plot Categorical vs. Quantitative
+Categorical_vs_quantitative_plot <- function(data,categorical_col,quantitative_col){
+  # plot the distribution using violin and boxplots
+  ggplot(data, aes_(x = categorical_col, 
+                    y = quantitative_col)) +
+    geom_violin(fill = "cornflowerblue") +
+    geom_boxplot(width = .2, 
+                 fill = "orange",
+                 outlier.color = "orange",
+                 outlier.size = 2) 
+}
+Categorical_vs_quantitative_plot(data,~Churn,~tenure)
+```
+
+
+```{r}
+## density plot
+density_plot <-function(data,categorical_col,quantitative_col ){
+  ggplot(data, 
+         aes_(x = quantitative_col, fill = categorical_col)) + 
+    geom_density(alpha = 0.7) + 
+    scale_fill_manual(values = c("#386cb0","#fdb462"))
+}
+density_plot(data,~Churn,~tenure)
+```
+
+```{r}
+## Plot combine
+facet_plot <- function(data,categorical_col,quantitative_col,facet_col){
+  # plot the distribution using violin and boxplots
+  ggplot(data, aes_(x = categorical_col, 
+                    y = quantitative_col)) +
+    geom_violin(fill = "cornflowerblue") +
+    geom_boxplot(width = .2, 
+                 fill = "orange",
+                 outlier.color = "orange",
+                 outlier.size = 2) +
+    facet_wrap(facet_col) +
+    labs(title=facet_col)
+}
+facet_plot(data,~Churn,~tenure,~Contract)
+```
+#4. Survival analysis ----
+## Process data (not convert contract) ----
+
+```{r}
+train_tbl <- data %>%
+  mutate(
+    Churn_Yes                     = Churn == "Yes",
+    OnlineSecurity_No             = OnlineSecurity == "No",
+    TechSupport_No                = TechSupport == "No",
+    InternetService_FiberOptic    = InternetService %>% str_detect("Fiber"),
+    PaymentMethod_ElectronicCheck = PaymentMethod %>% str_detect("Electronic"),
+    OnlineBackup_No               = OnlineBackup == "No",
+    DeviceProtection_No           = DeviceProtection == "No"
+  ) %>%
+  select(
+    tenure, Churn_Yes, Contract, OnlineSecurity_No, TechSupport_No, InternetService_FiberOptic,
+    PaymentMethod_ElectronicCheck, OnlineSecurity_No, DeviceProtection_No
+  ) 
+```
+
+
+```{r}
+train_tbl2 <- data %>%
+  mutate(
+    Churn_Yes                     = Churn == "Yes",
+  ) %>% 
+  select(
+    tenure, Churn_Yes, Contract, OnlineSecurity, TechSupport, InternetService,
+    PaymentMethod, DeviceProtection
+  ) 
+```
+
+## Survival Tables (Kaplan-Meier Method) ----
+```{r}
+plot_customer_survival <- function(object_survfit) {
+  
+  g <- tidy(object_survfit) %>%
+    ggplot(aes(time, estimate, color = strata)) +
+    geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = 0.5) +
+    geom_line(size = 1) +
+    theme_tq() +
+    scale_color_tq() +
+    scale_y_continuous(labels = scales::percent_format()) +
+    labs(title = "Churn Problem", color = "Contract Type", 
+         x = "Days After Purchase", y = "Percentage of Customers Staying")
+  
+  ggplotly(g)
+}
+plot_customer_loss <- function(object_survfit) {
+  
+  g <- tidy(object_survfit) %>%
+    mutate(customers_lost = 1 - estimate) %>%
+    ggplot(aes(time, customers_lost, color = strata)) +
+    geom_line(size = 1) +
+    theme_tq() +
+    scale_color_tq() +
+    scale_y_continuous(labels = scales::percent_format()) +
+    labs(title = "Churn Problem", color = "Contract Type", 
+         x = "Days After Purchase", y = "Percentage of Customers Lost")
+  
+  ggplotly(g)
+}
+```
+
+
+```{r}
+survfit_simple <- survfit(Surv(tenure, Churn_Yes) ~ strata(Contract), data = train_tbl)
+tidy(survfit_simple)
+
+```
+```{r}
+summary(tidy(survfit_simple))
+```
+
+```{r}
+plot_customer_survival(survfit_simple)
+plot_customer_loss(survfit_simple)
+```
+
+```{r}
+survfit_simple <- survfit(Surv(tenure, Churn_Yes) ~ strata(Contract), data = train_tbl2)
+plot_customer_survival(survfit_simple)
+
+```
+
+### Convert to function
+```{r}
+model_Kaplan_Meier_func <- function(data,time,event,group){
+  lhs <- paste("Surv(",time,",",event,")")
+  rhs <- paste("strata(",group,")")
+  form = as.formula(paste(lhs, "~", rhs))
+  model <- survfit(form, data)
+  model
+}
+survfit_simple <- model_Kaplan_Meier_func(train_tbl2,"tenure","Churn_Yes","Contract")
+as.data.table(tidy(survfit_simple))
+plot_customer_survival(survfit_simple)
+plot_customer_loss(survfit_simple)
+```
+
+
+```{r}
+# Explain
+time <- "tenure"
+event <- "Churn_Yes"
+group <- "Contract"
+lhs <- paste("Surv(",time,",",event,")")
+rhs <- paste("-",group,"+strata(",group,")")
+form = as.formula(paste(lhs, "~ .", rhs))
+coxph(form, train_tbl)
+```
+
+## Cox Regression Model (Multivariate) ----
+```{r}
+model_coxph <- coxph(Surv(tenure, Churn_Yes) ~ . - Contract + strata(Contract), data = train_tbl)
+tidy(model_coxph) ## Regression Estimates
+survfit_coxph <- survfit(model_coxph)
+
+model_coxph %>% # Mortality Table
+  survfit() %>%
+  tidy()
+
+```
+```{r}
+summary(model_coxph %>% # Mortality Table
+  survfit() %>%
+  tidy())
+```
+
+```{r}
+plot_customer_survival(survfit_coxph)
+plot_customer_loss(survfit_coxph)
+```
+
+```{r}
+# Use train_tbl2 as DNN modified
+model_coxph2 <- coxph(Surv(tenure, Churn_Yes) ~ . - Contract + strata(Contract), data = train_tbl2)
+survfit_coxph2 <- survfit(model_coxph2)
+plot_customer_survival(survfit_coxph2)
+plot_customer_loss(survfit_coxph2)
+
+class(model_coxph2)
+```
+
+
+```{r}
+# Convert to function
+
+model_coxph_func <- function(data,time,event,group){
+  lhs <- paste("Surv(",time,",",event,")")
+  rhs <- paste("-",group,"+strata(",group,")")
+  form = as.formula(paste(lhs, "~ .", rhs))
+  model_coxph <- coxph(form, data)
+  model_coxph
+}
+coxph_model <- model_coxph_func(train_tbl2,"tenure","Churn_Yes","Contract")
+survfit_coxph <- survfit(coxph_model)
+plot_customer_survival(survfit_coxph)
+
+# Explain
+time <- "tenure"
+event <- "Churn_Yes"
+group <- "Contract"
+lhs <- paste("Surv(",time,",",event,")")
+rhs <- paste("-",group,"+strata(",group,")")
+form = as.formula(paste(lhs, "~ .", rhs))
+coxph(form, train_tbl)
+```
+
+#5. Predict with survival model ----
+```{r}
+## Cox PH - Produces Theoretical Hazard Ratio ----
+table_predict <- predict(model_coxph, newdata = train_tbl, type = "expected") %>%
+          tibble(.pred = .) %>%
+          bind_cols(train_tbl) # predict Yes/No churn with propability
+table_predict<-table_predict  %>%
+            mutate(prediction=ifelse(.pred>0.5,"TRUE","FALSE"))
+
+str(table_predict)
+predict <- factor(table_predict$prediction)
+reference <- factor(table_predict$Churn_Yes)
+caret::confusionMatrix(predict,reference,positive="TRUE",mode="prec_recall")
+# Precision : 0.38389
+# Recall : 0.26271
+# F1 : 0.31194
+# Balanced Accuracy : 0.55504
+
+```
+
+
+```{r}
+## Survival Regression w/ Parsnip ----
+model_survreg <- parsnip::surv_reg(mode = "regression", dist = "weibull") %>%
+  #set_engine("survreg", control = survreg.control(maxiter=500)) %>% # survreg not available
+  set_engine("survival", control = survreg.control(maxiter=500)) %>%
+  fit.model_spec(Surv(I(tenure + 1), Churn_Yes) ~ . - Contract + strata(Contract), data = train_tbl)
+
+model_survreg$fit %>% tidy()
+
+predict(model_survreg, new_data = train_tbl) %>%
+  bind_cols(train_tbl %>% select(Churn_Yes, everything())) # predict day churn
+```
+
+#6. Prepare data for build ML model ----
+```{r}
+response="Churn"
+set.seed(430)
+split = caret::createDataPartition(data[[response]], p =0.6, list = FALSE)
+train = data[split, ]
+
+valid_test = data[-split, ]
+split2 = caret::createDataPartition(valid_test[[response]], p =0.5, list = FALSE)
+valid = valid_test[split2, ]
+test = valid_test[-split2, ]
+
+dim(train)
+dim(valid)
+dim(test)
+prop.table(table(as.data.frame(train[[response]])))
+prop.table(table(as.data.frame(valid[[response]])))
+prop.table(table(as.data.frame(test[[response]])))
+
+recipe_obj <- recipe(Churn ~ ., data = train) %>%
+  step_rm(customerID) %>% 
+  step_discretize(tenure, options = list(cuts = 6)) %>% 
+  step_string2factor(all_nominal()) %>% # convert character to factor (auto convert char to factor with recipes)
+  step_nzv(all_numeric(), -all_outcomes())  %>% #Remove near-zero variance features like sex, yes/no...
+  prep()
+
+baked_train <- bake(recipe_obj, new_data = train)
+baked_valid <- bake(recipe_obj, new_data = valid)
+baked_test <- bake(recipe_obj, new_data = test)
+# convert training data to h2o object
+train_h2o <- as.h2o(baked_train)
+valid_h2o <- as.h2o(baked_valid)
+test_h2o <- as.h2o(baked_test)
+# set the predictor names
+predictors <- setdiff(colnames(baked_train), response)
+```
+
+#7. ML model ----
+
+##  GBM BEST ----
+```{r}
+assignment_type <- "Stratified"
+tic()
+h2o.gbm <- h2o.gbm(
+  x = predictors, 
+  y = response,
+  training_frame = train_h2o, 
+  #validation_frame = valid_h2o,
+  balance_classes = TRUE,
+  fold_assignment = assignment_type,
+  nfolds=5,
+  #ntrees = 1000,
+  #booster = "dart",
+  #normalize_type = "tree",
+  
+  seed = 123
+)
+toc() # 7 s
+test_pred <-h2o.predict(h2o.gbm, newdata = test_h2o)
+predict <- as.data.frame(test_pred)$predict
+reference <- as.data.frame(test_h2o)[[response]]
+caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
+#Precision : 0.5406          
+#Recall : 0.8204          
+#F1 : 0.6518
+```
+
+## Random forest ----
+```{r}
+
+assignment_type <- "Stratified"
+tic()
+h2o_model_rf <- h2o.randomForest(
+  x = predictors, 
+  y = response,
+  training_frame = train_h2o, 
+  validation_frame = valid_h2o,
+  balance_classes = TRUE,
+  ntrees = 1000,
+  #fold_assignment = assignment_type,
+  #nfolds=5,
+  seed = 123
+)
+toc() # 7 s
+test_pred <-h2o.predict(h2o_model_rf, newdata = test_h2o)
+predict <- as.data.frame(test_pred)$predict
+reference <- as.data.frame(test_h2o)[[response]]
+caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
+#Precision : 0.5577          
+#Recall : 0.7641          
+#F1 : 0.6448   
+
+```
+
+## Deep learning ----
+```{r}
+model_dnn <- h2o.deeplearning(x = predictors, 
+                              y = response, 
+                              training_frame = train_h2o,
+                              validation_frame=valid_h2o,
+                              hidden = c(200,200), # c(200,200)
+                              epoch = 100, # 10
+                              model_id = "baseline_dnn", 
+                              #nfolds = 5, 
+                              stopping_metric="AUC", ## could be "MSE","logloss","r2","AUC", "AUCPR", "mean_per_class_error","custom"
+                              stopping_tolerance=0.01,  ## stop when misclassification does not improve by >=1% for 2 scoring events
+                              seed = 1234)
+
+test_pred <-h2o.predict(model_dnn, newdata = test_h2o)
+predict <- as.data.frame(test_pred)$predict
+reference <- as.data.frame(test_h2o)[[response]]
+caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
+#Precision : 0.5418          
+#Recall : 0.7641         
+#F1 : 0.6340
+```
+
+# 8. Save model ----
+# Save recipe
+```{r}
+write_rds(recipe_obj,"/home/dnn/Data_science/Git/R_project/Marketing_BS/Churn/Shiny/dnn_shiny/recipe2.Rds")
+
+#Save model
+slect_model=h2o.gbm
+getwd()
+model_path <- h2o.saveModel(object = slect_model, path = "/home/dnn/Data_science/Git/R_project/Marketing_BS/Churn/Shiny/dnn_shiny/", force = TRUE)
+print(model_path)
+# /home/dnn/Data_science/Git/R_project/Churn/GBM_model_R_1613740880034_453
+```
+
+# 9. Load model ----
+```{r}
+# Load recipe
+recipe_load <- readr::read_rds("/home/dnn/Data_science/Git/R_project/Marketing_BS/Churn/Shiny/dnn_shiny/recipe.Rds")
+# Load model
+model_path <- "/home/dnn/Data_science/Git/R_project/Marketing_BS/Churn/Shiny/dnn_shiny/GBM_model_R_1613740880034_453"
+h2o_model_load <- h2o.loadModel(model_path)
+
+```
+
+#10. Explain model ----
+```{r}
+#dev.off() # clear all plot to avoid call graphics error
+## Explain GBM model ----
+h2o.varimp(h2o_model_load)
+h2o.varimp_plot(h2o_model_load)
+h2o.shap_summary_plot(h2o_model_load,test_h2o)
+h2o.pd_plot(h2o_model_load, test_h2o, column = "Contract")
+h2o.pd_plot(h2o_model_load, test_h2o, column = "tenure")
+h2o.pd_plot(h2o_model_load, test_h2o, column = "MonthlyCharges")
+h2o.pd_plot(h2o_model_load, test_h2o, column = "OnlineSecurity")
+h2o.pd_plot(h2o_model_load, test_h2o, column = "PaymentMethod")
+h2o.pd_plot(h2o_model_load, test_h2o, column = "MultipleLines")
+h2o.partialPlot(h2o_model_load, data = test_h2o, cols = "MonthlyCharges")
+h2o.ice_plot(h2o_model_load, test_h2o, column = "MonthlyCharges")
+```
+
+
+```{r}
+# Class = No
+h2o.shap_explain_row_plot(h2o_model_load, test_h2o,row_index = 10)
+h2o.shap_explain_row_plot(h2o_model_load, test_h2o,row_index = 3)
+# Class =Yes #2,17,20
+h2o.shap_explain_row_plot(h2o_model_load, test_h2o,row_index = 18)
+h2o.shap_explain_row_plot(h2o_model_load, test_h2o,row_index = 4)
+```
+
+
+```{r}
+# Run lime() on training set
+explainer <- lime::lime(
+  as.data.frame(train_h2o), 
+  model          = h2o_model_load, 
+  bin_continuous = FALSE)
+# Run explain() on explainer
+explanation <- lime::explain(
+  as.data.frame(test_h2o[1,]), 
+  explainer    = explainer, 
+  n_labels     = 1, 
+  n_features   = 10,
+  kernel_width = 0.5)
+
+lime::plot_features(explanation) +
+  labs(title = "HR Predictive Analytics: LIME Feature Importance Visualization",
+       subtitle = "Hold Out (Test) Set, First 10 Cases Shown")
+plot_explanations(explanation)
+
+
+```
+
+```{r}
+explanation_caret <- explain(
+  x = as.data.frame(test_h2o[1:5,]), 
+  explainer = explainer, 
+  n_permutations = 5000,
+  dist_fun = "gower",
+  kernel_width = .75,
+  n_features = 10, 
+  #feature_select = "highest_weights",
+  labels = "Yes"
+)
+plot_features(explanation_caret)
+plot_explanations(explanation_caret)
+```
+
+```{r}
+## Explain combine model ----
+explainer_h2o_rf  <- lime(as.data.frame(train_h2o), h2o_model_rf, n_bins = 5)
+explainer_h2o_gbm <- lime(as.data.frame(train_h2o), h2o.gbm, n_bins = 5)
+
+explanation_rf  <- lime::explain(as.data.frame(test_h2o[1:5,]), 
+                                 explainer_h2o_rf, 
+                                 n_features      = 5, 
+                                 labels          = "Yes", 
+                                 kernel_width    = .1, 
+                                 feature_select  = "highest_weights")
+explanation_gbm <- lime::explain(as.data.frame(test_h2o[1:5,]), 
+                                 explainer_h2o_gbm, 
+                                 n_features      = 5, 
+                                 labels          = "Yes", 
+                                 kernel_width    = .1, 
+                                 feature_select  = "highest_weights")
+p1 <- plot_features(explanation_rf,  ncol = 1) + ggtitle("rf")
+p2 <- plot_features(explanation_gbm, ncol = 1) + ggtitle("gbm")
+gridExtra::grid.arrange(p1, p2, nrow = 1)
+```
+
+
+```{r}
+## Explain DL model ----
+h2o.varimp_plot(model_dnn)
+h2o.pd_plot(model_dnn, test_h2o, column = "Contract")
+h2o.pd_plot(h2o_model_load, test_h2o, column = "tenure")
+h2o.partialPlot(model_dnn, data = test_h2o, cols = "Contract")
+h2o.ice_plot(model_dnn, test_h2o, column = "Contract")
+```
+
+# 11. Recommendation
+```{r}
+test_h2o
+```
+```{r}
+customer_choose <- test_h2o[2,]
+customer_choose_df<-as.data.frame(customer_choose)
+customer_choose_df
+```
+
+```{r}
+if (customer_choose_df$tenure == "bin1"  | customer_choose_df$tenure == "bin2" ){
+  print(paste("---Current tenure < 2 years:", customer_choose_df$tenure) )
+  print("Strategy for tenure: discount to extend service usage time")
+} 
+if ( customer_choose_df$Contract == 'Month-to-month') {
+  print(paste("---Current contract:", customer_choose_df$Contract) )
+  print("Strategy for contract: Upsell to annual contract")
+}
+if ( customer_choose_df$InternetService == 'Fiber optic') {
+  print(paste("---Current InternetService:", customer_choose_df$InternetService) )
+  print("Strategy for InternetService: Offer tech support and service")
+}
+if ( customer_choose_df$InternetService == 'No') {
+  print(paste("---Current InternetService:", customer_choose_df$InternetService) )
+  print("Strategy for InternetService: Upsell to internet service")
+}
+if ( customer_choose_df$MonthlyCharges > 50 ) {
+  print(paste("---Current MonthlyCharges:", customer_choose_df$MonthlyCharges) )
+  print("Strategy for MonthlyCharges: Offer discount in monthly rate")
+}
+if ( customer_choose_df$PaymentMethod %in% c('Mailed Check', 'Electronic Check') ) {
+  print(paste("---Current PaymentMethod:", customer_choose_df$PaymentMethod) )
+  print("Strategy for PaymentMethod: Move to credit card or bank transfer")
+}
+if ( customer_choose_df$OnlineSecurity == 'No') {
+  print(paste("---Current OnlineSecurity:", customer_choose_df$OnlineSecurity) )
+  print("Strategy for OnlineSecurity: Upsell online security")
+}
+if ( customer_choose_df$DeviceProtection == 'No') {
+  print(paste("---Current DeviceProtection:", customer_choose_df$DeviceProtection) )
+  print("Strategy for DeviceProtection: Upsell Device Protection")
+}
+if ( customer_choose_df$TechSupport == 'No') {
+      print(paste("---Current TechSupport:", customer_choose_df$TechSupport) )
+      print("Strategy for TechSupport: Upsell Tech Support")
+}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+

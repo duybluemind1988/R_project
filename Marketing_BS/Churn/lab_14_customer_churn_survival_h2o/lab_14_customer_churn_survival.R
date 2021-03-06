@@ -170,12 +170,12 @@ predict(model_survreg, new_data = train_tbl) %>%
 
 
 # SUMMARY:
-# 6.1 CoxPH 
+# 6.1 CoxPH
 #   - Let's us use multivariate regression
 # 6.2 Survival Curve
 #   - Curves give us a clear indication of how cohorts churn
 #   - We saw that if someone is Month-to-Month Contract, that group is 48% risk of leaving in first 50 days
-# 6.3 Survival Regression 
+# 6.3 Survival Regression
 #   - Gives us estimated time, but can be quite innaccurate
 
 # CONCLUSION:

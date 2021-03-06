@@ -1,4 +1,5 @@
 library(shiny)
+library(plotly)
 ui <- fluidPage(
   navbarPage("Churn prediction",
             tabPanel("Explore data",
@@ -117,6 +118,8 @@ ui <- fluidPage(
                      selectInput("custome_id", "Select customer ID for prediction", choices=NULL, selected=NULL),
                      "Show test row choose",
                      dataTableOutput("test_row_choose_DT"), # Show test set choose all column
+                     "Show test row choose target",
+                     tableOutput("test_row_choose_DT_target"), 
                      "Prediction row choose",
                      tableOutput("test_predict"),
                      fluidRow(
@@ -129,6 +132,8 @@ ui <- fluidPage(
                               plotOutput("Lime_Explain_Row_plot"),
                        ),
                      ),
+                     h4("Strategy to retain customer and upsell: "),
+                     verbatimTextOutput("strategy_retain_cust"),
 
             )
   )

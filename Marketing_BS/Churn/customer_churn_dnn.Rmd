@@ -34,7 +34,7 @@ library(tidyquant)
 
 # - KEY POINTS: tenure = Time, Churn = Target, Everything Else = Possible Predictors
 
-customer_churn_tbl <- read_csv("~/Data_science/Git/R_project/Churn/lab_14_customer_churn_survival_h2o/WA_Fn-UseC_-Telco-Customer-Churn.csv")
+customer_churn_tbl <- read_csv("~/Data_science/Git/R_project//Marketing_BS/Churn/lab_14_customer_churn_survival_h2o/WA_Fn-UseC_-Telco-Customer-Churn.csv")
 
 customer_churn_tbl %>% glimpse()
 ```
@@ -288,7 +288,7 @@ library(tictoc)
 ```
 ## Recipe
 ```{r}
-data <- fread("~/Data_science/Git/R_project/Churn/lab_14_customer_churn_survival_h2o/WA_Fn-UseC_-Telco-Customer-Churn.csv")
+data <- fread("~/Data_science/Git/R_project//Marketing_BS/Churn/lab_14_customer_churn_survival_h2o/WA_Fn-UseC_-Telco-Customer-Churn.csv")
 str(data)
 ```
 ```{r}
@@ -490,7 +490,7 @@ caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
 #slect_model=h2o.gbm
 #getwd()
 #model_path <- h2o.saveModel(object = slect_model, path = getwd(), force = TRUE)
-print(model_path)
+#print(model_path)
 ```
 
 # 9. Load model
@@ -499,7 +499,7 @@ print(model_path)
 # Load recipe
 #recipe_load <- readr::read_rds("/home/dnn/Data_science/Git/R_project/Churn/GBM_model_R_1613221099274_388/recipe.Rds")
 # Load model
-model_path <- "/home/dnn/Data_science/Git/R_project/Churn/GBM_model_R_1613221099274_388"
+model_path <- "/home/dnn/Data_science/Git/R_project//Marketing_BS/Churn/GBM_model_R_1613221099274_388"
 h2o_model_load <- h2o.loadModel(model_path)
 ```
 
@@ -526,7 +526,7 @@ h2o.pd_plot(h2o_model_load, test_h2o, column = "PaymentMethod")
 h2o.pd_plot(h2o_model_load, test_h2o, column = "MultipleLines")
 ```
 ```{r}
-str(baked_test)
+#str(baked_test)
 baked_test$Contract
 ```
 
@@ -610,6 +610,46 @@ test_pred <- h2o.predict(slect_model, test_h2o)
 reference <- as.data.frame(test_h2o)[[response]]
 predict <- as.data.frame(test_pred)$predict
 caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
+```
+# 12. Recommendation based on customer
+
+```{r}
+test_h2o
+```
+
+
+```{r}
+customer_choose <- test_h2o[1,]
+customer_choose
+```
+
+
+```{r}
+summary(test_h2o$tenure)
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
 ```
 
 # BS [Not good]- Customer Churn Modeling using Machine Learning with parsnip
