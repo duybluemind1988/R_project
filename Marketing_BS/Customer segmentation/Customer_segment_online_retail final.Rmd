@@ -197,23 +197,27 @@ library(gridExtra)
 grid.arrange(p1, p2, p3)
 ```
 
-Let's take a closer look at this. The fourth cluster has the lowest numbers for all three
-attributes. This suggests that the fourth cluster contains customers with the smallest
+The Third cluster has the lowest numbers for all three
+attributes. This suggests that the Third cluster contains customers with the smallest
 amount of sales, smallest number of orders, and lowest average per-order value. This group
-of customers is one of low-value customers. On the other hand, the third cluster has the
-highest numbers for all three attributes. The customers in the third cluster have the greatest
+of customers is one of low-value customers. 
+
+The Fist cluster has the highest numbers for all three attributes. The customers 
+in the third cluster have the greatest
 amount of sales, greatest number of orders, and highest average per-order value. So, these
 customers in the third cluster purchase expensive items and give the business the highest
 revenue. You would typically want to focus your marketing efforts on this segment of
 customers, as it will result in the highest return.
 
 
-The customers in the second cluster are interesting. They make purchases relatively
+The customers in the Fourth cluster are interesting. They make purchases relatively
 frequently, as they have a medium-to-high cluster center value for OrderCount, but their
 average per-order value is low, as the cluster center for AvgOrderValue is low. These are
 the customers who make frequent purchases of low-value items. So, it would be perfect to
-market items with low per-item prices to this segment of customers. The customers in the
-first cluster are also interesting. Their contributions to the revenue and number of orders
+market items with low per-item prices to this segment of customers. 
+
+The customers in the
+second cluster are also interesting. Their contributions to the revenue and number of orders
 are medium to low, looking at the centers of this cluster. However, their average per-order
 value is high. These are the customers who buy expensive items infrequently. Thus, it
 would be perfect to market expensive items to this segment of customers.

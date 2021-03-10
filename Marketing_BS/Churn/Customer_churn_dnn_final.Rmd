@@ -477,6 +477,47 @@ caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
 #Recall : 0.8204          
 #F1 : 0.6518
 ```
+## XGBOOST
+```{r}
+assignment_type <- "Stratified"
+tic()
+h2o_model_lightgbm <- h2o.xgboost(
+    x = predictors, 
+    y = response,
+    training_frame = train_h2o, 
+    #validation_frame = valid_h2o,
+    #fold_assignment = assignment_type,
+    #nfolds=5,
+    seed = 123
+)
+toc() # 7 s
+test_pred <-h2o.predict(h2o_model_lightgbm, newdata = test_h2o)
+predict <- as.data.frame(test_pred)$predict
+reference <- as.data.frame(test_h2o)[[response]]
+caret::confusionMatrix(predict,reference,positive = "1",mode="prec_recall")
+```
+## Light gbm
+```{r}
+# Light gbm
+assignment_type <- "Stratified"
+tic()
+h2o_model_lightgbm <- h2o.xgboost(
+    x = predictors, 
+    y = response,
+    training_frame = train_h2o, 
+    #validation_frame = valid_h2o,
+    #fold_assignment = assignment_type,
+    tree_method="hist",
+    grow_policy="lossguide",
+    #nfolds=5,
+    seed = 123
+)
+toc() # 7 s
+test_pred <-h2o.predict(h2o_model_lightgbm, newdata = test_h2o)
+predict <- as.data.frame(test_pred)$predict
+reference <- as.data.frame(test_h2o)[[response]]
+caret::confusionMatrix(predict,reference,positive = "1",mode="prec_recall")
+```
 
 ## Random forest ----
 ```{r}
@@ -550,8 +591,17 @@ model_path <- "/home/dnn/Data_science/Git/R_project/Marketing_BS/Churn/Shiny/dnn
 h2o_model_load <- h2o.loadModel(model_path)
 
 ```
-
 #10. Explain model ----
+```{r}
+h2o.shap_summary_plot(h2o_model_load,test_h2o)
+```
+```{r}
+h2o.shap_summary_plot(h2o_model_load,train_h2o)
+```
+```{r}
+h2o.explain(h2o_model_load, test_h2o)
+```
+
 ```{r}
 #dev.off() # clear all plot to avoid call graphics error
 ## Explain GBM model ----
@@ -568,6 +618,13 @@ h2o.partialPlot(h2o_model_load, data = test_h2o, cols = "MonthlyCharges")
 h2o.ice_plot(h2o_model_load, test_h2o, column = "MonthlyCharges")
 ```
 
+```{r}
+h2o.explain_row(h2o_model_load, test_h2o,row_index = 10)
+```
+
+```{r}
+h2o.varimp_heatmap(h2o_model_load,test_h2o)
+```
 
 ```{r}
 # Class = No

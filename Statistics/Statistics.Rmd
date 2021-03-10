@@ -1,0 +1,644 @@
+---
+title: "Statistics"
+output: html_document
+---
+#1. Normality Test in R
+
+```{r}
+library("dplyr")
+library("ggpubr")
+```
+
+
+```{r}
+# Store the data in the variable my_data
+my_data <- ToothGrowth
+set.seed(1234)
+dplyr::sample_n(my_data, 10)
+```
+
+
+```{r}
+library("ggpubr")
+ggdensity(my_data$len, 
+          main = "Density plot of tooth length",
+          xlab = "Tooth length")
+```
+
+
+```{r}
+library(ggpubr)
+ggqqplot(my_data$len)
+```
+
+
+```{r}
+library("car")
+qqPlot(my_data$len)
+```
+
+
+```{r}
+shapiro.test(my_data$len)
+```
+
+
+# 2 One-Sample T-test in R
+```{r}
+set.seed(1234)
+my_data <- data.frame(
+  name = paste0(rep("M_", 10), 1:10),
+  weight = round(rnorm(10, 20, 2), 1)
+)
+# Print the first 10 rows of the data
+head(my_data, 10)
+```
+
+
+```{r}
+# Statistical summaries of weight
+summary(my_data$weight)
+```
+Min.: the minimum value
+1st Qu.: The first quartile. 25% of values are lower than this.
+Median: the median value. Half the values are lower; half are higher.
+3rd Qu.: the third quartile. 75% of values are higher than this.
+Max.: the maximum value
+
+```{r}
+library(ggpubr)
+ggboxplot(my_data$weight, 
+          ylab = "Weight (g)", xlab = FALSE,
+          ggtheme = theme_minimal())
+```
+Preleminary test to check one-sample t-test assumptions
+Is this a large sample? - No, because n < 30.
+Since the sample size is not large enough (less than 30, central limit theorem), we need to check whether the data follow a normal distribution.
+
+```{r}
+shapiro.test(my_data$weight) # => p-value = 0.6993
+```
+From the output, the p-value is greater than the significance level 0.05 implying that the distribution of the data are not significantly different from normal distribtion. In other words, we can assume the normality.
+
+Visual inspection of the data normality using Q-Q plots (quantile-quantile plots). Q-Q plot draws the correlation between a given sample and the normal distribution.
+
+```{r}
+library("ggpubr")
+ggqqplot(my_data$weight, ylab = "Men's weight",
+         ggtheme = theme_minimal())
+```
+From the normality plots, we conclude that the data may come from normal distributions.
+
+Compute one-sample t-test
+```{r}
+# One-sample t-test
+res <- t.test(my_data$weight, mu = 25)
+# Printing the results
+res 
+```
+In the result above :
+
+t is the t-test statistic value (t = -9.078),
+df is the degrees of freedom (df= 9),
+p-value is the significance level of the t-test (p-value = 7.95310^{-6}).
+conf.int is the confidence interval of the mean at 95% (conf.int = [17.8172, 20.6828]);
+sample estimates is he mean value of the sample (mean = 19.25).
+
+Null hypothesis:
+H0:m=μ
+Alternative hypotheses:
+Ha:m≠μ  (different)
+If the p-value is inferior or equal to the significance level 0.05, we can reject the null hypothesis and accept the alternative hypothesis. In other words, we conclude that the sample mean is significantly different from the theoretical mean.
+
+The p-value of the test is 7.95310^{-6}, which is less than the significance level alpha = 0.05. We can conclude that the mean weight of the mice is significantly different from 25g with a p-value = 7.95310^{-6}.
+```{r}
+# printing the p-value
+res$p.value
+# printing the mean
+res$estimate
+# printing the confidence interval
+res$conf.int
+```
+
+Less than
+```{r}
+t.test(my_data$weight, mu = 25,
+              alternative = "less")
+```
+
+Null hypothesis:
+H0:m >= μ
+Alternative hypotheses:
+Ha:m < μ  (less than)
+p value < 0.05 --> reject hypothesis H0, choose alternative hypotheses
+
+Greater than
+```{r}
+t.test(my_data$weight, mu = 25,
+              alternative = "greater")
+```
+Null hypothesis:
+H0:m <= μ
+Alternative hypotheses:
+Ha:m > μ  (greater than)
+p value > 0.05 --> cannot reject hypothesis H0
+
+# 3. Two-Samples T-test in R
+
+For example, suppose that we have measured the weight of 100 individuals: 50 women (group A) and 50 men (group B). We want to know if the mean weight of women (mA) is significantly different from that of men (mB).
+
+In this case, we have two unrelated (i.e., independent or unpaired) groups of samples. Therefore, it’s possible to use an independent t-test to evaluate whether the means are different.
+
+Note that, unpaired two-samples t-test can be used only under certain conditions:
+
+when the two groups of samples (A and B), being compared, are normally distributed. This can be checked using Shapiro-Wilk test.
+and when the variances of the two groups are equal. This can be checked using F-test.
+In statistics, we can define the corresponding null hypothesis (H0) as follow:
+
+H0:mA=mB
+H0:mA≤mB
+H0:mA≥mB
+The corresponding alternative hypotheses (Ha) are as follow:
+
+Ha:mA≠mB (different)
+Ha:mA>mB (greater)
+Ha:mA<mB (less)
+```{r}
+# Data in two numeric vectors
+women_weight <- c(38.9, 61.2, 73.3, 21.8, 63.4, 64.6, 48.4, 48.8, 48.5)
+men_weight <- c(67.8, 60, 63.4, 76, 89.4, 73.3, 67.3, 61.3, 62.4) 
+# Create a data frame
+my_data <- data.frame( 
+                group = rep(c("Woman", "Man"), each = 9),
+                weight = c(women_weight,  men_weight)
+                )
+my_data
+```
+
+
+```{r}
+library(dplyr)
+group_by(my_data, group) %>%
+  summarise(
+    count = n(),
+    mean = mean(weight, na.rm = TRUE),
+    sd = sd(weight, na.rm = TRUE)
+  )
+```
+```{r}
+# Plot weight by group and color by group
+library("ggpubr")
+ggboxplot(my_data, x = "group", y = "weight", 
+          color = "group", palette = c("#00AFBB", "#E7B800"),
+        ylab = "Weight", xlab = "Groups")
+```
+## Assumption 1: Are the two samples independents?
+Yes, since the samples from men and women are not related.
+
+## Assumtion 2: Are the data from each of the 2 groups follow a normal distribution?
+
+```{r}
+# Shapiro-Wilk normality test for Men's weights
+with(my_data, shapiro.test(weight[group == "Man"]))# p = 0.1
+# Shapiro-Wilk normality test for Women's weights
+with(my_data, shapiro.test(weight[group == "Woman"])) # p = 0.6
+```
+From the output, the two p-values are greater than the significance level 0.05 implying that the distribution of the data are not significantly different from the normal distribution. In other words, we can assume the normality.
+
+### Two-Samples Wilcoxon Test in R
+(fail assumption 2)
+The unpaired two-samples Wilcoxon test (also known as Wilcoxon rank sum test or Mann-Whitney test) is a non-parametric alternative to the unpaired two-samples t-test, which can be used to compare two independent groups of samples. It’s used when your data are not normally distributed.
+
+
+```{r}
+res <- wilcox.test(weight ~ group, data = my_data,
+                   exact = FALSE)
+res
+```
+
+```{r}
+wilcox.test(weight ~ group, data = my_data, 
+        exact = FALSE, alternative = "less")
+```
+```{r}
+wilcox.test(weight ~ group, data = my_data,
+        exact = FALSE, alternative = "greater")
+```
+
+
+## Assumption 3. Do the two populations have the same variances?
+
+We’ll use F-test to test for homogeneity in variances. This can be performed with the function var.test() as follow:
+```{r}
+res.ftest <- var.test(weight ~ group, data = my_data)
+res.ftest
+```
+The p-value of F-test is p = 0.1713596. It’s greater than the significance level alpha = 0.05. In conclusion, there is no significant difference between the variances of the two sets of data. Therefore, we can use the classic t-test witch assume equality of the two variances.
+
+### Compute unpaired two-samples t-test
+Equal
+```{r}
+# Compute t-test
+res <- t.test(women_weight, men_weight, var.equal = TRUE)
+res
+```
+
+
+```{r}
+# Compute t-test
+res <- t.test(weight ~ group, data = my_data, var.equal = TRUE)
+res
+```
+In the result above :
+
+t is the t-test statistic value (t = 2.784),
+df is the degrees of freedom (df= 16),
+p-value is the significance level of the t-test (p-value = 0.01327).
+conf.int is the confidence interval of the mean at 95% (conf.int = [4.0298, 29.748]);
+sample estimates is he mean value of the sample (mean = 68.9888889, 52.1).
+
+H0:mA=mB
+Ha:mA≠mB (different)
+
+The p-value of the test is 0.01327, which is less than the significance level alpha = 0.05. We can conclude that men’s average weight is significantly different from women’s average weight with a p-value = 0.01327.
+
+Less than
+
+```{r}
+t.test(weight ~ group, data = my_data,
+        var.equal = TRUE, alternative = "less")
+```
+H0:mA >= mB
+Ha:mA < mB (less)
+p value > 0.05 --> cannot reject hypothesis : man >= woman
+
+Greater than
+```{r}
+t.test(weight ~ group, data = my_data,
+        var.equal = TRUE, alternative = "greater")
+```
+H0:mA =< mB
+Ha:mA > mB (greater)
+
+p value < 0.05 --> reject hypothesis, accept altenative hypothesis: man > woman
+
+###  Welch Two Sample t-test (variance not equal)
+
+```{r}
+# Compute t-test
+res <- t.test(weight ~ group, data = my_data, var.equal = FALSE)
+res
+```
+
+
+```{r}
+t.test(weight ~ group, data = my_data,
+        alternative = "less",var.equal = FALSE)
+```
+
+
+```{r}
+t.test(weight ~ group, data = my_data,
+        alternative = "greater",var.equal = FALSE)
+```
+
+# 4. One-Way ANOVA Test in R
+
+The one-way analysis of variance (ANOVA), also known as one-factor ANOVA, is an extension of independent two-samples t-test for comparing means in a situation where there are more than two groups. In one-way ANOVA, the data is organized into several groups base on one single grouping variable (also called factor variable). This tutorial describes the basic principle of the one-way ANOVA test and provides practical anova test examples in R software.
+```{r}
+my_data <- PlantGrowth
+# Show a random sample
+set.seed(1234)
+dplyr::sample_n(my_data, 10)
+```
+
+
+```{r}
+# Show the levels
+levels(my_data$group)
+```
+```{r}
+my_data$group <- ordered(my_data$group,
+                         levels = c("ctrl", "trt1", "trt2"))
+```
+
+
+```{r}
+library(dplyr)
+group_by(my_data, group) %>%
+  summarise(
+    count = n(),
+    mean = mean(weight, na.rm = TRUE),
+    sd = sd(weight, na.rm = TRUE)
+  )
+```
+
+
+```{r}
+# Box plots
+# ++++++++++++++++++++
+# Plot weight by group and color by group
+library("ggpubr")
+ggboxplot(my_data, x = "group", y = "weight", 
+          color = "group", palette = c("#00AFBB", "#E7B800", "#FC4E07"),
+          order = c("ctrl", "trt1", "trt2"),
+          ylab = "Weight", xlab = "Treatment")
+```
+```{r}
+# Box plot
+boxplot(weight ~ group, data = my_data,
+        xlab = "Treatment", ylab = "Weight",
+        frame = FALSE, col = c("#00AFBB", "#E7B800", "#FC4E07"))
+```
+
+
+```{r}
+# Mean plots
+# ++++++++++++++++++++
+# Plot weight by group
+# Add error bars: mean_se
+# (other values include: mean_sd, mean_ci, median_iqr, ....)
+library("ggpubr")
+ggline(my_data, x = "group", y = "weight", 
+       add = c("mean_se", "jitter"), 
+       order = c("ctrl", "trt1", "trt2"),
+       ylab = "Weight", xlab = "Treatment")
+```
+
+## Compute one-way ANOVA test
+```{r}
+# Compute the analysis of variance
+res.aov <- aov(weight ~ group, data = my_data)
+# Summary of the analysis
+summary(res.aov)
+```
+The output includes the columns F value and Pr(>F) corresponding to the p-value of the test.
+
+As the p-value is less than the significance level 0.05, we can conclude that there are significant differences between the groups highlighted with “*" in the model summary.
+
+Multiple pairwise-comparison between the means of groups
+In one-way ANOVA test, a significant p-value indicates that some of the group means are different, but we don’t know which pairs of groups are different.
+
+It’s possible to perform multiple pairwise-comparison, to determine if the mean difference between specific pairs of group are statistically significant.
+
+## Tukey multiple pairwise-comparisons
+```{r}
+TukeyHSD(res.aov)
+```
+
+It can be seen from the output, that only the difference between trt2 and trt1 is significant with an adjusted p-value of 0.012.
+## Multiple comparisons using multcomp package
+```{r}
+#install.packages("multcomp")
+library(multcomp)
+summary(glht(res.aov, linfct = mcp(group = "Tukey")))
+```
+## Pairewise t-test
+
+The function pairewise.t.test() can be also used to calculate pairwise comparisons between group levels with corrections for multiple testing.
+
+```{r}
+pairwise.t.test(my_data$weight, my_data$group,
+                 p.adjust.method = "BH")
+```
+## Check ANOVA assumptions: test validity?
+
+### Check the homogeneity of variance assumption
+```{r}
+# 1. Homogeneity of variances
+plot(res.aov, 1)
+```
+Points 17, 15, 4 are detected as outliers, which can severely affect normality and homogeneity of variance. It can be useful to remove outliers to meet the test assumptions.
+
+```{r}
+library(car)
+leveneTest(weight ~ group, data = my_data)
+```
+
+From the output above we can see that the p-value is not less than the significance level of 0.05. This means that there is no evidence to suggest that the variance across groups is statistically significantly different. Therefore, we can assume the homogeneity of variances in the different treatment groups.
+
+#### ANOVA test with no assumption of equal variances
+```{r}
+oneway.test(weight ~ group, data = my_data)
+```
+#### Pairwise t-tests with no assumption of equal variances
+
+```{r}
+pairwise.t.test(my_data$weight, my_data$group,
+                 p.adjust.method = "BH", pool.sd = FALSE)
+```
+
+###Check the normality assumption
+
+Normality plot of residuals. In the plot below, the quantiles of the residuals are plotted against the quantiles of the normal distribution. A 45-degree reference line is also plotted.
+
+The normal probability plot of residuals is used to check the assumption that the residuals are normally distributed. It should approximately follow a straight line.
+
+
+```{r}
+# 2. Normality
+plot(res.aov, 2)
+```
+The conclusion above, is supported by the Shapiro-Wilk test on the ANOVA residuals (W = 0.96, p = 0.6) which finds no indication that normality is violated.
+
+```{r}
+# Extract the residuals
+aov_residuals <- residuals(object = res.aov )
+# Run Shapiro-Wilk test
+shapiro.test(x = aov_residuals )
+```
+#### Non-parametric alternative to one-way ANOVA test
+
+Note that, a non-parametric alternative to one-way ANOVA is Kruskal-Wallis rank sum test, which can be used when ANNOVA assumptions are not met.
+
+```{r}
+kruskal.test(weight ~ group, data = my_data)
+```
+
+#5. Two-way ANOVA test
+```{r}
+# Store the data in the variable my_data
+my_data <- ToothGrowth
+# Show a random sample
+set.seed(1234)
+dplyr::sample_n(my_data, 10)
+```
+
+
+```{r}
+# Check the structure
+str(my_data)
+```
+
+
+```{r}
+# Convert dose as a factor and recode the levels
+# as "D0.5", "D1", "D2"
+my_data$dose <- factor(my_data$dose, 
+                  levels = c(0.5, 1, 2),
+                  labels = c("D0.5", "D1", "D2"))
+head(my_data)
+```
+
+
+```{r}
+# Box plot with multiple groups
+# +++++++++++++++++++++
+# Plot tooth length ("len") by groups ("dose")
+# Color box plot by a second group: "supp"
+library("ggpubr")
+ggboxplot(my_data, x = "dose", y = "len", color = "supp",
+          palette = c("#00AFBB", "#E7B800"))
+```
+
+
+```{r}
+# Line plots with multiple groups
+# +++++++++++++++++++++++
+# Plot tooth length ("len") by groups ("dose")
+# Color box plot by a second group: "supp"
+# Add error bars: mean_se
+# (other values include: mean_sd, mean_ci, median_iqr, ....)
+library("ggpubr")
+ggline(my_data, x = "dose", y = "len", color = "supp",
+       add = c("mean_se", "dotplot"),
+       palette = c("#00AFBB", "#E7B800"))
+```
+
+## Compute two-way ANOVA test
+```{r}
+res.aov2 <- aov(len ~ supp + dose, data = my_data)
+summary(res.aov2)
+```
+
+From the ANOVA table we can conclude that both supp and dose are statistically significant. dose is the most significant factor variable. These results would lead us to believe that changing delivery methods (supp) or the dose of vitamin C, will impact significantly the mean tooth length.
+```{r}
+# Two-way ANOVA with interaction effect
+# These two calls are equivalent
+res.aov3 <- aov(len ~ supp * dose, data = my_data)
+res.aov3 <- aov(len ~ supp + dose + supp:dose, data = my_data)
+summary(res.aov3)
+```
+It can be seen that the two main effects (supp and dose) are statistically significant, as well as their interaction.
+Interpret the results
+From the ANOVA results, you can conclude the following, based on the p-values and a significance level of 0.05:
+
+the p-value of supp is 0.000429 (significant), which indicates that the levels of supp are associated with significant different tooth length.
+the p-value of dose is < 2e-16 (significant), which indicates that the levels of dose are associated with significant different tooth length.
+the p-value for the interaction between supp*dose is 0.02 (significant), which indicates that the relationships between dose and tooth length depends on the supp method.
+# Compute some summary statistics
+
+```{r}
+group_by(my_data, supp, dose) %>%
+  summarise(
+    count = n(),
+    mean = mean(len, na.rm = TRUE),
+    sd = sd(len, na.rm = TRUE)
+  )
+```
+
+
+```{r}
+model.tables(res.aov3, type="means", se = TRUE)
+```
+
+## Tukey multiple pairwise-comparisons
+
+```{r}
+TukeyHSD(res.aov3, which = "dose")
+```
+```{r}
+TukeyHSD(res.aov3, which = "supp")
+```
+
+## Multiple comparisons using multcomp package
+```{r}
+library(multcomp)
+summary(glht(res.aov2, linfct = mcp(dose = "Tukey")))
+```
+```{r}
+summary(glht(res.aov2, linfct = mcp(supp = "Tukey")))
+```
+
+## Pairwise t-test
+The function pairwise.t.test() can be also used to calculate pairwise comparisons between group levels with corrections for multiple testing.
+
+```{r}
+pairwise.t.test(my_data$len, my_data$dose,
+                p.adjust.method = "BH")
+```
+```{r}
+pairwise.t.test(my_data$len, my_data$supp,
+                p.adjust.method = "BH")
+```
+
+Check ANOVA assumptions: test validity?
+## Check the homogeneity of variance assumption
+```{r}
+# 1. Homogeneity of variances
+plot(res.aov3, 1)
+```
+
+
+```{r}
+library(car)
+leveneTest(len ~ supp*dose, data = my_data)
+```
+
+## Check the normality assumpttion
+```{r}
+# 2. Normality
+plot(res.aov3, 2)
+```
+
+As all the points fall approximately along this reference line, we can assume normality.
+
+The conclusion above, is supported by the Shapiro-Wilk test on the ANOVA residuals (W = 0.98, p = 0.5) which finds no indication that normality is violated.
+```{r}
+# Extract the residuals
+aov_residuals <- residuals(object = res.aov3)
+# Run Shapiro-Wilk test
+shapiro.test(x = aov_residuals )
+```
+## Compute two-way ANOVA test in R for unbalanced designs
+
+An unbalanced design has unequal numbers of subjects in each group.
+
+There are three fundamentally different ways to run an ANOVA in an unbalanced design. They are known as Type-I, Type-II and Type-III sums of squares. To keep things simple, note that The recommended method are the Type-III sums of squares
+```{r}
+library(car)
+my_anova <- aov(len ~ supp * dose, data = my_data)
+Anova(my_anova, type = "III")
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+```{r}
+```
+
+
+```{r}
+```
+

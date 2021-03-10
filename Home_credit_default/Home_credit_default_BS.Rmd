@@ -15,6 +15,7 @@ library(recipes)
 
 # Machine Learning
 library(h2o)
+h2o.init()
 library(tictoc)
 ```
 
@@ -316,6 +317,26 @@ performance_h2o <- h2o.performance(h2o_model_lightgbm, newdata = test_h2o)
 performance_h2o %>%
     h2o.auc()
 ```
+# Xgboost
+```{r}
+assignment_type <- "Stratified"
+tic()
+h2o_model_lightgbm <- h2o.xgboost(
+    x = predictors, 
+    y = response,
+    training_frame = train_h2o, 
+    #validation_frame = valid_h2o,
+    #fold_assignment = assignment_type,
+    #nfolds=5,
+    seed = 123
+)
+toc() # 108 s
+test_pred <-h2o.predict(h2o_model_lightgbm, newdata = test_h2o)
+predict <- as.data.frame(test_pred)$predict
+reference <- as.data.frame(test_h2o)[[response]]
+caret::confusionMatrix(predict,reference,positive = "1",mode="prec_recall")
+```
+
 ## AutoML
 
 ```{r}
