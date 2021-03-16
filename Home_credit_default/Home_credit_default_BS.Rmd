@@ -311,13 +311,24 @@ reference <- as.data.frame(test_h2o)[[response]]
 caret::confusionMatrix(predict,reference,positive = "1",mode="prec_recall")
 ```
 
+```{r}
+library(cvAUC)
+predict_proba <- as.data.frame(test_pred)$p1
+reference
+AUC(predict_proba,reference)
+```
 
 ```{r}
 performance_h2o <- h2o.performance(h2o_model_lightgbm, newdata = test_h2o)
+performance_h2o
 performance_h2o %>%
-    h2o.auc()
+    h2o.auc() # 0.7543209
 ```
-# Xgboost
+```{r}
+library(cvAUC)
+```
+
+## Xgboost
 ```{r}
 assignment_type <- "Stratified"
 tic()
