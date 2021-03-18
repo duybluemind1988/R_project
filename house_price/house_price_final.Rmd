@@ -1,0 +1,325 @@
+---
+title: "Untitled"
+output: html_document
+---
+# 1. Get data
+```{r}
+library(tidyverse)# include dplyr, tidr, ggplot2, tibble, readr, purr
+library(recipes)
+library(data.table)
+library(rsample)   # for data splitting
+library(caret)     # for model packages
+```
+
+
+```{r}
+path="house_price_train.csv"
+data <- fread(path)
+dim(data)
+head(data)
+```
+#2. Preprocess data
+## Remove column with high null value (>50%)
+```{r}
+null_value <- sapply(data, function(x) sum(is.na(x)))
+class(null_value)
+null_value_df <- as.data.frame(null_value) %>% arrange(desc(null_value)) %>% filter(null_value > 0)
+# Name the unnamed first column
+null_value_df <- cbind(Features= rownames(null_value_df), null_value_df)
+rownames(null_value_df) <- NULL
+# Add percentage column
+total_rows <- dim(data)[1]
+null_value_df <- null_value_df %>% mutate(percentage=null_value/total_rows*100)
+null_value_df
+```
+
+
+```{r}
+# Check which column have na value > 50 %
+data[, which(colMeans(is.na(data)) > 0.5)]
+# Check which column did not have na value > 50 %
+col_low_na_value <- data[, which(colMeans(!is.na(data)) > 0.5)]
+col_low_na_value
+```
+
+```{r}
+data <- data %>% select(all_of(col_low_na_value))
+dim(data)
+```
+
+
+```{r}
+# Create training (80%) and test (20%) sets for the 
+set.seed(430)
+split = createDataPartition(data$SalePrice, p =0.8, list = FALSE)
+train = data[split, ]
+test = data[-split, ]
+dim(train)
+dim(test)
+head(train)
+```
+```{r}
+colSums(is.na(train))
+```
+
+## Try method not convert to factor
+```{r}
+library(parsnip)
+```
+
+```{r}
+rf_model <- rand_forest(mtry = 10, trees = 200) %>%
+      set_engine("ranger", importance = "impurity") %>%
+      set_mode("regression") %>%
+      fit(SalePrice ~ ., data = train)
+rf_model
+```
+```{r}
+# Khong ap dung duoc khi chua convert sang factor
+glmn_fit <- 
+  linear_reg(penalty = 0.001, mixture = 0.5) %>% 
+  set_engine("glmnet") %>%
+  fit(SalePrice ~ ., data = train)
+glmn_fit
+```
+Error in `contrasts<-`(`*tmp*`, value = contr.funs[1 + isOF[nn]]) : contrasts can be applied only to factors with 2 or more levels
+```{r}
+# Khong ap dung duoc khi chua convert sang factor
+xgboost_model <- boost_tree() %>% 
+            set_engine("xgboost") %>% 
+            set_mode("regression") %>% 
+            fit(SalePrice ~ ., data = train)
+xgboost_model
+```
+Error in `contrasts<-`(`*tmp*`, value = contr.funs[1 + isOF[nn]]) : contrasts can be applied only to factors with 2 or more levels
+```{r}
+# Khong ap dung duoc khi co qua nhieu NA
+linear_fit <- 
+        linear_reg() %>% 
+        set_engine("lm") %>%
+        set_mode("regression") %>% 
+        fit(SalePrice ~ ., data = train)
+```
+Error in `contrasts<-`(`*tmp*`, value = contr.funs[1 + isOF[nn]]) : contrasts can be applied only to factors with 2 or more levels
+```{r}
+# Khong ap dung duoc khi co factor 1 level
+linear_fit <- 
+        linear_reg() %>% 
+        set_engine("lm") %>%
+        set_mode("regression") %>% 
+        fit(SalePrice ~ ., data = drop_na(train))
+
+```
+Error in `contrasts<-`(`*tmp*`, value = contr.funs[1 + isOF[nn]]) : contrasts can be applied only to factors with 2 or more levels
+```{r}
+# convert training data to h2o object
+response="SalePrice"
+predictors <- setdiff(colnames(train), response)
+train_h2o_new <- as.h2o(train)
+tic()
+h2o.gbm <- h2o.gbm(
+  x = predictors, 
+  y = response,
+  training_frame = train_h2o_new, 
+  #validation_frame = valid_h2o,
+  balance_classes = TRUE,
+  nfolds=5,
+  #ntrees = 1000,
+  #booster = "dart",
+  #normalize_type = "tree",
+  
+  seed = 123
+)
+toc() # 7 s
+test_pred <-h2o.predict(h2o.gbm, newdata = test_h2o)
+h2o.gbm
+```
+
+There are three main steps in creating and applying feature engineering with recipes:
+VERY IMPORTANT
+- recipe: where you define your feature engineering steps to create your blueprint.
+- prepare: estimate feature engineering parameters based on training data.
+- bake: apply the blueprint to new data.
+
+Receipe:
+- Remove near-zero variance features that are categorical (aka nominal).
+- Ordinal encode our quality-based features (which are inherently ordinal).
+- Center and scale (i.e., standardize) all numeric features.
+- Perform dimension reduction by applying PCA to all numeric features.
+
+While your project’s needs may vary, here is a suggested order of potential steps that should work for most problems:
+
+- Filter out zero or near-zero variance features.
+- Perform imputation if required.
+- Normalize to resolve numeric feature skewness.
+- Standardize (center and scale) numeric features.
+- Perform dimension reduction (e.g., PCA) on numeric features.
+- One-hot or dummy encode categorical features.
+
+Functions that specify the role of the variables:
+
+- all_predictors() applies the step to the predictor variables only
+- all_outcomes() applies the step to the outcome variable(s) only
+Functions that specify the type of the variables:
+
+- all_nominal() applies the step to all variables that are nominal (categorical)
+- all_numeric() applies the step to all variables that are numeric
+
+Predictor variables: are also known as independent variables, x-variables, and input variables. A predictor variable explains changes in the response. Typically, you want to determine how changes in one or more predictors are associated with changes in the response.
+
+Outcome variables are usually the dependent variables which are observed and measured by changing independent variables. These variables determine the effect of the cause (independent) variables when changed for different values. The dependent variables are the outcomes of the experiments determining what was caused or what changed as a result of the study.
+
+## Try method convert to factor
+```{r}
+library(tictoc)
+library(h2o)
+h2o.init()
+```
+
+```{r}
+response="SalePrice"
+recipe_obj <- recipe(SalePrice ~ ., data = train) %>%
+  #step_nzv(all_nominal())  %>% #Remove near-zero variance features 
+  #step_knnimpute(all_predictors(), neighbors = 6) %>%  # Impute, very slow in large data, need step outside
+  step_YeoJohnson(all_numeric(),-all_outcomes()) %>% # Remove skewness
+  #step_integer(matches("Qual|Cond|QC|Qu")) %>% # Ordinal encoder
+  step_center(all_numeric(), -all_outcomes()) %>% # center 
+  step_scale(all_numeric(), -all_outcomes()) %>% # scale
+  #step_dummy(all_nominal(), one_hot = TRUE) %>% 
+  #step_pca(all_numeric(), -all_outcomes()) #Perform dimension reduction
+  prep()
+  
+baked_train <- bake(recipe_obj, new_data = train)
+#baked_valid <- bake(recipe_obj, new_data = valid)
+baked_test <- bake(recipe_obj, new_data = test)
+
+# convert training data to h2o object
+train_h2o <- as.h2o(baked_train)
+#valid_h2o <- as.h2o(baked_valid)
+test_h2o <- as.h2o(baked_test)
+# set the predictor names
+predictors <- setdiff(colnames(baked_train), response)
+```
+```{r}
+colSums(is.na(baked_train))
+```
+
+```{r}
+# xgboost partsnip dung tot khi da convert sang factor 
+xgboost_model <- boost_tree() %>% 
+            set_engine("xgboost") %>% 
+            set_mode("regression") %>% 
+            fit(SalePrice ~ ., data = baked_train)
+#xgboost_model
+```
+
+```{r}
+# glmn_fit partsnip dung tot khi da convert sang factor , chap nhan NA value
+glmn_fit <- 
+  linear_reg(penalty = 0.001, mixture = 0.5) %>% 
+  set_engine("glmnet") %>%
+  set_mode("regression") %>% 
+  fit(SalePrice ~ ., data = baked_train)
+# glmn_fit
+```
+
+```{r}
+# linear regression cannot work, may be NA value
+linear_fit <- 
+        linear_reg() %>% 
+        set_engine("lm") %>%
+        set_mode("regression") %>% 
+        fit(SalePrice ~ ., data = baked_train)
+```
+Error in `contrasts<-`(`*tmp*`, value = contr.funs[1 + isOF[nn]]) : contrasts can be applied only to factors with 2 or more levels
+```{r}
+linear_fit <- 
+        linear_reg() %>% 
+        set_engine("lm") %>%
+        set_mode("regression") %>% 
+        fit(SalePrice ~ ., data = drop_na(baked_train))
+```
+Error in `contrasts<-`(`*tmp*`, value = contr.funs[1 + isOF[nn]]) : contrasts can be applied only to factors with 2 or more levels
+```{r}
+tic()
+h2o.gbm <- h2o.gbm(
+  x = predictors, 
+  y = response,
+  training_frame = train_h2o, 
+  #validation_frame = valid_h2o,
+  balance_classes = TRUE,
+  nfolds=5,
+  #ntrees = 1000,
+  #booster = "dart",
+  #normalize_type = "tree",
+  
+  seed = 123
+)
+toc() # 7 s
+test_pred <-h2o.predict(h2o.gbm, newdata = test_h2o)
+h2o.gbm
+```
+
+#3. Benchmark method
+```{r}
+library(tidymodels)
+data(ames)
+#ames <- mutate(ames, Sale_Price = log10(Sale_Price))
+ames
+```
+
+
+```{r}
+colSums(is.na(ames))
+```
+
+```{r}
+#ames_split <- initial_split(ames, prop = 0.80, strata = Sale_Price)
+#ames_train <- training(ames_split)
+#ames_test  <-  testing(ames_split)
+```
+
+```{r}
+# Create training (80%) and test (20%) sets for the 
+set.seed(430)
+split = createDataPartition(data$SalePrice, p =0.8, list = FALSE)
+train = data[split, ]
+test = data[-split, ]
+dim(train)
+dim(test)
+head(train)
+```
+
+```{r}
+blueprint <- recipe(SalePrice ~ ., data = train_data) %>%
+  step_nzv(all_nominal())  %>% #Remove near-zero variance features 
+  #step_knnimpute(all_predictors(), neighbors = 6) %>%  # Impute
+  step_YeoJohnson(all_numeric(),-all_outcomes()) %>% # Remove skewness
+  #step_integer(matches("Qual|Cond|QC|Qu")) %>% # Ordinal encoder
+  step_center(all_numeric(), -all_outcomes()) %>% # center 
+  step_scale(all_numeric(), -all_outcomes()) # scale
+  #step_dummy(all_nominal(), one_hot = TRUE) %>% 
+  #step_pca(all_numeric(), -all_outcomes()) #Perform dimension reduction
+prepare <- prep(blueprint, training = train_data)
+```
+
+
+```{r}
+ames_rec <- 
+  recipe(Sale_Price ~ Neighborhood + Gr_Liv_Area + Year_Built + Bldg_Type + 
+           Latitude + Longitude, data = ames_train) %>%
+  step_log(Gr_Liv_Area, base = 10) %>% 
+  step_other(Neighborhood, threshold = 0.01) %>% 
+  step_dummy(all_nominal()) %>% 
+  step_interact( ~ Gr_Liv_Area:starts_with("Bldg_Type_") ) %>% 
+  step_ns(Latitude, Longitude, deg_free = 20)
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
