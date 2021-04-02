@@ -1514,40 +1514,185 @@ caret::confusionMatrix(predict,reference,positive = "Yes",mode="prec_recall")
 ```
 Choose select model because best Recall/F1/balanced accuracy and easy model explanation
 
-# 9. Try model with no factor conver
+# 9. Study
+
 ```{r}
+library(tidyverse)# include dplyr, tidr, ggplot2, tibble, readr, purr
+library(data.table)
+library(recipes)
+# library(rsample)   # for data splitting
+library(caret)     # for model packages
+library(h2o)
+library(tictoc)
+library(parsnip)
+h2o.init()
+```
+
+```{r}
+#setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+path <- "WA_Fn-UseC_-HR-Employee-Attrition.csv"
+data <- fread(path)
+head(data)
+```
+##  Try model with no factor convert
+```{r}
+set.seed(430)
+response <- "Attrition"
+split = caret::createDataPartition(data[[response]], p =0.8, list = FALSE)
+train = data[split, ]
+test = data[-split, ]
+train$Attrition <- as.factor(train$Attrition)
+#write.csv(test,"test_sample1.csv",row.names = FALSE)
+train
+```
+
+```{r}
+rf_model <- rand_forest(mtry = 10, trees = 200) %>%
+      set_engine("ranger", importance = "impurity") %>%
+      set_mode("classification") %>%
+      fit(Attrition ~ ., data = train)
+rf_model
 ```
 
 
 ```{r}
+xgboost_model <- boost_tree() %>% 
+            set_engine("xgboost") %>% 
+            set_mode("classification") %>% 
+            fit(Attrition ~ ., data = train)
+xgboost_model
+```
+```{r}
+glmn_fit <- 
+  linear_reg(penalty = 0.001, mixture = 0.5) %>% 
+  set_engine("glmnet") %>%
+  fit(Attrition ~ ., data = train)
+glmn_fit
+```
+```{r}
+# convert training data to h2o object
+train_h2o <- as.h2o(train)
+#test_h2o <- as.h2o(baked_test)
+# set the response column to Sale_Price
+response <- "Attrition"
+#n_features <- length(setdiff(names(baked_train), response))
+# set the predictor names
+predictors <- setdiff(colnames(train_h2o), response)
+assignment_type <- "Stratified"
+tic()
+h2o_model_gbm <- h2o.gbm(
+    x = predictors, 
+    y = response,
+    training_frame = train_h2o, 
+    balance_classes = TRUE,
+    #fold_assignment = assignment_type,
+    #nfolds=5,
+    seed = 123
+)
+toc() # 7 s
+```
+Remove over 18
+```{r}
+train<- train %>% select(-Over18)
+```
+```{r}
+logistic_fit <- 
+  logistic_reg() %>% 
+  set_engine("glmnet") %>%
+  set_mode("classification") %>% 
+  fit(Attrition ~ ., data = train)
+logistic_fit
+```
+```{r}
+xgboost_model <- boost_tree() %>% 
+            set_engine("xgboost") %>% 
+            set_mode("classification") %>% 
+            fit(Attrition ~ ., data = train)
+xgboost_model
+```
+
+## Try model with  factor convert
+```{r}
+set.seed(430)
+response <- "Attrition"
+split = caret::createDataPartition(data[[response]], p =0.8, list = FALSE)
+train = data[split, ]
+test = data[-split, ]
+#write.csv(test,"test_sample1.csv",row.names = FALSE)
+# all character columns to factor:
+train <- mutate_if(train, is.character, as.factor)
+train
+```
+```{r}
+str(train)
+```
+
+```{r}
+rf_model <- rand_forest(mtry = 10, trees = 200) %>%
+      set_engine("ranger", importance = "impurity") %>%
+      set_mode("classification") %>%
+      fit(Attrition ~ ., data = train)
+rf_model
 ```
 
 
 ```{r}
+xgboost_model <- boost_tree() %>% 
+            set_engine("xgboost") %>% 
+            set_mode("classification") %>% 
+            fit(Attrition ~ ., data = train)
+xgboost_model
 ```
 
 
 ```{r}
+logistic_fit <- 
+  logistic_reg() %>% 
+  set_engine("glmnet") %>%
+  set_mode("classification") %>% 
+  fit(Attrition ~ ., data = train)
+logistic_fit
 ```
 
 
 ```{r}
+recipe_obj <- recipe(Attrition ~ ., data = train) %>%
+  #step_rm(EmployeeNumber,StandardHours,Over18,EmployeeCount) %>%
+  #step_string2factor(all_nominal()) %>% # convert character to factor
+  #step_integer(Education,EnvironmentSatisfaction) %>% # Ordinal encoder
+  #step_num2factor(Education,EnvironmentSatisfaction,JobInvolvement,JobLevel,JobSatisfaction,PerformanceRating,RelationshipSatisfaction,StockOptionLevel,WorkLifeBalance) %>%  # convert number to factor
+  step_nzv(all_predictors(), -all_outcomes())  %>% #Remove near-zero variance features like sex, yes/no...
+  #step_knnimpute(all_predictors(), neighbors = 6) %>%  # Impute, very slow in large data in train, need step outside
+  #step_YeoJohnson(all_numeric(),-all_outcomes()) %>% # Remove skewness
+
+  #step_center(all_numeric(), -all_outcomes()) %>% # center, no need for tree method
+  #step_scale(all_numeric(), -all_outcomes()) %>% # scale, no need for tree method
+  #step_dummy(all_nominal(), one_hot = TRUE) %>%
+  #step_pca(all_numeric(), -all_outcomes()) #Perform dimension reduction
+  prep()
+baked_train <- bake(recipe_obj, new_data = train)
+```
+
+```{r}
+str(baked_train)
+```
+
+```{r}
+xgboost_model <- boost_tree() %>% 
+            set_engine("xgboost") %>% 
+            set_mode("classification") %>% 
+            fit(Attrition ~ ., data = baked_train)
+xgboost_model
 ```
 
 
 ```{r}
-```
-
-
-```{r}
-```
-
-
-```{r}
-```
-
-
-```{r}
+logistic_fit <- 
+  logistic_reg() %>% 
+  set_engine("glmnet") %>%
+  set_mode("classification") %>% 
+  fit(Attrition ~ ., data = baked_train)
+#logistic_fit
 ```
 
 

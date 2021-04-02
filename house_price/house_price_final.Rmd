@@ -179,7 +179,7 @@ h2o.init()
 ```{r}
 response="SalePrice"
 recipe_obj <- recipe(SalePrice ~ ., data = train) %>%
-  #step_nzv(all_nominal())  %>% #Remove near-zero variance features 
+  step_nzv(all_predictors())  %>% #Remove near-zero variance features 
   #step_knnimpute(all_predictors(), neighbors = 6) %>%  # Impute, very slow in large data, need step outside
   step_YeoJohnson(all_numeric(),-all_outcomes()) %>% # Remove skewness
   #step_integer(matches("Qual|Cond|QC|Qu")) %>% # Ordinal encoder
@@ -261,58 +261,291 @@ h2o.gbm
 ```
 
 #3. Benchmark method
+https://www.tidymodels.org/learn/models/parsnip-ranger-glmnet/
+
+## 3.1 Data clean
 ```{r}
 library(tidymodels)
-data(ames)
-#ames <- mutate(ames, Sale_Price = log10(Sale_Price))
-ames
+library(data.table)
+data(ames) # No na value, convert all to factor
+
+#path="house_price_train.csv"
+#ames <- fread(path)
+
+set.seed(4595)
+data_split <- initial_split(ames, strata = "Sale_Price", prop = 0.75)
+
+ames_train <- training(data_split)
+ames_test  <- testing(data_split)
+ames_train
+```
+## RANDOM FOREST
+
+```{r}
+preds <- c("Longitude", "Latitude", "Lot_Area", "Neighborhood", "Year_Sold")
+
+rf_xy_fit <- 
+  rand_forest() %>%
+  set_mode("regression") %>% 
+  set_engine("ranger") %>%
+  fit_xy(
+    x = ames_train[, preds],
+    y = log10(ames_train$Sale_Price)
+  )
+
+rf_xy_fit
 ```
 
 
 ```{r}
-colSums(is.na(ames))
+test_results <- 
+  ames_test %>%
+  select(Sale_Price) %>%
+  mutate(Sale_Price = log10(Sale_Price)) %>%
+  bind_cols(
+    predict(rf_xy_fit, new_data = ames_test[, preds])
+  )
+test_results %>% slice(1:5)
 ```
 
-```{r}
-#ames_split <- initial_split(ames, prop = 0.80, strata = Sale_Price)
-#ames_train <- training(ames_split)
-#ames_test  <-  testing(ames_split)
-```
 
 ```{r}
-# Create training (80%) and test (20%) sets for the 
-set.seed(430)
-split = createDataPartition(data$SalePrice, p =0.8, list = FALSE)
-train = data[split, ]
-test = data[-split, ]
-dim(train)
-dim(test)
-head(train)
+# summarize performance
+test_results %>% metrics(truth = Sale_Price, estimate = .pred) 
 ```
 
+mtry: The number of predictors that will be randomly sampled at each split when creating the tree models.
+trees: The number of trees contained in the ensemble.
+
 ```{r}
-blueprint <- recipe(SalePrice ~ ., data = train_data) %>%
-  step_nzv(all_nominal())  %>% #Remove near-zero variance features 
-  #step_knnimpute(all_predictors(), neighbors = 6) %>%  # Impute
+rand_forest(mode = "regression", mtry = 3, trees = 1000) %>%
+  set_engine("ranger") %>%
+  fit(
+    log10(Sale_Price) ~ Longitude + Latitude + Lot_Area + Neighborhood + Year_Sold,
+    data = ames_train
+  )
+```
+When the model it being fit by parsnip, data descriptors are made available. These attempt to let you know what you will have available when the model is fit. When a model object is created (say using rand_forest()), the values of the arguments that you give it are immediately evaluated unless you delay them. To delay the evaluation of any argument, you can used rlang::expr() to make an expression.
+
+
+Two relevant data descriptors for our example model are:
+
+.preds(): the number of predictor variables in the data set that are associated with the predictors prior to dummy variable creation.
+.cols(): the number of predictor columns after dummy variables (or other encodings) are created.
+```{r}
+rand_forest(mode = "regression", mtry = .preds(), trees = 1000) %>%
+  set_engine("ranger") %>%
+  fit(
+    log10(Sale_Price) ~ Longitude + Latitude + Lot_Area + Neighborhood + Year_Sold,
+    data = ames_train
+  )
+```
+
+## REGULARIZED REGRESSION
+A linear model might work for this data set as well. We can use the linear_reg() parsnip model. There are two engines that can perform regularization/penalization, the glmnet and sparklyr packages. Let’s use the former here. The glmnet package only implements a non-formula method, but parsnip will allow either one to be used.
+
+When regularization is used, the predictors should first be centered and scaled before being passed to the model. The formula method won’t do that automatically so we will need to do this ourselves. We’ll use the recipes package for these steps.
+
+
+```{r}
+norm_recipe <- 
+  recipe(
+    Sale_Price ~ Longitude + Latitude + Lot_Area + Neighborhood + Year_Sold, 
+    data = ames_train
+  ) %>%
+  step_other(Neighborhood) %>% 
+  step_dummy(all_nominal()) %>%
+  step_center(all_predictors()) %>%
+  step_scale(all_predictors()) %>%
+  step_log(Sale_Price, base = 10) %>% 
+  # estimate the means and standard deviations
+  prep(training = ames_train, retain = TRUE)
+norm_recipe
+```
+```{r}
+baked_train<-bake(norm_recipe, new_data = ames_train)
+baked_train
+```
+
+
+```{r}
+# Now let's fit the model using the processed version of the data
+
+glmn_fit <- 
+  linear_reg(penalty = 0.001, mixture = 0.5) %>% 
+  set_engine("glmnet") %>%
+  fit(Sale_Price ~ ., data = baked_train)
+glmn_fit
+```
+
+
+```{r}
+# First, get the processed version of the test set predictors:
+test_normalized <- bake(norm_recipe, new_data = ames_test, all_predictors())
+
+test_results <- 
+  test_results %>%
+  rename(`random forest` = .pred) %>%
+  bind_cols(
+    predict(glmn_fit, new_data = test_normalized) %>%
+      rename(glmnet = .pred)
+  )
+test_results
+```
+```{r}
+test_results %>% metrics(truth = Sale_Price, estimate = glmnet) 
+```
+```{r}
+test_results %>% 
+  gather(model, prediction, -Sale_Price) %>% 
+  ggplot(aes(x = prediction, y = Sale_Price)) + 
+  geom_abline(col = "green", lty = 2) + 
+  geom_point(alpha = .4) + 
+  facet_wrap(~model) + 
+  coord_fixed()
+```
+
+## 3.2 Data not clean
+```{r}
+library(tidymodels)
+library(data.table)
+#data(ames) # No na value, convert all to factor
+
+path="house_price_train.csv"
+ames <- fread(path)
+
+set.seed(4595)
+data_split <- initial_split(ames, strata = "SalePrice", prop = 0.75)
+
+ames_train <- training(data_split)
+ames_test  <- testing(data_split)
+ames_train
+```
+```{r}
+colSums(is.na(ames_train))
+```
+
+## Random forest
+```{r}
+rf_model <- rand_forest(mtry = 10, trees = 200) %>%
+      set_engine("ranger", importance = "impurity") %>%
+      set_mode("regression") %>%
+      fit(SalePrice ~ ., data = ames_train)
+rf_model
+
+```
+
+## REGULARIZED REGRESSION
+```{r}
+norm_recipe <- 
+  recipe(
+    SalePrice ~ ., 
+    data = ames_train
+  ) %>%
+  step_rm(Id) %>% 
+  step_nzv(all_predictors())  %>% #Remove near-zero variance features 
+  #step_knnimpute(all_predictors(), neighbors = 6) %>%  # Impute, very slow in large data, need step outside
+  step_other(Neighborhood) %>% 
+  step_dummy(all_nominal()) %>%
+  
   step_YeoJohnson(all_numeric(),-all_outcomes()) %>% # Remove skewness
-  #step_integer(matches("Qual|Cond|QC|Qu")) %>% # Ordinal encoder
-  step_center(all_numeric(), -all_outcomes()) %>% # center 
-  step_scale(all_numeric(), -all_outcomes()) # scale
-  #step_dummy(all_nominal(), one_hot = TRUE) %>% 
-  #step_pca(all_numeric(), -all_outcomes()) #Perform dimension reduction
-prepare <- prep(blueprint, training = train_data)
+  step_center(all_predictors()) %>%
+  step_scale(all_predictors()) %>%
+  step_log(SalePrice, base = 10) %>% 
+  # estimate the means and standard deviations
+  prep()
+norm_recipe
 ```
 
 
 ```{r}
-ames_rec <- 
-  recipe(Sale_Price ~ Neighborhood + Gr_Liv_Area + Year_Built + Bldg_Type + 
-           Latitude + Longitude, data = ames_train) %>%
-  step_log(Gr_Liv_Area, base = 10) %>% 
-  step_other(Neighborhood, threshold = 0.01) %>% 
-  step_dummy(all_nominal()) %>% 
-  step_interact( ~ Gr_Liv_Area:starts_with("Bldg_Type_") ) %>% 
-  step_ns(Latitude, Longitude, deg_free = 20)
+baked_train <- bake(norm_recipe, new_data = ames_train)
+#baked_valid <- bake(recipe_obj, new_data = valid)
+baked_test <- bake(norm_recipe, new_data = ames_test)
+baked_train
+```
+```{r}
+rf_model <- rand_forest(mtry = 10, trees = 200) %>%
+      set_engine("ranger", importance = "impurity") %>%
+      set_mode("regression") %>%
+      fit(SalePrice ~ ., data = baked_train)
+rf_model
+```
+
+```{r}
+glmn_fit <- 
+  linear_reg() %>% 
+  set_engine("glmnet") %>%
+  fit(SalePrice ~ ., data = baked_train)
+glmn_fit
+```
+```{r}
+xgboost_model <- boost_tree() %>% 
+            set_engine("xgboost") %>% 
+            set_mode("regression") %>% 
+            fit(SalePrice ~ ., data = baked_train)
+xgboost_model
+```
+```{r}
+predict(xgboost_model,baked_test)
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+## H2O
+```{r}
+response="SalePrice"
+# convert training data to h2o object
+train_h2o <- as.h2o(baked_train)
+#valid_h2o <- as.h2o(baked_valid)
+test_h2o <- as.h2o(baked_test)
+# set the predictor names
+predictors <- setdiff(colnames(baked_train), response)
+```
+
+
+```{r}
+tic()
+h2o.gbm <- h2o.gbm(
+  x = predictors, 
+  y = response,
+  training_frame = train_h2o, 
+  #validation_frame = valid_h2o,
+  #balance_classes = TRUE,
+  #nfolds=5,
+  #ntrees = 1000,
+  #booster = "dart",
+  #normalize_type = "tree",
+  
+  seed = 123
+)
+toc() # 7 s
+test_pred <-h2o.predict(h2o.gbm, newdata = test_h2o)
+h2o.gbm
+```
+```{r}
+h2o.varimp_plot(h2o.gbm,num_of_features=20)
+```
+
+
+```{r}
+h2o.shap_summary_plot(h2o.gbm,test_h2o)
+```
+
+
+```{r}
+h2o.shap_explain_row_plot(h2o.gbm, test_h2o,row_index = 10)
+h2o.shap_explain_row_plot(h2o.gbm, test_h2o,row_index = 4)
+```
+
+
+```{r}
 ```
 
 
