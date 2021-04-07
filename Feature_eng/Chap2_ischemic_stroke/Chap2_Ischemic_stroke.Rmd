@@ -1,0 +1,876 @@
+# Ischemic_stroke prediction
+
+# 2. Preprocessing
+```{r}
+library(tidymodels)
+library(corrplot)
+```
+
+
+```{r}
+Stroke<-load("stroke_data.RData") # save multy object in Rdata
+
+VC_preds <- 
+  c("CALCVol", "CALCVolProp", "MATXVol", "MATXVolProp", "LRNCVol", 
+    "LRNCVolProp", "MaxCALCArea", "MaxCALCAreaProp", "MaxDilationByArea", 
+    "MaxMATXArea", "MaxMATXAreaProp", "MaxLRNCArea", "MaxLRNCAreaProp", 
+    "MaxMaxWallThickness", "MaxRemodelingRatio", "MaxStenosisByArea", 
+    "MaxWallArea", "WallVol", "MaxStenosisByDiameter")
+
+risk_preds <-
+  c("age", "sex", "SmokingHistory", "AtrialFibrillation", "CoronaryArteryDisease", 
+    "DiabetesHistory", "HypercholesterolemiaHistory", "HypertensionHistory")
+```
+
+```{r}
+Stroke
+```
+
+```{r}
+dim(stroke_train)
+dim(stroke_test)
+stroke_train
+```
+
+
+```{r}
+stroke_train %>% 
+  count(Stroke) %>% 
+  mutate(Data = "Training") %>% 
+  bind_rows(
+    stroke_test %>% 
+      count(Stroke) %>% 
+      mutate(Data = "Testing")
+  ) %>% 
+  spread(Stroke, n)
+```
+
+
+```{r}
+fig_2_2_a <- 
+  bind_rows(stroke_train, stroke_test) %>% 
+  ggplot(aes(x = MaxLRNCArea)) +
+  geom_histogram(bins = 15, col = "#D53E4F", fill = "#D53E4F", alpha = .5) +
+  xlab("MaxLRNCArea") +
+  ylab("Frequency") +
+  ggtitle("(a)") +
+  theme_bw()
+
+fig_2_2_b <- 
+  recipe(Stroke ~ ., data = bind_rows(stroke_train, stroke_test)) %>% 
+  step_YeoJohnson(all_predictors()) %>% 
+  prep() %>% 
+  juice() %>% 
+  ggplot(aes(x = MaxLRNCArea)) +
+  geom_histogram(bins = 15, col = "#D53E4F", fill = "#D53E4F", alpha = .5) +
+  xlab("Transformed MaxLRNCArea") +
+  ylab("Frequency") +
+  ggtitle("(b)") +
+  theme_bw()
+
+fig_2_2_a
+fig_2_2_b
+```
+
+
+```{r}
+risk_train <-
+  recipe(Stroke ~ ., data = stroke_train) %>%
+  step_center(VC_preds) %>%
+  step_scale(VC_preds) %>%
+  step_YeoJohnson(VC_preds) %>%
+  prep() %>% 
+  juice() %>%
+  select(-one_of(c("Stroke", "NASCET", risk_preds)))
+risk_train
+
+```
+```{r}
+risk_corr <- cor(risk_train)
+```
+
+
+# 2. Exploration
+```{r}
+library(caret)
+library(tidymodels)
+library(utils)
+library(pROC)
+library(plotly)
+
+theme_set(theme_bw())
+```
+
+```{r}
+# ------------------------------------------------------------------------------
+# Code to compare 2-way interaction models to their main effects model ---------
+
+# `a` and `b` are two models from `train()`
+compare_models_1way <- function(a, b, metric = a$metric[1], ...) {
+  mods <- list(a, b)
+  rs <- resamples(mods)
+  diffs <- diff(rs, metric = metric[1], ...)
+  diffs$statistics[[1]][[1]]
+}
+```
+
+
+```{r}
+# `risk_preds` is contained in the original data file and has the predictor 
+# names for the risk related variables
+
+# ------------------------------------------------------------------------------
+# Create a "null model" with no predictors to get baseline performance ---------
+
+null_mat <- data.frame(intercept = rep(1, nrow(stroke_train)))
+null_mat
+
+```
+```{r}
+ctrl <- 
+  trainControl(method = "repeatedcv", repeats = 5,
+               classProbs = TRUE, 
+               summaryFunction = twoClassSummary)
+
+set.seed(63331)
+null_mod <- train(x = null_mat, 
+                  y = stroke_train$Stroke, 
+                  preProc = "YeoJohnson",
+                  method = "glm", 
+                  metric = "ROC", 
+                  trControl = ctrl)
+null_mod
+```
+
+
+```{r}
+# ------------------------------------------------------------------------------
+# Compare the models with single predictors to the risk model. These data make
+# https://bookdown.org/max/FES/stroke-tour.html#tab:stroke-strokeRiskAssociations
+
+# `VC_preds` and `risk_preds` contain the predictor names for different sets.
+
+one_predictor_res <- 
+  data.frame(Predictor = c(VC_preds, risk_preds), 
+             Improvement = NA,
+             Pvalue = NA,
+             ROC = NA,
+             stringsAsFactors = FALSE)
+
+one_predictor_res
+
+```
+```{r}
+# Investigate one cycle only (1 for loop)
+set.seed(63331)
+i=1
+var_mod <- train(Stroke ~ ., 
+                 data = stroke_train[, c("Stroke", one_predictor_res$Predictor[i])], 
+                 method = "glm", 
+                 metric = "ROC",
+                 trControl = ctrl)  
+var_mod
+
+```
+```{r}
+tmp_diff <- compare_models_1way(var_mod, null_mod, alternative = "greater")
+tmp_diff
+```
+```{r}
+# Explain function
+#compare_models_1way <- function(a, b, metric = a$metric[1], ...) {
+mods <- list(var_mod, null_mod)
+metric= var_mod$metric[1]
+rs <- resamples(mods)
+diffs <- diff(rs, metric = metric[1])
+diffs$statistics[[1]][[1]]
+
+print("---mods")
+mods
+print("---metric")
+metric
+print("---resamples")
+rs
+#print("---diffs")
+#diffs
+print("---diffs statistics")
+diffs$statistics
+#}
+```
+```{r}
+rs$values
+```
+
+```{r}
+diffs$statistics
+```
+
+```{r}
+one_predictor_res$ROC[i] <- getTrainPerf(var_mod)[1, "TrainROC"]
+one_predictor_res$Improvement[i] <- tmp_diff$estimate
+one_predictor_res$Pvalue[i] <- tmp_diff$p.value
+one_predictor_res
+```
+
+```{r}
+for (i in 1:nrow(one_predictor_res)) {
+  set.seed(63331)
+  var_mod <- train(Stroke ~ ., 
+                   data = stroke_train[, c("Stroke", one_predictor_res$Predictor[i])], 
+                   method = "glm", 
+                   metric = "ROC",
+                   trControl = ctrl)  
+  tmp_diff <- compare_models_1way(var_mod, null_mod, alternative = "greater")
+  one_predictor_res$ROC[i] <- getTrainPerf(var_mod)[1, "TrainROC"]
+  one_predictor_res$Improvement[i] <- tmp_diff$estimate
+  one_predictor_res$Pvalue[i] <- tmp_diff$p.value
+}
+```
+
+```{r}
+# ------------------------------------------------------------------------------
+# Data in table 2.3
+# https://bookdown.org/max/FES/stroke-tour.html#tab:stroke-strokeRiskAssociations
+
+one_predictor_res %>% 
+  dplyr::filter(Predictor %in% risk_preds) %>% 
+  arrange(Pvalue)
+```
+
+
+```{r}
+# ------------------------------------------------------------------------------
+# Figure 2.4
+# https://bookdown.org/max/FES/stroke-tour.html#fig:stroke-vascuCAPAssocations
+
+vc_pred <- 
+  recipe(Stroke ~ ., data = stroke_train %>% dplyr::select(Stroke, !!!VC_preds)) %>% 
+  step_YeoJohnson(all_predictors()) %>% 
+  prep(stroke_train %>% dplyr::select(Stroke, !!!VC_preds)) %>% 
+  juice() %>% 
+  gather(Predictor, value, -Stroke)
+vc_pred
+```
+
+
+```{r}
+# get_max value per predictor
+
+pred_max <- 
+  vc_pred %>% 
+  group_by(Predictor) %>% 
+  summarize(max_val = max(value)) %>% 
+  inner_join(one_predictor_res %>% dplyr::select(Pvalue, Predictor)) %>% 
+  mutate(
+    x = 1.5, 
+    value = 1.25 * max_val,
+    label = paste0("p-value: ", format.pval(Pvalue, digits = 2, sci = FALSE, eps = .0001))
+  )
+
+new_order <- pred_max$Predictor[order(pred_max$Pvalue)]
+new_order
+```
+
+```{r}
+vc_pred <- 
+  vc_pred %>% 
+  mutate(Predictor = factor(Predictor, levels = new_order))
+
+pred_max <- 
+  pred_max %>% 
+  mutate(Predictor = factor(Predictor, levels = new_order))
+```
+
+
+```{r}
+fig_2_4 <-
+  ggplot(vc_pred, aes(x = Stroke, y = value)) + 
+  geom_boxplot() + 
+  geom_point(alpha = 0.3, cex = .5) + 
+  geom_text(data = pred_max, aes(x = x, label = label), size = 3) + 
+  facet_wrap(~Predictor, scales = "free_y") + 
+  ylab("")
+fig_2_4
+```
+
+
+```{r}
+# ------------------------------------------------------------------------------
+# Figure 2.5
+# https://bookdown.org/max/FES/stroke-tour.html#fig:stroke-maxRemodelingRatioROC
+
+fig_2_5 <- 
+  roc_curve(stroke_train, Stroke, MaxRemodelingRatio) %>% 
+  ggplot(aes(x = 1 - specificity, y = sensitivity)) + 
+  geom_abline(alpha = .5, lty = 2) +
+  geom_path()
+fig_2_5
+```
+
+
+```{r}
+# ------------------------------------------------------------------------------
+# Interaction exploration
+
+pairs <- 
+  combn(VC_preds, 2) %>% 
+  t() %>% 
+  as.data.frame(stringsAsFactors = FALSE) %>% 
+  mutate(
+    Improvement = NA,
+    Pvalue = NA,
+    ROC = NA
+  )
+pairs
+```
+
+
+```{r}
+for (i in 1:nrow(pairs)) {
+  tmp_vars <- c("Stroke", pairs$V1[i], pairs$V2[i])
+  set.seed(63331)
+  main_eff <- train(Stroke ~ ., 
+                    data = stroke_train[, tmp_vars], 
+                    preProc = c("center", "scale", "YeoJohnson"),
+                    method = "glm", 
+                    metric = "ROC",
+                    trControl = ctrl)
+  set.seed(63331)
+  main_int <- train(Stroke ~ (.)^2, 
+                    data = stroke_train[, tmp_vars], 
+                    preProc = c("center", "scale", "YeoJohnson"), 
+                    method = "glm", 
+                    metric = "ROC", 
+                    trControl = ctrl)  
+  tmp_diff <- compare_models_1way(main_int, main_eff, alternative = "greater")
+  pairs$ROC[i] <- getTrainPerf(main_eff)[1, "TrainROC"]
+  pairs$Improvement[i] <- tmp_diff$estimate
+  pairs$Pvalue[i] <- tmp_diff$p.value
+}
+
+retained_pairs <- 
+  pairs %>% 
+  dplyr::filter(ROC > 0.5  & Pvalue <= 0.2)
+retained_pairs
+
+```
+
+
+```{r}
+# ------------------------------------------------------------------------------
+# Figure 2.6
+# https://bookdown.org/max/FES/stroke-tour.html#fig:stroke-interactionScreening
+
+vol_plot <- 
+  pairs %>% 
+  dplyr::filter(ROC > 0.5) %>%
+  mutate(Term = paste(V1, "by", V2, "\nROC:", round(ROC, 2))) %>%
+  ggplot(aes(x = Improvement, y = -log10(Pvalue))) + 
+  xlab("Improvement") +
+  geom_point(alpha = .2, aes(size = ROC, text = Term))
+
+vol_plot <- ggplotly(vol_plot, tooltip = "Term")
+vol_plot
+```
+
+
+```{r}
+# ------------------------------------------------------------------------------
+
+## Create interaction formula
+int_form <- 
+  pairs %>% 
+  dplyr::filter(ROC > 0.5  & Pvalue <= 0.2 & Improvement > 0) %>% 
+  mutate(form  = paste0(V1, ":", V2)) %>% 
+  pull(form) %>% 
+  paste(collapse = "+")
+int_form <- paste("~", int_form)
+int_form <- as.formula(int_form)
+
+save(int_form, file = "interactions.RData")
+
+# ------------------------------------------------------------------------------
+```
+
+# 3 Predictive modeling
+```{r}
+library(tidyverse)
+library(caret)
+library(tidymodels)
+library(utils)
+library(pROC)
+library(plotly)
+
+theme_set(theme_bw())
+```
+
+
+```{r}
+load("stroke_data.RData")
+load("interactions.RData")
+
+VC_preds <- 
+  c("CALCVol", "CALCVolProp", "MATXVol", "MATXVolProp", "LRNCVol", 
+    "LRNCVolProp", "MaxCALCArea", "MaxCALCAreaProp", "MaxDilationByArea", 
+    "MaxMATXArea", "MaxMATXAreaProp", "MaxLRNCArea", "MaxLRNCAreaProp", 
+    "MaxMaxWallThickness", "MaxRemodelingRatio", "MaxStenosisByArea", 
+    "MaxWallArea", "WallVol", "MaxStenosisByDiameter")
+
+risk_preds <-
+  c("age", "sex", "SmokingHistory", "AtrialFibrillation", "CoronaryArteryDisease", 
+    "DiabetesHistory", "HypercholesterolemiaHistory", "HypertensionHistory")
+
+risk_train <- 
+  stroke_train %>%
+  dplyr::select(one_of(risk_preds), Stroke)
+
+image_train <- 
+  stroke_train %>%
+  dplyr::select(one_of(VC_preds), Stroke)
+
+risk_train
+image_train
+```
+
+
+```{r}
+fiveStats <- function(...) c(twoClassSummary(...), defaultSummary(...))
+internal_ctrl = trainControl(method = "none", classProbs = TRUE,
+                             allowParallel = FALSE)
+lrFuncsNew <- caretFuncs  
+lrFuncsNew$summary <- fiveStats
+rfeCtrl <- rfeControl(functions = lrFuncsNew,
+                      method = "repeatedcv",
+                      repeats = 5,
+                      rerank = FALSE,
+                      returnResamp = "all",
+                      saveDetails = TRUE,
+                      verbose = FALSE)
+
+```
+
+
+```{r}
+library(doParallel)  
+no_cores <- detectCores() - 1  
+registerDoParallel(cores=no_cores)  
+```
+
+
+```{r}
+# RFE procedure using risk predictors
+
+# All pair-wise interactions
+risk_int_filtered_recipe <-
+  recipe(Stroke ~ ., data = risk_train) %>%
+  step_interact(~ all_predictors():all_predictors()) %>%
+  step_corr(all_predictors(), threshold = 0.75) %>% 
+  step_center(all_predictors()) %>%
+  step_scale(all_predictors()) %>%
+  step_zv(all_predictors())
+risk_int_filtered_recipe
+```
+```{r}
+
+fiveStats <- function(...) c(twoClassSummary(...), defaultSummary(...))
+internal_ctrl = trainControl(method = "none", classProbs = TRUE,
+                             allowParallel = FALSE)
+lrFuncsNew <- caretFuncs  
+lrFuncsNew$summary <- fiveStats
+rfeCtrl <- rfeControl(functions = lrFuncsNew,
+                      method = "repeatedcv",
+                      repeats = 5,
+                      rerank = FALSE,
+                      returnResamp = "all",
+                      saveDetails = TRUE,
+                      verbose = FALSE)
+```
+
+
+```{r}
+set.seed(63331)
+risk_int_filtered_rfe <- rfe(
+  risk_int_filtered_recipe,
+  data = risk_train,
+  sizes = 1:36,
+  rfeControl = rfeCtrl,
+  metric = "ROC",
+  ## train options
+  method = "glm",
+  trControl = internal_ctrl
+)
+```
+
+
+```{r}
+# Main effects
+risk_main_filtered_recipe <-
+  recipe(Stroke ~ ., data = risk_train) %>%
+  step_corr(all_predictors(), threshold = 0.75) %>% 
+  step_center(all_predictors()) %>%
+  step_scale(all_predictors()) %>%
+  step_zv(all_predictors())
+
+set.seed(63331)
+risk_main_filtered_rfe <- rfe(
+  risk_main_filtered_recipe,
+  data = risk_train,
+  sizes = 1:8,
+  rfeControl = rfeCtrl,
+  metric = "ROC",
+  ## train options
+  method = "glm",
+  trControl = internal_ctrl
+)
+```
+
+
+```{r}
+# RFE procedure using imaging predictors
+
+img_int_filtered_recipe <-
+  recipe(Stroke ~ ., data = image_train) %>%
+  step_interact(int_form)  %>%
+  step_corr(all_predictors(), threshold = 0.75) %>%
+  step_center(all_predictors()) %>%
+  step_scale(all_predictors()) %>%
+  step_YeoJohnson(all_predictors()) %>%
+  step_zv(all_predictors())
+
+set.seed(63331)
+img_int_filtered_rfe <- rfe(
+  img_int_filtered_recipe,
+  data = image_train,
+  sizes = 1:35,
+  rfeControl = rfeCtrl,
+  metric = "ROC",
+  ## train options
+  method = "glm",
+  trControl = internal_ctrl
+)
+
+img_main_filtered_recipe <-
+  recipe(Stroke ~ ., data = image_train)  %>%
+  step_corr(all_predictors(), threshold = 0.75) %>%
+  step_center(all_predictors()) %>%
+  step_scale(all_predictors()) %>%
+  step_YeoJohnson(all_predictors()) %>%
+  step_zv(all_predictors())
+
+set.seed(63331)
+img_main_filtered_rfe <- rfe(
+  img_main_filtered_recipe,
+  data = image_train,
+  sizes = 1:19,
+  rfeControl = rfeCtrl,
+  metric = "ROC",
+  ## train options
+  method = "glm",
+  trControl = internal_ctrl
+)
+```
+
+```{r}
+both_int_filtered_recipe <-
+  recipe(Stroke ~ ., data = stroke_train) %>%
+  step_interact(int_form)  %>%
+  step_corr(all_predictors(), threshold = 0.75) %>%
+  step_center(all_predictors()) %>%
+  step_scale(all_predictors()) %>%
+  step_YeoJohnson(all_predictors()) %>%
+  step_zv(all_predictors())
+
+set.seed(63331)
+both_int_filtered_rfe <- rfe(
+  both_int_filtered_recipe,
+  data = stroke_train,
+  sizes = 1:44,
+  rfeControl = rfeCtrl,
+  metric = "ROC",
+  ## train options
+  method = "glm",
+  trControl = internal_ctrl
+)
+
+both_main_filtered_recipe <-
+  recipe(Stroke ~ ., data = stroke_train)  %>%
+  step_corr(all_predictors(), threshold = 0.75) %>%
+  step_center(all_predictors()) %>%
+  step_scale(all_predictors()) %>%
+  step_YeoJohnson(all_predictors()) %>%
+  step_zv(all_predictors())
+
+set.seed(63331)
+both_main_filtered_rfe <- rfe(
+  both_main_filtered_recipe,
+  data = stroke_train,
+  sizes = 1:28,
+  rfeControl = rfeCtrl,
+  metric = "ROC",
+  ## train options
+  method = "glm",
+  trControl = internal_ctrl
+)
+```
+
+
+```{r}
+risk_int_recipe <-
+  recipe(Stroke ~ ., data = risk_train) %>%
+  step_interact(~ all_predictors():all_predictors()) %>%
+  step_center(all_predictors()) %>%
+  step_scale(all_predictors()) %>%
+  step_zv(all_predictors())
+
+set.seed(63331)
+risk_int_rfe <- rfe(
+  risk_int_recipe,
+  data = risk_train,
+  sizes = 1:36,
+  rfeControl = rfeCtrl,
+  metric = "ROC",
+  ## train options
+  method = "glm",
+  trControl = internal_ctrl
+)
+
+risk_main_recipe <-
+  recipe(Stroke ~ ., data = risk_train) %>%
+  step_center(all_predictors()) %>%
+  step_scale(all_predictors()) %>%
+  step_zv(all_predictors())
+
+set.seed(63331)
+risk_main_rfe <- rfe(
+  risk_main_recipe,
+  data = risk_train,
+  sizes = 1:8,
+  rfeControl = rfeCtrl,
+  metric = "ROC",
+  ## train options
+  method = "glm",
+  trControl = internal_ctrl
+)
+```
+
+
+```{r}
+img_int_recipe <-
+  recipe(Stroke ~ ., data = image_train) %>%
+  step_interact(int_form)  %>%
+  step_center(all_predictors()) %>%
+  step_scale(all_predictors()) %>%
+  step_YeoJohnson(all_predictors()) %>%
+  step_zv(all_predictors())
+
+set.seed(63331)
+img_int_rfe <- rfe(
+  img_int_recipe,
+  data = image_train,
+  sizes = 1:35,
+  rfeControl = rfeCtrl,
+  metric = "ROC",
+  ## train options
+  method = "glm",
+  trControl = internal_ctrl
+)
+
+img_main_recipe <-
+  recipe(Stroke ~ ., data = image_train)  %>%
+  step_center(all_predictors()) %>%
+  step_scale(all_predictors()) %>%
+  step_YeoJohnson(all_predictors()) %>%
+  step_zv(all_predictors())
+
+set.seed(63331)
+img_main_rfe <- rfe(
+  img_main_recipe,
+  data = image_train,
+  sizes = 1:19,
+  rfeControl = rfeCtrl,
+  metric = "ROC",
+  ## train options
+  method = "glm",
+  trControl = internal_ctrl
+)
+```
+
+
+```{r}
+both_int_recipe <-
+  recipe(Stroke ~ ., data = stroke_train) %>%
+  step_interact(int_form)  %>%
+  step_center(all_predictors()) %>%
+  step_scale(all_predictors()) %>%
+  step_YeoJohnson(all_predictors()) %>%
+  step_zv(all_predictors())
+
+set.seed(63331)
+both_int_rfe <- rfe(
+  both_int_recipe,
+  data = stroke_train,
+  sizes = 1:44,
+  rfeControl = rfeCtrl,
+  metric = "ROC",
+  ## train options
+  method = "glm",
+  trControl = internal_ctrl
+)
+
+both_main_recipe <-
+  recipe(Stroke ~ ., data = stroke_train)  %>%
+  step_center(all_predictors()) %>%
+  step_scale(all_predictors()) %>%
+  step_YeoJohnson(all_predictors()) %>%
+  step_zv(all_predictors())
+
+set.seed(63331)
+both_main_rfe <- rfe(
+  both_main_recipe,
+  data = stroke_train,
+  sizes = 1:28,
+  rfeControl = rfeCtrl,
+  metric = "ROC",
+  ## train options
+  method = "glm",
+  trControl = internal_ctrl
+)
+```
+
+
+```{r}
+format_data <- function(x, lab, int = FALSE) {
+  dat <- 
+    x %>% 
+    pluck("results") %>% 
+    mutate(Predictors = !!lab) %>% 
+    dplyr::select(ROC, Variables, Predictors, Variables, Num_Resamples) %>% 
+    mutate(Model = "Main Effects")
+  if (int)
+    dat$Model <- "Interactions"
+  dat
+  
+}
+
+filtered_dat <- 
+  format_data(risk_main_filtered_rfe, lab = "Risk Predictors") %>% 
+  bind_rows(
+    format_data(risk_int_filtered_rfe, lab = "Risk Predictors", TRUE),
+    format_data(img_main_filtered_rfe, lab = "Imaging Predictors"),
+    format_data(img_int_filtered_rfe, lab = "Imaging Predictors", TRUE),
+    format_data(both_main_filtered_rfe, lab = "All Predictors"),
+    format_data(both_int_filtered_rfe, lab = "All Predictors", TRUE)
+  ) %>% 
+  mutate(
+    Predictors = factor(
+      Predictors, 
+      levels = c("Risk Predictors", "Imaging Predictors", "All Predictors")
+    ),
+    Model = factor(Model, levels = c("Main Effects", "Interactions")),
+    Filtering = "Correlation Filter"
+  )
+
+unfiltered_dat <- 
+  format_data(risk_main_rfe, lab = "Risk Predictors") %>% 
+  bind_rows(
+    format_data(risk_int_rfe, lab = "Risk Predictors", TRUE),
+    format_data(img_main_rfe, lab = "Imaging Predictors"),
+    format_data(img_int_rfe, lab = "Imaging Predictors", TRUE),
+    format_data(both_main_rfe, lab = "All Predictors"),
+    format_data(both_int_rfe, lab = "All Predictors", TRUE)
+  ) %>% 
+  mutate(
+    Predictors = factor(
+      Predictors, 
+      levels = c("Risk Predictors", "Imaging Predictors", "All Predictors")
+    ),
+    Model = factor(Model, levels = c("Main Effects", "Interactions")),
+    Filtering = "No Filter"
+  )
+
+rfe_data <- 
+  bind_rows(filtered_dat, unfiltered_dat) %>% 
+  mutate(
+    Filtering = factor(Filtering, levels = c("No Filter", "Correlation Filter"))
+  )
+
+```
+
+
+```{r}
+# ------------------------------------------------------------------------------
+
+# https://bookdown.org/max/FES/predictive-modeling-across-sets.html#fig:stroke-rfe-res
+ggplot(rfe_data, aes(x = Variables, y = ROC, col = Model)) +
+  geom_point(size = 0.75) + 
+  geom_line() + 
+  facet_grid(Filtering ~ Predictors) + 
+  scale_color_manual(values = c("#6A3D9A", "#CAB2D6"))
+
+# ------------------------------------------------------------------------------
+
+# https://bookdown.org/max/FES/predictive-modeling-across-sets.html#tab:stroke-rfe-tab
+rfe_tab <-
+  img_main_filtered_rfe %>% 
+  pluck("variables") %>% 
+  filter(Variables == img_main_filtered_rfe$optsize) %>% 
+  group_by(var) %>% 
+  count() %>% 
+  arrange(desc(n)) %>% 
+  mutate(final = ifelse(var %in% img_main_filtered_rfe$optVariables, "Yes", "No")) %>% 
+  ungroup()
+
+# ------------------------------------------------------------------------------
+
+save(both_int_filtered_rfe, both_int_rfe, both_main_filtered_rfe, both_main_rfe, 
+     img_int_filtered_rfe, img_int_rfe, img_main_filtered_rfe, img_main_rfe, 
+     risk_int_filtered_rfe, risk_int_rfe, risk_main_filtered_rfe, risk_main_rfe, 
+     file = "stroke_rfe.RData")
+
+# ------------------------------------------------------------------------------
+
+sessionInfo()
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+```{r}
+```
+
+```{r}
+```
+
+
+```{r}
+```
+
