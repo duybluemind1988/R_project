@@ -25,11 +25,11 @@ library(plotly)
 library(tidyquant)
 
 #2. Load data and function ----
-path<-'/home/dnn/Data_science/Git/R_project/Marketing_BS/Churn/WA_Fn-UseC_-Telco-Customer-Churn.csv'
+path<-'/home/dnn/Data_science/R_project/Marketing_BS/Churn/WA_Fn-UseC_-Telco-Customer-Churn.csv'
 # load the model
-model_path <- "/home/dnn/Data_science/Git/R_project/Marketing_BS/Churn/Shiny/dnn_shiny/GBM_model_R_1613740880034_453"
+model_path <- "/home/dnn/Data_science/R_project/Marketing_BS/Churn/Shiny/dnn_shiny/GBM_model_R_1613740880034_453"
 #model_path <- "/home/dnn/Data_science/Git/R_project/Marketing_BS/Churn/Shiny/dnn_shiny/GBM_model_R_1614996058676_2208"
-recipe_path <- "/home/dnn/Data_science/Git/R_project/Marketing_BS/Churn/Shiny/dnn_shiny/recipe.Rds"
+recipe_path <- "/home/dnn/Data_science/R_project/Marketing_BS/Churn/Shiny/dnn_shiny/recipe.Rds"
 #recipe_path <- "/home/dnn/Data_science/Git/R_project/Marketing_BS/Churn/Shiny/dnn_shiny/recipe2.Rds"
 
 h2o_model_load <- h2o.loadModel(model_path)

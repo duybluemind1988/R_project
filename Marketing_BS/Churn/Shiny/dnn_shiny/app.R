@@ -11,3 +11,4 @@ options(shiny.port = 4414)
 # Option 2:
 #shinyApp(ui = ui, server = server)
 shiny::runApp(host="0.0.0.0",port=4414)
+
